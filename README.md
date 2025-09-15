@@ -1,6 +1,6 @@
-# Prisma AIRS Partner Integrations
+# Prisma AIRS Integrations
 
-Welcome to the central documentation repository for all partner integrations with Palo Alto Networks Prisma AIRS (AI Runtime Security).
+Welcome to the central documentation repository for all integrations with Palo Alto Networks Prisma AIRS (AI Runtime Security).
 
 ## Overview
 
