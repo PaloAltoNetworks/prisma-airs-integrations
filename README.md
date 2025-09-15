@@ -14,8 +14,8 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 
 | Partner | Category | Documentation Link |
 | :--- | :--- | :--- |
-| **TrueFoundry** | AI Gateway | [./truefoundry/README.md](./TrueFoundry/README.md) |
-| **LiteLLM** | LLM Gateway | [./litellm/README.md](./LiteLLM/README.md) |
+| **TrueFoundry** | AI Gateway | [./TrueFoundry/README.md](./TrueFoundry/README.md) |
+| **LiteLLM** | LLM Gateway | [./LiteLLM/README.md](./LiteLLM/README.md) |
 | **Portkey** | AI Gateway & Observability | [./Portkey/README.md](./portkey/README.md) |
 | **n8n** | Workflow Automation | [./n8n/README.md](./n8n/README.md) |
 
