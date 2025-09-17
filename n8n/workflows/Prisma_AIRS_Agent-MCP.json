@@ -1,0 +1,765 @@
+{
+    "name": "Prisma_AIRS-Agent-MCP",
+    "nodes": [
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "id": "b863aac9-a292-4da0-ad38-b58dae8b2bff",
+        "name": "When clicking ‘Execute workflow’"
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "21d85f2a-d3ca-404d-ba95-937d227d8819",
+                "name": "prompt",
+                "value": "={{ $json.chatInput }}",
+                "type": "string"
+              },
+              {
+                "id": "fdefdabe-df81-4b7c-b7f3-1dd0a0726ada",
+                "name": "ai_model",
+                "value": "gpt-oss:20b",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "c1806f7c-c29c-4fe9-b361-3b01da40262d",
+        "name": "Set Prompt & Model Info",
+        "type": "n8n-nodes-base.set",
+        "position": [
+          -1920,
+          -448
+        ],
+        "typeVersion": 3.4
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "5000a404-023c-4e71-a919-53fae47f5ef1",
+                "leftValue": "={{ $json.action }}",
+                "rightValue": "block",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "b5c3eeca-bb5f-4c08-8001-662d9ac79d3c",
+        "name": "Blocked?",
+        "type": "n8n-nodes-base.if",
+        "position": [
+          -1472,
+          -448
+        ],
+        "typeVersion": 2.2
+      },
+      {
+        "parameters": {},
+        "id": "dc527d4b-c72e-4402-ade7-6a07ff32797b",
+        "name": "Block Prompt",
+        "type": "n8n-nodes-base.noOp",
+        "position": [
+          -1168,
+          -448
+        ],
+        "typeVersion": 1
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "108c162a-b59d-44b7-92f9-1c8fa554b00d",
+                "name": "text",
+                "value": "=Content blocked by security policy. Category: {{ $json.category }}, Scan ID: {{ $json.scan_id }}",
+                "type": "string"
+              },
+              {
+                "id": "blocked-timestamp",
+                "name": "timestamp",
+                "value": "={{new Date().toISOString()}}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "932cb5d6-ac2b-49a5-862b-036a4167bc99",
+        "name": "Log Blocked Content",
+        "type": "n8n-nodes-base.set",
+        "position": [
+          -896,
+          -480
+        ],
+        "typeVersion": 3.4
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -2144,
+          -448
+        ],
+        "id": "0bf40101-842e-4cc5-b4ce-3d1d05eed404",
+        "name": "When chat message received",
+        "webhookId": "REPLACE_WITH_YOUR_WEBHOOK_ID"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Smart Response Cleaning - Inline Version\nconst responseText = items[0].json.text || '';\n\n// Apply smart cleaning directly\nconst cleanResponse = responseText\n  .replace(/\\r\\n/g, '\\n')           // Normalize line endings\n  .replace(/\\r/g, '\\n')             // Convert \\r to \\n\n  .replace(/\\t/g, '    ')           // Convert tabs to spaces\n  .replace(/\\n{3,}/g, '\\n\\n')       // Max 2 consecutive newlines\n  .replace(/[ ]{3,}/g, '  ')        // Max 2 consecutive spaces\n  .trim();                          // Remove leading/trailing whitespace\n\nreturn {\n  ...items[0].json,\n  clean_response: cleanResponse,\n  original_response: responseText\n};"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -848,
+          -144
+        ],
+        "id": "aad6b152-a767-4526-a1ba-578160785d58",
+        "name": "Clean Response"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "35c608fa-c3a2-4ac1-a36f-3d184ebb8960",
+                "leftValue": "={{ $json.action }}",
+                "rightValue": "block",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "bbf36aa9-4809-4dc8-afd6-dc7d5bc6fd48",
+        "name": "Response Blocked?",
+        "type": "n8n-nodes-base.if",
+        "position": [
+          -400,
+          -144
+        ],
+        "typeVersion": 2.2
+      },
+      {
+        "parameters": {},
+        "id": "8652411c-6a86-4673-aefb-bad5fec1e899",
+        "name": "Block Response",
+        "type": "n8n-nodes-base.noOp",
+        "position": [
+          -176,
+          -240
+        ],
+        "typeVersion": 1
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "8955d56f-30e7-4935-b5d6-02d90816e0a7",
+                "name": "text",
+                "value": "=Response blocked by security policy. Category: {{ $json.category }}, Scan ID: {{ $json.scan_id }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "c63a7331-c067-48ba-b7dd-4b7be8656138",
+        "name": "Return Block Message",
+        "type": "n8n-nodes-base.set",
+        "position": [
+          64,
+          -240
+        ],
+        "typeVersion": 3.4
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "8955d56f-30e7-4935-b5d6-02d90816e0a7",
+                "name": "text",
+                "value": "={{ $('AI Agent').item.json.output }}",
+                "type": "string"
+              },
+              {
+                "id": "scan-status",
+                "name": "scan_status",
+                "value": "approved",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "a9ba6baf-ca41-4faa-b6a6-bdbbc01e08c8",
+        "name": "Return Safe Result",
+        "type": "n8n-nodes-base.set",
+        "position": [
+          -176,
+          -48
+        ],
+        "typeVersion": 3.4
+      },
+      {
+        "parameters": {
+          "model": {
+            "__rl": true,
+            "value": "gpt-3.5-turbo",
+            "mode": "list",
+            "cachedResultName": "gpt-3.5-turbo"
+          },
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        "typeVersion": 1.2,
+        "position": [
+          -832,
+          64
+        ],
+        "id": "5fd66322-82ce-4073-a9e3-1963a494972b",
+        "name": "OpenAI Chat Model"
+      },
+      {
+        "parameters": {
+          "model": {
+            "__rl": true,
+            "value": "claude-3-5-haiku-20241022",
+            "mode": "list",
+            "cachedResultName": "Claude Haiku 3.5"
+          },
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+        "typeVersion": 1.3,
+        "position": [
+          -1392,
+          80
+        ],
+        "id": "19871f25-3e22-4f47-aedd-c28a4f919abd",
+        "name": "Anthropic Chat Model"
+      },
+      {
+        "parameters": {
+          "model": "gpt-oss:20b",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+        "typeVersion": 1,
+        "position": [
+          -1088,
+          80
+        ],
+        "id": "5308126a-728f-49f3-87b9-e71eb3631043",
+        "name": "Ollama Chat Model",
+        "credentials": {
+          "ollamaApi": {
+            "id": "REPLACE_WITH_YOUR_OLLAMA_CREDENTIAL_ID",
+            "name": "Ollama account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## Choose Chat or Manual Trigger\n\n**Manual Trigger**: Test with hardcoded prompts\n**Chat Trigger**: Interactive chat interface\n\nBoth feed into the same security pipeline.",
+          "height": 236,
+          "width": 250,
+          "color": 4
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          -2240,
+          -240
+        ],
+        "typeVersion": 1,
+        "id": "3cda448e-f7bc-4bcb-aba7-71a1c9b03c60",
+        "name": "Entry Points"
+      },
+      {
+        "parameters": {
+          "content": "## Prisma AIRS Prompt Scan\n\n**Scans user input for:**\n- Sensitive data (PII, credit cards)\n- Malicious code requests  \n- Prompt injection attempts\n- Malicious URLs",
+          "height": 312,
+          "width": 216,
+          "color": 5
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          -1760,
+          -288
+        ],
+        "typeVersion": 1,
+        "id": "2de986c9-af7a-46c2-b726-56c800c6feaa",
+        "name": "Prompt Security Scan"
+      },
+      {
+        "parameters": {
+          "content": "## AI Model Selection\n\n**Available Models:**\n- OpenAI GPT (Add API Key)\n- Google Vertex Gemini (Add GCP Creds)\n- Anthropic Claude (Add API Key)\n- Ollama Local (setup local)\n\n",
+          "height": 284,
+          "width": 248,
+          "color": 6
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          -1216,
+          240
+        ],
+        "typeVersion": 1,
+        "id": "e4ac8032-3e78-4487-8aad-f03167c4e3ac",
+        "name": "Model Selection Guide"
+      },
+      {
+        "parameters": {
+          "content": "## Prisma AIRS Response Scan\n\n**Scans AI output for:**\n- Leaked sensitive data\n- Generated malicious code\n- Harmful URLs in response\n- Policy violations",
+          "height": 264,
+          "width": 216,
+          "color": 5
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          -688,
+          16
+        ],
+        "typeVersion": 1,
+        "id": "6494fbd2-e105-4df0-adbd-5ce72facaaf0",
+        "name": "Response Security Scan"
+      },
+      {
+        "parameters": {
+          "content": "## Safe Prompt Processing\n\n**If prompt passes security:**\n- Forward to selected AI model\n- Generate response\n- Clean response for scanning\n- Continue to response scan",
+          "height": 296,
+          "width": 196
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          -1520,
+          -272
+        ],
+        "typeVersion": 1,
+        "id": "9529af6a-4c88-4574-b685-85a5aae48214",
+        "name": "Safe Processing Flow"
+      },
+      {
+        "parameters": {
+          "content": "## Response Block Handler\n\n**If AI response is malicious:**\n- Block response immediately\n- Log security violation\n- Return block message\n- Protect user from harmful content",
+          "height": 252,
+          "width": 236,
+          "color": 3
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          -16,
+          -512
+        ],
+        "typeVersion": 1,
+        "id": "f13bc169-1e2b-4e02-a902-2becda76915c",
+        "name": "Response Block Handler"
+      },
+      {
+        "parameters": {
+          "content": "## Safe Response Processing\n\n**If response passes security:**\n- Return AI response to user\n- Mark as approved\n- Complete secure AI interaction\n- Full dual-scan protection",
+          "height": 296,
+          "width": 200
+        },
+        "type": "n8n-nodes-base.stickyNote",
+        "position": [
+          -432,
+          -464
+        ],
+        "typeVersion": 1,
+        "id": "59a86069-f22a-4131-bc59-0d7d86bd5b06",
+        "name": "Safe Response Delivery"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "x-pan-token",
+                "value": "={{$env.AIRS_API_KEY}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"tr_id\": \"{{ $execution.id }}-prompt\",\n  \"ai_profile\": {\n    \"profile_name\": \"{{$env.AIRS_API_PROFILE_NAME}}\"\n  },\n  \"metadata\": {\n    \"app_user\": \"n8n-user\",\n    \"ai_model\": \"{{ $json.ai_model }}\",\n    \"application_name\": \"n8n-airs-integration\"\n  },\n  \"contents\": [\n    {\n      \"prompt\": \"{{ $json.prompt }}\"\n    }\n  ]\n}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "id": "a73ac882-f7b3-491d-98c0-46c2f0ce7a2c",
+        "name": "Prisma AIRS API Scan – Prompt",
+        "type": "n8n-nodes-base.httpRequest",
+        "position": [
+          -1696,
+          -656
+        ],
+        "typeVersion": 4.2
+      },
+      {
+        "parameters": {
+          "projectId": {
+            "__rl": true,
+            "value": "YOUR_GCP_PROJECT_ID",
+            "mode": "list",
+            "cachedResultName": "YOUR_GCP_PROJECT_NAME"
+          },
+          "modelName": "gemini-2.5-flash",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatGoogleVertex",
+        "typeVersion": 1,
+        "position": [
+          -1248,
+          80
+        ],
+        "id": "ffa2ea9b-f71d-4f41-8cd0-17b6689a217f",
+        "name": "Google Vertex Chat Model",
+        "credentials": {
+          "googleApi": {
+            "id": "REPLACE_WITH_YOUR_GOOGLE_CREDENTIAL_ID",
+            "name": "Google Service Account account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "responseScan",
+          "content": "={{ $json.output }}",
+          "additionalOptions": {}
+        },
+        "type": "@paloaltonetworks/n8n-nodes-prisma-airs.prismaAirs",
+        "typeVersion": 1,
+        "position": [
+          -656,
+          -144
+        ],
+        "id": "84561705-5c01-4fb0-a73e-f4350663a24e",
+        "name": "Prisma AIRS1",
+        "credentials": {
+          "prismaAirsApi": {
+            "id": "REPLACE_WITH_YOUR_PRISMA_AIRS_CREDENTIAL_ID",
+            "name": "Prisma AIRS account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "={{ $('When chat message received').item.json.chatInput }}",
+          "additionalOptions": {}
+        },
+        "type": "@paloaltonetworks/n8n-nodes-prisma-airs.prismaAirs",
+        "typeVersion": 1,
+        "position": [
+          -1664,
+          -448
+        ],
+        "id": "7a52f507-1826-4442-b6b6-f6b85579ec0a",
+        "name": "Prisma AIRS",
+        "credentials": {
+          "prismaAirsApi": {
+            "id": "REPLACE_WITH_YOUR_PRISMA_AIRS_CREDENTIAL_ID",
+            "name": "Prisma AIRS account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "={{ $('When chat message received').item.json.chatInput }}",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 2.2,
+        "position": [
+          -1216,
+          -208
+        ],
+        "id": "d4ef208e-a129-4182-a6c6-a3139e7ed07c",
+        "name": "AI Agent"
+      },
+      {
+        "parameters": {},
+        "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+        "typeVersion": 1.3,
+        "position": [
+          -976,
+          -64
+        ],
+        "id": "919cb287-bd51-4576-b324-2058e4f862fd",
+        "name": "Simple Memory",
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "endpointUrl": "https://mcp.deepwiki.com/mcp",
+          "serverTransport": "httpStreamable",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+        "typeVersion": 1.1,
+        "position": [
+          -720,
+          368
+        ],
+        "id": "b8a1e8d9-1e3e-4576-b84e-b123b1c05667",
+        "name": "MCP DeepWiki"
+      },
+      {
+        "parameters": {
+          "endpointUrl": "https://context7.liam.sh/mcp",
+          "serverTransport": "httpStreamable",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+        "typeVersion": 1.1,
+        "position": [
+          -896,
+          368
+        ],
+        "id": "bea3de0e-50a1-440c-8cf4-19454b36480a",
+        "name": "MCP Context7"
+      }
+    ],
+    "pinData": {},
+    "connections": {
+      "When clicking ‘Execute workflow’": {
+        "main": [
+          []
+        ]
+      },
+      "When chat message received": {
+        "main": [
+          [
+            {
+              "node": "Set Prompt & Model Info",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Blocked?": {
+        "main": [
+          [
+            {
+              "node": "Log Blocked Content",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Block Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "AI Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Block Prompt": {
+        "main": [
+          [
+            {
+              "node": "Log Blocked Content",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Response Blocked?": {
+        "main": [
+          [
+            {
+              "node": "Block Response",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Return Safe Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Block Response": {
+        "main": [
+          [
+            {
+              "node": "Return Block Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ollama Chat Model": {
+        "ai_languageModel": [
+          []
+        ]
+      },
+      "Set Prompt & Model Info": {
+        "main": [
+          [
+            {
+              "node": "Prisma AIRS",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Clean Response": {
+        "main": [
+          [
+            {
+              "node": "Prisma AIRS1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prisma AIRS1": {
+        "main": [
+          [
+            {
+              "node": "Response Blocked?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prisma AIRS": {
+        "main": [
+          [
+            {
+              "node": "Blocked?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent": {
+        "main": [
+          [
+            {
+              "node": "Clean Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Simple Memory": {
+        "ai_memory": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_memory",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MCP DeepWiki": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MCP Context7": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Google Vertex Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "versionId": "REPLACE_WITH_YOUR_VERSION_ID",
+    "meta": {
+      "templateCredsSetupCompleted": true,
+      "instanceId": "REPLACE_WITH_YOUR_INSTANCE_ID"
+    },
+    "id": "REPLACE_WITH_YOUR_WORKFLOW_ID",
+    "tags": []
+  }
