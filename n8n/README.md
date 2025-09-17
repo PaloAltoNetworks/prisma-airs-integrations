@@ -6,7 +6,7 @@ This document provides instructions for using the Prisma AIRS community node wit
 
 ## Prerequisites
 
-* An active n8n instance (Cloud or self-hosted).
+* An active n8n instance (Cloud or self-hosted) [Setup Docs](https://docs.n8n.io/hosting/installation/docker/).
 * Instance owner permissions to install community nodes.
 * An active Prisma AIRS license and access to the [Strata Cloud Manager](https://www.strata.paloaltonetworks.com/).
 * A configured **AI Profile Name** within Strata Cloud Manager.
