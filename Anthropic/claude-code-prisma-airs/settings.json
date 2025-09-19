@@ -1,0 +1,56 @@
+{
+  "includeCoAuthoredBy": false,
+  "model": "sonnet",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/scan-user-input.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "WebFetch|WebSearch|web_search",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/scan-url.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*__read.*|mcp__.*__resource.*|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/scan-mcp-request.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "WebFetch|WebSearch|web_search",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/scan-response-enhanced.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*__read.*|mcp__.*__resource.*|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/scan-response-enhanced.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
