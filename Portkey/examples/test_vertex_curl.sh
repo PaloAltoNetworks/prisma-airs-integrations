@@ -77,7 +77,7 @@ echo Sending \"$USER_CONTENT\" to Portkey with Vertex AI...
 curl -X POST http://localhost:8787/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "x-portkey-config: $CONFIG" \
-    -d '{
-            "model": "gemini-2.5-flash",
-            "messages": [{"role": "user", "content": "$USER_CONTENT"}]
-        }' | jq .
+    -d "{
+        \"model\": \"gemini-2.5-flash\",
+        \"messages\": [{\"role\": \"user\", \"content\": \"$USER_CONTENT\" }]
+    }" | jq .

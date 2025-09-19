@@ -2,26 +2,27 @@
 
 This directory contains example scripts for testing Portkey integrations.
 
-## `test_curl.sh`
+## `test_<CSP>curl.sh`
 
-This Bash script demonstrates how to send a test request to a local Portkey server using `curl` and connecting to an Azure Instance.
+These Bash scripts demonstrates how to send a test request to a local Portkey server using `curl`
 
-It configures input and output guardrails for PANW Prisma AIRS interception and passes relevant API keys and configuration via HTTP headers.
+There is one for Azure, AWS and GCP (Vertex)
+
+The request is defined as an argument to the scripts
+
+The script configures input and output guardrails for PANW Prisma AIRS interception and passes relevant API keys and configuration via HTTP headers.
 
 ### Usage
 
 1. **Set the required environment variables:**
 
-   - `MY_AIRS_API_KEY`: Your Prisma AIRS API key.
-   - `AZURE_OPENAI_API_KEY`: Your Azure OpenAI API key.
-   - `AZURE_RESOURCE`: The Azure resource name.
-   - `AZURE_DEPLOYMENT`: The Azure deployment ID.
-   - `AZURE_API_VERSION`: The Azure API version.
+Examples of these are in the env.example file
 
 2. **Run the script:**
 
+    For example Azure would be:
    ```zsh
-   ./test_azure_curl.sh
+   ./test_azure_curl.sh Hi
    ```
 
    The script will send a sample chat completion request to `http://127.0.0.1:8787/v1/chat/completions` and print the JSON response.
@@ -31,7 +32,7 @@ It configures input and output guardrails for PANW Prisma AIRS interception and 
 - The script uses `jq` to format JSON output. Make sure `jq` is installed on your system.
 - You can modify the request payload or headers as needed for your testing scenarios.
 
-## `test_pyton.py`
+## `test_<CSP>_pyton.py`
 
 This Python script provides an example of how to interact with the Portkey API programmatically. It demonstrates sending a chat completion request, similar to the Bash script, but using Python's HTTP libraries.
 
@@ -48,25 +49,18 @@ This Python script provides an example of how to interact with the Portkey API p
 2. **Set the required environment variables:**
 
    You can set the variables directly in your shell, or use a `.env` file for convenience.  
-   Example `.env` file:
-
-   ```
-   MY_AIRS_API_KEY=your_airs_api_key
-   AZURE_OPENAI_API_KEY=your_azure_openai_api_key
-   AZURE_RESOURCE=your_azure_resource_name
-   AZURE_DEPLOYMENT=your_azure_deployment_id
-   AZURE_API_VERSION=your_azure_api_version
-   ```
+   `env.example` contains an example, only enter the details for the CSP you want to test.
 
    To use a `.env` file, ensure you have the `python-dotenv` package installed (included in `requirements.txt` if needed), and the script will automatically load variables from `.env`.
 
 3. **Run the script:**
 
+   For example Azure would be:
    ```zsh
-   python test_azure_pyton.py
+   python test_azure_pyton.py Hi
    ```
 
-   The script will send a chat completion request to the local Portkey server and print the response.
+   The script will send a chat completion based on the arguments to the local Portkey server and print the response.
 
 ### Notes
 

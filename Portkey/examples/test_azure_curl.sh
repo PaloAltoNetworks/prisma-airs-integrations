@@ -63,6 +63,9 @@ curl -s http://127.0.0.1:8787/v1/chat/completions \
     -H "x-portkey-azure-deployment-id: $AZURE_DEPLOYMENT" \
     -H "x-portkey-azure-api-version: $AZURE_API_VERSION" \
     -H "x-portkey-config: $CONFIG" \
-    -d '{ "messages": [ { "role": "user", "content": "$USER_CONTENT" }], "model": "gpt-4o-mini"}' | jq .
+    -d "{
+        \"model\": \"gpt4.0-mini\",
+        \"messages\": [{\"role\": \"user\", \"content\": \"$USER_CONTENT\" }]
+    }" | jq .
 
 

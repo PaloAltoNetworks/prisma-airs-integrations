@@ -62,7 +62,7 @@ echo Sending \"$USER_CONTENT\" to Portkey with AWS Bedrock...
 curl -X POST http://localhost:8787/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "x-portkey-config: $CONFIG" \
-    -d '{
-            "model": "anthropic.claude-3-haiku-20240307-v1:0",
-            "messages": [{"role": "user", "content": "$USER_CONTENT"}]
-        }' | jq .
+    -d "{
+            \"model\": \"anthropic.claude-3-haiku-20240307-v1:0\",
+            \"messages\": [{\"role\": \"user\", \"content\": \"$USER_CONTENT\" }]
+        }" | jq .
