@@ -14,6 +14,7 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 
 | Partner | Category | Documentation Link |
 | :--- | :--- | :--- |
+| **Anthropic** | Foundation Model Provider | [./Anthropic/README.md](./Anthropic/README.md) |
 | **LiteLLM** | LLM Gateway | [./LiteLLM/README.md](./LiteLLM/README.md) |
 | **n8n** | Workflow Automation | [./n8n/README.md](./n8n/README.md) |
 | **Portkey** | AI Gateway & Observability | [./Portkey/README.md](./portkey/README.md) |
