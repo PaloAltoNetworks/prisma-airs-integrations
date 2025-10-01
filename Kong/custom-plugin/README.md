@@ -8,7 +8,7 @@ This document provides instructions for deploying and configuring the custom Pri
 
 * A running Kong API Gateway instance (version 3.0 or newer).
 * Access to the Kong control plane (Admin API, Konnect, or declarative `kong.yml`).
-* Administrative access to [Strata Cloud Manager](https://www.strata.paloaltonetworks.com/) for Prisma AIRS.
+* Administrative access to Strata Cloud Manager for Prisma AIRS.
 * A configured **Security Profile** within Strata Cloud Manager. You will need the exact **Profile Name**.
 * A Prisma AIRS **API Key**.
 * The custom Prisma AIRS Kong plugin source files (`handler.lua`, `schema.lua`), which are located in this repository.
