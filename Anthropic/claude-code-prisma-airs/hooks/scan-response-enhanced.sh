@@ -1,10 +1,18 @@
 #!/bin/bash
 
-# Configuration with environment variable support
-LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/security.log}"
-AIRS_API_URL="${AIRS_API_URL:-https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request}"
+LOG_FILE="/Users/jpro/demos/cc_hooks/.claude/hooks/security.log"
+
+# Prisma AIRS API Configuration
+AIRS_API_URL="https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request"
 AIRS_API_KEY="${AIRS_API_KEY}"
-PROFILE_NAME="${AIRS_PROFILE_NAME}"
+PROFILE_NAME="dev-block-all-profile"
+
+# === FD HARDENING FOR CLEAN JSON OUTPUT ===
+# Save original stdout to FD 3 for JSON responses
+exec 3>&1
+# Redirect stdout to log file to prevent pollution
+exec 1>>"$LOG_FILE"
+# Keep stderr available for user messages (shows in terminal Claude Code)
 
 # Create log file if it doesn't exist
 mkdir -p "/Users/jpro/demos/cc_hooks/.claude/hooks"
@@ -18,7 +26,7 @@ TOOL_NAME=$(echo "$INPUT_JSON" | jq -r '.tool_name // "unknown"')
 TOOL_RESPONSE=$(echo "$INPUT_JSON" | jq -r '.tool_response // ""')
 
 # Log that we're processing this tool
-echo "[$(date)] 🔍 $TOOL_NAME: PostToolUse hook triggered" >> "$LOG_FILE"
+echo "[$(date)] 🔍 $TOOL_NAME: PostToolUse hook triggered"
 
 # Enhanced response content extraction - try multiple approaches
 RESPONSE_CONTENT=""
@@ -54,11 +62,11 @@ if [[ -z "$RESPONSE_CONTENT" || ${#RESPONSE_CONTENT} -lt 5 ]]; then
 fi
 
 # Log content extraction result
-echo "[$(date)] 🔍 $TOOL_NAME: Extracted content length: ${#RESPONSE_CONTENT}" >> "$LOG_FILE"
+echo "[$(date)] 🔍 $TOOL_NAME: Extracted content length: ${#RESPONSE_CONTENT}"
 
 # Skip if no content to scan
 if [[ -z "$RESPONSE_CONTENT" || ${#RESPONSE_CONTENT} -lt 5 ]]; then
-    echo "[$(date)] 🔍 $TOOL_NAME: Skipping - insufficient content (${#RESPONSE_CONTENT} chars)" >> "$LOG_FILE"
+    echo "[$(date)] 🔍 $TOOL_NAME: Skipping - insufficient content (${#RESPONSE_CONTENT} chars)"
     exit 0
 fi
 
@@ -70,7 +78,7 @@ URLS=$(echo "$RESPONSE_CONTENT" | grep -oE 'https?://[^\s<>"'"'"'()]+' | sort -u
 
 # Scan URLs if found
 if [[ -n "$URLS" ]]; then
-    echo "[$(date)] 🔗 $TOOL_NAME: Found URLs in response" >> "$LOG_FILE"
+    echo "[$(date)] 🔗 $TOOL_NAME: Found URLs in response"
     while IFS= read -r URL; do
         [[ -z "$URL" ]] && continue
         
@@ -92,8 +100,6 @@ EOF
         URL_CATEGORY=$(echo "$URL_RESULT" | jq -r '.category // "unknown"')
         URL_SCAN_ID=$(echo "$URL_RESULT" | jq -r '.scan_id // "unknown"')
         
-        # After URL_ACTION/URL_CATEGORY/URL_SCAN_ID:
-        URL_DETECTIONS=""
         # Dynamically extract all true detection fields from both prompt_detected and response_detected
         URL_DETECTIONS=$(echo "$URL_RESULT" | jq -r '
           [
@@ -104,27 +110,35 @@ EOF
 
         if [[ "$URL_ACTION" == "block" ]]; then
           if [[ -n "$URL_DETECTIONS" ]]; then
-            echo "[$(date)] 🚫 BLOCKED URL in $TOOL_NAME response: $URL ($URL_CATEGORY) - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]" >> "$LOG_FILE"
+            echo "[$(date)] 🚫 BLOCKED URL in $TOOL_NAME response: $URL ($URL_CATEGORY) - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]"
+            BLOCK_MSG="🚫 Blocked by Prisma AIRS: URL in $TOOL_NAME response ($URL_CATEGORY) - detected: $URL_DETECTIONS"
           else
-            echo "[$(date)] 🚫 BLOCKED URL in $TOOL_NAME response: $URL ($URL_CATEGORY) [scan:$URL_SCAN_ID]" >> "$LOG_FILE"
+            echo "[$(date)] 🚫 BLOCKED URL in $TOOL_NAME response: $URL ($URL_CATEGORY) [scan:$URL_SCAN_ID]"
+            BLOCK_MSG="🚫 Blocked by Prisma AIRS: URL in $TOOL_NAME response ($URL_CATEGORY)"
           fi
+          # Show user message on stderr (visible in terminal Claude Code)
+          echo "" >&2
+          echo "$BLOCK_MSG" >&2
+          echo "" >&2
+          # Output blocking JSON to FD 3 (original stdout)
           printf '%s' '{
   "continue": false,
   "stopReason": "Prisma AIRS blocked tool response",
+  "systemMessage": "Operation blocked by Prisma AIRS policy",
   "hookSpecificOutput": { "hookEventName": "PostToolUse" }
-}'
+}' >&3
           exit 0
         elif [[ "$URL_ACTION" != "allow" ]]; then
           if [[ -n "$URL_DETECTIONS" ]]; then
-            echo "[$(date)] ⚠️  URL WARNING in $TOOL_NAME response: $URL - $URL_ACTION/$URL_CATEGORY - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]" >> "$LOG_FILE"
+            echo "[$(date)] ⚠️  URL WARNING in $TOOL_NAME response: $URL - $URL_ACTION/$URL_CATEGORY - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]"
           else
-            echo "[$(date)] ⚠️  URL WARNING in $TOOL_NAME response: $URL - $URL_ACTION/$URL_CATEGORY [scan:$URL_SCAN_ID]" >> "$LOG_FILE"
+            echo "[$(date)] ⚠️  URL WARNING in $TOOL_NAME response: $URL - $URL_ACTION/$URL_CATEGORY [scan:$URL_SCAN_ID]"
           fi
         else
           if [[ -n "$URL_DETECTIONS" ]]; then
-            echo "[$(date)] ✅ URL in $TOOL_NAME response: $URL - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]" >> "$LOG_FILE"
+            echo "[$(date)] ✅ URL in $TOOL_NAME response: $URL - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]"
           else
-            echo "[$(date)] ✅ URL in $TOOL_NAME response: $URL [scan:$URL_SCAN_ID]" >> "$LOG_FILE"
+            echo "[$(date)] ✅ URL in $TOOL_NAME response: $URL [scan:$URL_SCAN_ID]"
           fi
         fi
     done <<< "$URLS"
@@ -151,7 +165,6 @@ EOF
     CONTENT_CATEGORY=$(echo "$CONTENT_RESULT" | jq -r '.category // "unknown"')
     CONTENT_SCAN_ID=$(echo "$CONTENT_RESULT" | jq -r '.scan_id // "unknown"')
     
-    # After CONTENT_ACTION/CONTENT_CATEGORY/CONTENT_SCAN_ID:
     # Dynamically extract all true detection fields from both prompt_detected and response_detected
     RESP_DETECTIONS=$(echo "$CONTENT_RESULT" | jq -r '
       [
@@ -162,21 +175,29 @@ EOF
 
     if [[ "$CONTENT_ACTION" == "block" ]]; then
       if [[ -n "$RESP_DETECTIONS" ]]; then
-        echo "[$(date)] 🚫 BLOCKED $TOOL_NAME response content: $CONTENT_CATEGORY - detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
+        echo "[$(date)] 🚫 BLOCKED $TOOL_NAME response content: $CONTENT_CATEGORY - detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]"
+        BLOCK_MSG="🚫 Blocked by Prisma AIRS: $TOOL_NAME response contained $CONTENT_CATEGORY content (detected: $RESP_DETECTIONS)"
       else
-        echo "[$(date)] 🚫 BLOCKED $TOOL_NAME response content: $CONTENT_CATEGORY [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
+        echo "[$(date)] 🚫 BLOCKED $TOOL_NAME response content: $CONTENT_CATEGORY [scan:$CONTENT_SCAN_ID]"
+        BLOCK_MSG="🚫 Blocked by Prisma AIRS: $TOOL_NAME response contained $CONTENT_CATEGORY content"
       fi
+      # Show user message on stderr (visible in terminal Claude Code)
+      echo "" >&2
+      echo "$BLOCK_MSG" >&2
+      echo "" >&2
+      # Output blocking JSON to FD 3 (original stdout)
       printf '%s' '{
   "continue": false,
   "stopReason": "Prisma AIRS blocked tool response",
+  "systemMessage": "Operation blocked by Prisma AIRS policy",
   "hookSpecificOutput": { "hookEventName": "PostToolUse" }
-}'
+}' >&3
       exit 0
     elif [[ "$CONTENT_ACTION" != "allow" && "$CONTENT_ACTION" != "unknown" ]]; then
       if [[ -n "$RESP_DETECTIONS" ]]; then
-        echo "[$(date)] ⚠️  $TOOL_NAME response content warning: $CONTENT_ACTION/$CONTENT_CATEGORY - detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
+        echo "[$(date)] ⚠️  $TOOL_NAME response content warning: $CONTENT_ACTION/$CONTENT_CATEGORY - detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]"
       else
-        echo "[$(date)] ⚠️  $TOOL_NAME response content warning: $CONTENT_ACTION/$CONTENT_CATEGORY [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
+        echo "[$(date)] ⚠️  $TOOL_NAME response content warning: $CONTENT_ACTION/$CONTENT_CATEGORY [scan:$CONTENT_SCAN_ID]"
       fi
     fi
 fi
