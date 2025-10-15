@@ -15,9 +15,11 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 | Partner | Category | Documentation Link |
 | :--- | :--- | :--- |
 | **Anthropic** | Foundation Model Provider | [./Anthropic/README.md](./Anthropic/README.md) |
+| **Kong (Custom Plugin)** | API Gateway | [./Kong/custom-plugin/README.md](./Kong/custom-plugin/README.md) |
+| **Kong (Request Callout)** | API Gateway | [./Kong/request-callout/README.md](./Kong/request-callout/README.md) |
 | **LiteLLM** | LLM Gateway | [./LiteLLM/README.md](./LiteLLM/README.md) |
 | **n8n** | Workflow Automation | [./n8n/README.md](./n8n/README.md) |
-| **Portkey** | AI Gateway & Observability | [./Portkey/README.md](./portkey/README.md) |
+| **Portkey** | AI Gateway & Observability | [./Portkey/README.md](./Portkey/README.md) |
 | **TrueFoundry** | AI Gateway | [./TrueFoundry/README.md](./TrueFoundry/README.md) |
 
 
@@ -32,5 +34,5 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 
 ## External Resources
 
-* [Prisma AIRS Developer Documenation](https://pan.dev/airs)
-* [Prisma AIRS Adminstrator Guide](https://docs.paloaltonetworks.com/ai-runtime-security/administration/prisma-airs-overview)
+* [Prisma AIRS Developer Documentation](https://pan.dev/airs)
+* [Prisma AIRS Administrator Guide](https://docs.paloaltonetworks.com/ai-runtime-security/administration/prisma-airs-overview)
