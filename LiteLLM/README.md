@@ -70,3 +70,9 @@ model_list:
 ## Verification
 
 Send a request to the LiteLLM model you configured. The request will be intercepted and scanned by Prisma AIRS according to the `mode` you set. Blocked requests will receive an error response. You can monitor all scan activity and threat logs in the Strata Cloud Manager dashboard.
+
+## Links
+
+Repo: https://github.com/BerriAI/litellm
+
+Docs: https://docs.litellm.ai/docs/proxy/guardrails/panw_prisma_airs

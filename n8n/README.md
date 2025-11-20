@@ -20,7 +20,7 @@ This document provides instructions for using the Prisma AIRS community node wit
 
 1.  Open your n8n instance.
 2.  Navigate to **Settings → Community Nodes**.
-3.  Search for `n8n-nodes-prisma-airs`.
+3.  Search for `@paloaltonetworks/n8n-nodes-prisma-airs` or visit the [npm package page](https://www.npmjs.com/package/@paloaltonetworks/n8n-nodes-prisma-airs).
 4.  Click **Install**.
 5.  Restart your n8n instance if prompted for the installation to take effect.
 
@@ -54,3 +54,11 @@ This document provides instructions for using the Prisma AIRS community node wit
 Run your workflow. The Prisma AIRS node will send the specified content to the AIRS API for scanning. The output of the node will contain the verdict from the API (`allow` or `block`), which you can use in subsequent nodes (e.g., an IF node) to control the workflow's logic.
 
 You can monitor detailed logs of all scans and security events in your Strata Cloud Manager dashboard.
+
+## Example Workflows
+ 
+Find workflow templates in the `workflows` directory. Have a useful template to share? We welcome contributions via pull request!
+
+## Links
+ 
+Additional Information: https://n8n.io/integrations/prisma-airs/

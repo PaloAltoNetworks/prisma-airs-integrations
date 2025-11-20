@@ -53,3 +53,9 @@ Make an API request through the Portkey Gateway, attaching your configured Confi
 ```
 
 Portkey will automatically invoke the Prisma AIRS guardrail to scan the request and/or response. If a threat is detected and the action is `block`, the request will be denied. All security events can be monitored and analyzed in the Strata Cloud Manager.
+
+## Links 
+
+Repo: https://github.com/Portkey-AI/gateway/tree/main/plugins/panw-prisma-airs
+
+Docs: https://portkey.ai/docs/integrations/guardrails/palo-alto-panw-prisma

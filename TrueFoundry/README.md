@@ -45,3 +45,7 @@ The TrueFoundry Gateway will now route requests through Prisma AIRS for scanning
 * If the Prisma AIRS API response includes `action: "allow"`, the request will be allowed to proceed to the language model.
 
 You can monitor scan logs and verdicts within the Strata Cloud Manager to verify that the integration is active and enforcing your security policies.
+
+## Links
+
+Docs: https://docs.truefoundry.com/ai-gateway/palo-alto-airs#palo-alto-prisma-airs-integration
