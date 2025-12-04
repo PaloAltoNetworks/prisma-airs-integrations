@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<KeyValueMapOperations name="KVM-GetConfig" mapIdentifier="private">
+  <Scope>environment</Scope>
+  <Get assignTo="private.airs.token">
+    <Key>
+      <Parameter>airs.token</Parameter>
+    </Key>
+  </Get>
+  <Get assignTo="private.airs.profile">
+    <Key>
+      <Parameter>airs.profile</Parameter>
+    </Key>
+  </Get>
+  <Get assignTo="private.vertex.project">
+    <Key>
+      <Parameter>vertex.project</Parameter>
+    </Key>
+  </Get>
+  <Get assignTo="private.vertex.model">
+    <Key>
+      <Parameter>vertex.model</Parameter>
+    </Key>
+  </Get>
+</KeyValueMapOperations>
+

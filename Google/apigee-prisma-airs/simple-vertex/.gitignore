@@ -1,0 +1,29 @@
+# Environment files
+.env
+.env.local
+
+# Service account keys
+*.json
+!package.json
+
+# Apigee deployment artifacts
+*.zip.bak
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+tmp/
+temp/
+

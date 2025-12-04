@@ -15,6 +15,7 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 | Partner | Category | Documentation Link |
 | :--- | :--- | :--- |
 | **Anthropic** | Foundation Model Provider | [./Anthropic/README.md](./Anthropic/README.md) |
+| **Google (Apigee X)** | API Gateway | [./Google/README.md](./Google/README.md) |
 | **Kong (Custom Plugin)** | API Gateway | [./Kong/custom-plugin/README.md](./Kong/custom-plugin/README.md) |
 | **Kong (Request Callout)** | API Gateway | [./Kong/request-callout/README.md](./Kong/request-callout/README.md) |
 | **LiteLLM** | LLM Gateway | [./LiteLLM/README.md](./LiteLLM/README.md) |

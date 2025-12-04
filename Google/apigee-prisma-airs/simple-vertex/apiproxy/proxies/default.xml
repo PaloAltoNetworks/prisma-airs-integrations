@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ProxyEndpoint name="default">
+  <HTTPProxyConnection>
+    <BasePath>/vertex</BasePath>
+  </HTTPProxyConnection>
+  
+  <PreFlow name="PreFlow">
+    <Request>
+      <Step><Name>KVM-GetConfig</Name></Step>
+      <Step><Name>JS-ScanPrompt</Name></Step>
+      <Step><Name>AM-AIRSRequest</Name></Step>
+      <Step><Name>SC-AIRSScan</Name></Step>
+      <Step><Name>EV-AIRSVerdict</Name></Step>
+      <Step>
+        <Name>JS-ApplyPromptMasking</Name>
+        <Condition>(airs.action = "allow") and (airs.prompt.redacted != null)</Condition>
+      </Step>
+      <Step>
+        <Name>RF-Block</Name>
+        <Condition>(airs.action = "block")</Condition>
+      </Step>
+    </Request>
+  </PreFlow>
+  
+  <PostFlow name="PostFlow">
+    <Response>
+      <Step>
+        <Name>JS-ScanResponse</Name>
+        <Condition>(response.status.code >= 200) and (response.status.code &lt; 300)</Condition>
+      </Step>
+      <Step>
+        <Name>AM-AIRSResponseRequest</Name>
+        <Condition>(response.status.code >= 200) and (response.status.code &lt; 300) and (airs.scan.response.payload != null)</Condition>
+      </Step>
+      <Step>
+        <Name>SC-AIRSResponseScan</Name>
+        <Condition>(response.status.code >= 200) and (response.status.code &lt; 300) and (airs.scan.response.payload != null)</Condition>
+      </Step>
+      <Step>
+        <Name>EV-AIRSResponseVerdict</Name>
+        <Condition>(response.status.code >= 200) and (response.status.code &lt; 300) and (airs.scan.response.payload != null)</Condition>
+      </Step>
+      <Step>
+        <Name>JS-ApplyMasking</Name>
+        <Condition>(response.status.code >= 200) and (response.status.code &lt; 300) and (airs.scan.response.action = "allow") and (airs.scan.response.redacted != null)</Condition>
+      </Step>
+      <Step>
+        <Name>RF-BlockResponse</Name>
+        <Condition>(airs.scan.response.action = "block")</Condition>
+      </Step>
+    </Response>
+  </PostFlow>
+  
+  <RouteRule name="default">
+    <TargetEndpoint>vertex-target</TargetEndpoint>
+  </RouteRule>
+</ProxyEndpoint>

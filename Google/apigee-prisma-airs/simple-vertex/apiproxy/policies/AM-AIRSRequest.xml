@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<AssignMessage name="AM-AIRSRequest">
+  <Set>
+    <Headers>
+      <Header name="Content-Type">application/json</Header>
+      <Header name="X-Pan-Token">{private.airs.token}</Header>
+    </Headers>
+    <Payload contentType="application/json">{airs.request.payload}</Payload>
+    <Verb>POST</Verb>
+  </Set>
+  <AssignTo createNew="true" type="request">airs.request</AssignTo>
+</AssignMessage>

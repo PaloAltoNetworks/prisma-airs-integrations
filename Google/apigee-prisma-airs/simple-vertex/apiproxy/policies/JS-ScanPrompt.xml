@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Javascript name="JS-ScanPrompt" timeLimit="200">
+  <ResourceURL>jsc://scan-prompt.js</ResourceURL>
+</Javascript>

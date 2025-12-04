@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ExtractVariables name="EV-AIRSVerdict">
+  <Source>airs.response</Source>
+  <JSONPayload>
+    <Variable name="airs.action" type="string">
+      <JSONPath>$.action</JSONPath>
+    </Variable>
+    <Variable name="airs.category" type="string">
+      <JSONPath>$.category</JSONPath>
+    </Variable>
+    <Variable name="airs.prompt.redacted" type="string">
+      <JSONPath>$.prompt_masked_data.data</JSONPath>
+    </Variable>
+  </JSONPayload>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</ExtractVariables>

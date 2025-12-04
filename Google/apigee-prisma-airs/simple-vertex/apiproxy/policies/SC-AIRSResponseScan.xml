@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ServiceCallout name="SC-AIRSResponseScan">
+  <Request variable="airs.scan.response.request"/>
+  <Response>airs.scan.response.result</Response>
+  <Timeout>5000</Timeout>
+  <HTTPTargetConnection>
+    <URL>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</URL>
+  </HTTPTargetConnection>
+</ServiceCallout>
+
