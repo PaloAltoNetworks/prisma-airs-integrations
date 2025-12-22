@@ -55,81 +55,83 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 ```
 -->
 <fragment>
-	<!--
-    This section defines the default error messages for each threat category.
-    These messages can be overridden by setting the `airsDescriptions` context variable.
-    -->
-	<set-variable name="scanDescriptions" value="@{
-        return new JObject(
-            new JProperty("url_cats", "This contains content with unacceptable URLs."),
-            new JProperty("dlp", "This contains content with sensitive data."),
-            new JProperty("injection", "This contains content that is interpreted as trying to do something malicious."),
-            new JProperty("toxic_content", "This contains content that is not in keeping with our policy."),
-            new JProperty("malicious_code", "This contains content that is interpreted as malicous code."),
-            new JProperty("agent", "This contains content that is interpreted as trying to manipulate an agent."),
-            new JProperty("topic_violation", "This contains content outside of the defined topic boundries."),
-            new JProperty("db_security", "This contains content with unacceptable SQL commands."),
-            new JProperty("ungrounded", "This contains content that are not grounded to the discussion.")
-        );
-    }" />
-	<!--
-    This section prepares the request data for the AIRS service.
-    It extracts common information from the request, such as the model, app name, and profile name.
-    -->
-	    <set-variable name="requestData" value="@{
-	        var body = context.Request.Body.As<JObject>(preserveContent: true);
-	        string model = body["model"]?.ToString() ?? "unknown-model";
-            // Applications will always start with APIM-, if the appName is not defined in the policy it will default to APIM-Gateway
-	        string appName = "APIM-" + (string)context.Variables.GetValueOrDefault("appName", "Gateway");
-            // By default exampl-profile is used, unless the variable is defined earlier in the policy
-	        string profileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
-            // If x-session-id exists use that to track coversations, else use the RequestId to link the prompt and response)
-            string sessionId = context.Request.Headers.GetValueOrDefault("x-session-id", context.RequestId.ToString());
-
-	        return new JObject(
-	            new JProperty("session_id", sessionId),
-	            new JProperty("ai_profile", new JObject(
-	                new JProperty("profile_name", profileName)
-	            )),
-	            new JProperty("metadata", new JObject(
-	                new JProperty("app_name", appName),
-	                new JProperty("user_ip", context.Request.IpAddress),
-	                new JProperty("ai_model", model),
-	                new JProperty("app_user", context.Request.Headers.GetValueOrDefault("x-user-id", "anonymous"))
-	            ))    
-	        );
-	    }" />	<!--
+    <!--
     This section determines whether a scan should be performed.
+    Skips anything by chat/completions or responses
     Prompts are always scanned. Responses are only scanned if the backend request was successful.
     -->
-	<set-variable name="shouldScan" value="@{
-        string type = context.Variables.GetValueOrDefault<string>("ScanType", "prompt");
+    <set-variable name="shouldScan" value="@{
+        string path = context.Request.OriginalUrl.Path.ToLower();
         
+        // Only allow specific paths to be scanned
+        bool isAllowedPath = path.Contains("/chat/completions") || 
+                             path.Contains("/responses");
+
+        if (!isAllowedPath) {
+            return false;
+        }
+
+        string type = context.Variables.GetValueOrDefault<string>("ScanType", "prompt");
         if (type == "prompt") {
-            // Always scan prompts
             return true; 
         } 
         else if (type == "response") {
-            // Only scan responses if the backend succeeded (HTTP 200)
             return context.Response != null && context.Response.StatusCode == 200;
         }
         
         return false;
     }" />
-	<choose>
-		<!--
-        This is the main choose block that executes the scan if `shouldScan` is true.
-        -->
-		<when condition="@((bool)context.Variables["shouldScan"])">
-			<!--
+
+    <choose>
+        <when condition="@((bool)context.Variables["shouldScan"])">
+            <!--
+            This section defines the default error messages for each threat category.
+            These messages can be overridden by setting the `airsDescriptions` context variable.
+            -->
+            <set-variable name="scanDescriptions" value="@{
+                return new JObject(
+                    new JProperty("url_cats", "This contains content with unacceptable URLs."),
+                    new JProperty("dlp", "This contains content with sensitive data."),
+                    new JProperty("injection", "This contains content that is interpreted as trying to do something malicious."),
+                    new JProperty("toxic_content", "This contains content that is not in keeping with our policy."),
+                    new JProperty("malicious_code", "This contains content that is interpreted as malicous code."),
+                    new JProperty("agent", "This contains content that is interpreted as trying to manipulate an agent."),
+                    new JProperty("topic_violation", "This contains content outside of the defined topic boundries."),
+                    new JProperty("db_security", "This contains content with unacceptable SQL commands."),
+                    new JProperty("ungrounded", "This contains content that are not grounded to the discussion.")
+                );
+            }" />
+            <!--
+            This section prepares the request data for the AIRS service.
+            It extracts common information from the request, such as the model, app name, and profile name.
+            -->
+            <set-variable name="requestData" value="@{
+                // Use null-coalescing to handle cases where body might be empty/null
+                var body = context.Request.Body.As<JObject>(preserveContent: true) ?? new JObject();
+                string model = body["model"]?.ToString() ?? "unknown-model";
+                string appName = "APIM-" + (string)context.Variables.GetValueOrDefault("appName", "Gateway");
+                string profileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+                string sessionId = context.Request.Headers.GetValueOrDefault("x-session-id", context.RequestId.ToString());
+
+                return new JObject(
+                    new JProperty("session_id", sessionId),
+                    new JProperty("ai_profile", new JObject(
+                        new JProperty("profile_name", profileName)
+                    )),
+                    new JProperty("metadata", new JObject(
+                        new JProperty("app_name", appName),
+                        new JProperty("user_ip", context.Request.IpAddress),
+                        new JProperty("ai_model", model),
+                        new JProperty("app_user", context.Request.Headers.GetValueOrDefault("x-user-id", "anonymous"))
+                    ))    
+                );
+            }" />
+            <!--
             This choose block extracts the content to be scanned based on the `ScanType`.
             -->
-			<choose>
-				<when condition="@(context.Variables.GetValueOrDefault<string>("ScanType", "prompt") == "prompt")">
-					<set-variable name="contextBody" value="@{
-                        return context.Request.Body.As<JObject>(preserveContent: true);
-                    }" />
-					<set-variable name="requestData" value="@{
+            <choose>
+                <when condition="@(context.Variables.GetValueOrDefault<string>("ScanType", "prompt") == "prompt")">
+                    <set-variable name="requestData" value="@{
                         try {
                             var data = (JObject)context.Variables["requestData"];
                             var body = context.Request.Body.As<JObject>(preserveContent: true);
@@ -138,8 +140,7 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                             var contentToken = body["messages"]?.Last?["content"];
                             if (body["input"] != null) {
                                 promptContent = body["input"].ToString();
-                            } else if (contentToken != null)
-                            {
+                            } else if (contentToken != null) {
                                 promptContent = contentToken.ToString();
                             }
                             
@@ -149,12 +150,9 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                             return (JObject)context.Variables["requestData"];
                         }
                     }" />
-				</when>
-				<otherwise>
-					<set-variable name="contextBody" value="@{
-                        return context.Response.Body.As<JObject>(preserveContent: true);
-                    }" />
-					<set-variable name="requestData" value="@{
+                </when>
+                <otherwise>
+                    <set-variable name="requestData" value="@{
                         try {
                             var data = (JObject)context.Variables["requestData"];
                             var body = context.Response.Body.As<JObject>(preserveContent: true);
@@ -164,8 +162,7 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                             var choicesToken = ((JArray)body["choices"])?.Last?["message"]?["content"];
                             if ( outputToken != null) {
                                 responseContent = outputToken.ToString();
-                            } else if (choicesToken != null) 
-                            {
+                            } else if (choicesToken != null) {
                                 responseContent = choicesToken.ToString();
                             }
                             
@@ -175,127 +172,92 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                             return (JObject)context.Variables["requestData"];
                         }                    
                     }" />
-				</otherwise>
-			</choose>
-			<!--
+                </otherwise>
+            </choose>
+            <!--
             This section sends the request to the AIRS service.
             -->
-			<send-request id="panw-airs-scan" mode="new" response-variable-name="panwScanResponse" timeout="10" ignore-error="true">
-				<set-url>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</set-url>
-				<set-method>POST</set-method>
-				<set-header name="x-pan-token" exists-action="override">
-					<value>{{airs-api}}</value>
-				</set-header>
-				<set-header name="Content-Type" exists-action="override">
-					<value>application/json</value>
-				</set-header>
-				<set-body>@{
+            <send-request id="panw-airs-scan" mode="new" response-variable-name="panwScanResponse" timeout="10" ignore-error="true">
+                <set-url>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</set-url>
+                <set-method>POST</set-method>
+                <set-header name="x-pan-token" exists-action="override">
+                    <value>{{airs-api}}</value>
+                </set-header>
+                <set-header name="Content-Type" exists-action="override">
+                    <value>application/json</value>
+                </set-header>
+                <set-body>@{
                     var requestBody = (JObject)context.Variables["requestData"];
                     return requestBody.ToString();
                 }</set-body>
-			</send-request>
-			<!--
+            </send-request>
+            <!--
              This section handles the response from the AIRS service.
              -->
-			<choose>
-				<!--
-                This `when` block handles the case where the AIRS service returns a successful response.
-                -->
-				<when condition="@(context.Variables.ContainsKey("panwScanResponse") && ((IResponse)context.Variables["panwScanResponse"]).StatusCode == 200)">
-					<choose>
-						<!--
+            <choose>
+                <when condition="@(context.Variables.ContainsKey("panwScanResponse") && ((IResponse)context.Variables["panwScanResponse"]).StatusCode == 200)">
+                    <choose>
+                        <!--
                         This `when` block handles the case where the AIRS service blocks the request.
                         -->
-						<when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "block")">
-							<!--
+                        <when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "block")">
+                            <!--
                             This section builds the detailed error message.
                             -->
-							<set-variable name="errorBody" value="@{
+                            <set-variable name="errorBody" value="@{
                                 var panwResponse = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
                                 var response = new JObject();
+                                var scanType = context.Variables.GetValueOrDefault<string>("ScanType", "prompt");
 
                                 // 1. Set the main error header based on scan type
-                                var scanType = context.Variables.GetValueOrDefault<string>("ScanType", "prompt");
-                                if (scanType == "prompt") {
-                                    response.Add("error", "🛡️ PRISMA AIRS SECURITY ALERT: REQUEST BLOCKED");
-                                } else {
-                                    response.Add("error", "🛡️ PRISMA AIRS SECURITY ALERT: RESPONSE BLOCKED");
-                                }
-
+                                response.Add("error", (scanType == "prompt") ? "🛡️ PRISMA AIRS SECURITY ALERT: REQUEST BLOCKED" : "🛡️ PRISMA AIRS SECURITY ALERT: RESPONSE BLOCKED");
                                 // 2. Define the Mapping
-                                var descriptions = context.Variables.GetValueOrDefault<object>("airsDescriptions") as JObject;
-                                // Fallback to default if not defined
-                                if (descriptions == null)
-                                {   
-                                    descriptions = context.Variables.GetValueOrDefault<object>("scanDescriptions") as JObject;
-                                    }
-
+                                var descriptions = context.Variables.GetValueOrDefault<object>("airsDescriptions") as JObject ?? context.Variables.GetValueOrDefault<object>("scanDescriptions") as JObject;
                                 // 3. Select the correct detected object (prompt vs response)
-                                //    We check for null using ? to avoid crashes if the field is missing
                                 JObject detected = (scanType == "prompt") ? panwResponse["prompt_detected"] as JObject : panwResponse["response_detected"] as JObject;
-
                                 var details = new JObject();
-
                                 // 4. Loop through the dictionary and check the 'detected' object
-                                if (detected != null)
-                                {
-                                    foreach (JProperty prop in detected.Properties())
-                                    {
+                                if (detected != null) {
+                                    foreach (JProperty prop in detected.Properties()) {
                                         // Only care if the flag is actually true (and is a boolean)
-                                        if (prop.Value.Type == JTokenType.Boolean && (bool)prop.Value == true)
-                                        {
+                                        if (prop.Value.Type == JTokenType.Boolean && (bool)prop.Value == true) {
                                             string key = prop.Name;
-
-                                            // A. Check if we have a friendly description for this key
-                                            if (descriptions[key] != null)
-                                            {
-                                                details.Add(key, descriptions[key]);
-                                            }
-                                            // B. If not, add the key with 'true' (Dynamic handling of new threats)
-                                            else 
-                                            {
-                                                details.Add(key, true);
-                                            }
+                                            // Respond with the key value, or true if the key is not defined
+                                            details.Add(key, descriptions[key] ?? true);
                                         }
                                     }                                    
                                 }
-
                                 response.Add("details", details);
                                 return response.ToString();
                             }" />
-							<!--
+                            <!--
                             This section returns the error response.
                             -->
-							<return-response>
-								<set-status code="403" reason="Forbidden" />
-								<set-header name="Content-Type" exists-action="override">
-									<value>application/json</value>
-								</set-header>
-								<set-body>@(context.Variables.GetValueOrDefault<string>("errorBody"))</set-body>
-							</return-response>
-						</when>
-                        <!--
+                            <return-response>
+                                <set-status code="403" reason="Forbidden" />
+                                <set-header name="Content-Type" exists-action="override">
+                                    <value>application/json</value>
+                                </set-header>
+                                <set-body>@(context.Variables.GetValueOrDefault<string>("errorBody"))</set-body>
+                            </return-response>
+                        </when>
+                         <!--
                             This `when` block handles the case where the AIRS service action is allow but Data Masking is enabled on the prompt. 
                             It will replace the request contents with the masked text. A Trace message with the origional text will be created.
                         -->
-						<when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "allow" && ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true).ContainsKey("prompt_masked_data"))">
-							<trace source="SecurityScanner" severity="error">
+                        <when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "allow" && ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true).ContainsKey("prompt_masked_data"))">
+                            <trace source="SecurityScanner" severity="error">
 								<message>@("🛡️ PRISMA AIRS SECURITY ALERT:  Masked Prompt: " + ((JObject)context.Variables["requestData"])["contents"]?.Last?["prompt"])</message>
-							</trace>
-							<set-body>@{
+							</trace>                             
+                            <set-body>@{
                                 var body = context.Request.Body.As<JObject>(preserveContent: true);
                                 var panwResponse = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
                                 var maskedData = panwResponse["prompt_masked_data"]["data"].ToString();
-                                if (body["input"]  != null)
-                                {
-                                    body["input"] = maskedData;
-                                } else if (body["messages"] is JArray choicesArr && choicesArr.Count > 0 && choicesArr.Last["content"] != null)
-                                {
-                                    choicesArr.Last["content"] = maskedData;
-                                }
+                                if (body["input"] != null) { body["input"] = maskedData; } 
+                                else if (body["messages"] is JArray choicesArr && choicesArr.Count > 0) { choicesArr.Last["content"] = maskedData; }
                                 return body.ToString();
                             }</set-body>
-						</when>
+                        </when>
                         <!--
                             This `when` block handles the case where the AIRS service action is allow but Data Masking is enabled on the response. 
                             It will replace the response contents with the masked text. A Trace message with the origional text will be created.
@@ -319,39 +281,27 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                 return body.ToString();
                             }</set-body>
 						</when>
-					</choose>
-				</when>
-				<!--
+                    </choose>
+                </when>
+                <!--
                 This `otherwise` block handles the case where the AIRS service is unavailable.
                 -->
-				<otherwise>
-					<choose>
-						<when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)) == false)">
-							<return-response>
-								<set-status code="503" reason="Service Unavailable" />
-								<set-header name="Content-Type" exists-action="override">
-									<value>application/json</value>
-								</set-header>
-								<set-body>{ "error": "🛡️ PRISMA AIRS SECURITY ALERT: Security scanner unavailable. Request blocked for safety." }</set-body>
-							</return-response>
-						</when>
-						<otherwise>
-							<trace source="SecurityScanner" severity="error">
+                <otherwise>
+                    <choose>
+                        <when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)) == false)">
+                            <return-response>
+                                <set-status code="503" reason="Service Unavailable" />
+                                <set-body>{ "error": "🛡️ PRISMA AIRS SECURITY ALERT: Security scanner unavailable. Request blocked for safety." }</set-body>
+                            </return-response>
+                        </when>
+                        <otherwise>
+                            <trace source="SecurityScanner" severity="error">
 								<message>🛡️ PRISMA AIRS SECURITY ALERT:  Scanner failed or timed out. Failing open (allowing traffic).</message>
 							</trace>
-						</otherwise>
-					</choose>
-				</otherwise>
-			</choose>
-		</when>
-		<!--
-        This `otherwise` block handles the case where the fragment inherits an error from a previous policy.
-        -->
-		<otherwise>
-			<trace source="PANW-Scanner" severity="error">
-				<message>Inherited an Error</message>
-			</trace>
-			<set-body>@(context.Response.Body.As<string>(preserveContent: true))</set-body>
-		</otherwise>
-	</choose>
+                        </otherwise>
+                    </choose>
+                </otherwise>
+            </choose>
+        </when>
+    </choose>
 </fragment>
