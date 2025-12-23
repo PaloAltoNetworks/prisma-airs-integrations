@@ -175,3 +175,4 @@ curl -X POST "https://mgollop-apim-svs.azure-api.net/myllm/responses" \
 * Sample Testing in the Testing Window ![AI Gateway - Test](<images/Azure AI Gateway - API Test.png>)
 * Sample Testing Response ![AI Gateway - Test Result](<images/Azure AI Gateway - API Test Confirmed.png>)
 
+ 
