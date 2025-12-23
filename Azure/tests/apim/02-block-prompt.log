@@ -1,7 +1,0 @@
-{
-  "error": "🛡️ PRISMA AIRS SECURITY ALERT: REQUEST BLOCKED",
-  "details": {
-    "agent": true,
-    "injection": "This contains content that is interpreted as trying to do something malicious."
-  }
-}
