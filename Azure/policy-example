@@ -1,7 +1,8 @@
 <policies>
     <inbound>
         <base />
-        <set-backend-service id="apim-generated-policy" backend-id="myllm-openai-endpoint" />
+        <set-backend-service id="apim-generated-policy" backend-id="my-llm-openai-endpoint" />
+        <!--Optional Entries -->
         <set-variable name="airsDescriptions" value="@{
                 return new JObject(
                     new JProperty("url_cats", "There are unacceptable URLs."),
@@ -15,9 +16,11 @@
                     new JProperty("ungrounded", "We lost the plot.")
                 );
             }" />
-        <set-variable name="ScanType" value="prompt" />
-        <set-variable name="currentProfile" value="prompt-profile" />
         <set-variable name="FailOpen" value="true" />
+        <!--Recommended Entries -->
+        <set-variable name="currentProfile" value="prompt-profile" />
+        <!--Mandatory Entries -->
+        <set-variable name="ScanType" value="prompt" />
         <include-fragment fragment-id="panw-airs-scan" />
     </inbound>
     <backend>
@@ -25,9 +28,12 @@
     </backend>
     <outbound>
         <base />
+        <!--Optional Entries -->
         <set-variable name="FailOpen" value="false" />
-        <set-variable name="ScanType" value="response" />
+        <!--Recommended Entries -->
         <set-variable name="currentProfile" value="response-profile" />
+        <!--Mandatory Entries -->
+        <set-variable name="ScanType" value="response" />
         <include-fragment fragment-id="panw-airs-scan" />
     </outbound>
     <on-error>
