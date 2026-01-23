@@ -123,9 +123,38 @@ key: value
 
 ---
 
-## Verification
+## Validation
 
-How to test that the integration is working correctly...
+Include unit/fucntional tests and instructions on how to execute in the `/scripts`, `/examples` or `/test` directories. 
+
+---
+
+## Technical Requirements
+
+1. Integrations **MUST** indicate the integration using the `app_name` field in the AIRS request. Ideally, allow users to **append** their business-specific application name to the integration. (E.g. `LiteLLM` becomes `LiteLLM-HR-Chatbot`).
+2. If applicable, override tr_id with any available unique identifiers from integration platform.
+
+
+```
+{
+  "tr_id": "string", # If applicable, leverage tr_id to pass unique ID from integration platform
+  "session_id": "string",
+  "ai_profile": {
+    "profile_name": "string"
+  },
+  "metadata": {
+    "app_name": "<VENDOR_NAME>-<CUSTOMER_APP>", # Requirement
+    }
+  },
+  "contents": [
+    {
+      "prompt": "string",
+      "response": "string",
+    }
+  ]
+}
+
+```
 
 ---
 
