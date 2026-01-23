@@ -1,4 +1,6 @@
 # Kong Konnect - Prisma AIRS Custom Plugin
+> **_NOTE:_** DOCS on Kong plugin Hub: https://developer.konghq.com/plugins/prisma-airs-intercept/
+
 # Prisma AI Runtime Security (AIRS) API Intercept Plugin
 
 A Kong Gateway custom plugin that provides real-time security scanning for AI/LLM traffic using Palo Alto Networks Prisma AI Runtime Security.
