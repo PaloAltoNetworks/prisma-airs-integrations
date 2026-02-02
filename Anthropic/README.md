@@ -1,70 +1,82 @@
 # Anthropic Integrations for Prisma AIRS
 
-  This directory contains integrations between Anthropic's AI technologies and Palo Alto Networks' Prisma AI Runtime
-  Security (AIRS) platform.
+This directory contains integrations between Anthropic's Claude Code and Palo Alto Networks Prisma AI Runtime Security (AIRS).
 
-  ## Overview
+## Overview
 
-  Anthropic integrations enable real-time security scanning
-  and threat detection for AI-powered applications using
-  Claude and other Anthropic services. These integrations
-  help organizations maintain security compliance while
-  leveraging advanced AI capabilities.
+Three integration methods are available, each serving different security needs:
 
-  ## Available Integrations
+| Integration | Method | Use Case |
+|-------------|--------|----------|
+| [claude-code-hooks](./claude-code-hooks/) | Hooks (automatic) | Runtime protection - scans all inputs/outputs transparently |
+| [claude-code-mcp](./claude-code-mcp/) | MCP Server (native) | Native MCP tools for AI-driven security scanning |
+| [claude-code-skill](./claude-code-skill/) | Skill (on-demand) | User-invoked scanning via slash command |
 
-  ### Claude Code Security Hooks
-  - **Directory**: `claude-code-prisma-airs/`
-  - **Description**: Runtime security hooks for Claude Code
-  (Anthropic's AI coding assistant)
-  - **Features**:
-    - Pre-execution content scanning
-    - URL filtering and validation
-    - Sensitive data detection
-    - Malicious code pattern identification
-    - Real-time threat blocking and logging
+## Choosing an Integration
 
-  ## Key Benefits
+### Claude Code Hooks (Recommended for Enterprise)
 
-  - 🛡️ **Runtime Protection**: Scan AI inputs and outputs in
-  real-time
-  - 🔍 **Threat Detection**: Identify malicious patterns,
-  prompt injections, and security risks
-  - 📊 **Compliance**: Maintain security standards for
-  AI-assisted development
-  - 🚀 **Seamless Integration**: Easy-to-implement hooks and
-  middleware
-  - 📝 **Audit Logging**: Comprehensive security event
-  tracking
+**Best for**: Organizations requiring comprehensive, always-on protection
 
-  ## Getting Started
+- Automatically scans every user input, tool call, and AI response
+- Zero-trust architecture with 6 security checkpoints
+- No user action required - protection is transparent
+- Blocks threats before they reach Claude or the user
 
-  Each integration directory contains its own detailed setup
-  instructions. Navigate to the specific integration folder
-  for:
-  - Installation guides
-  - Configuration options
-  - Usage examples
-  - API documentation
+[View Hooks Integration](./claude-code-hooks/)
 
-  ## Security Features
+### Claude Code MCP Server
 
-  - Prompt injection detection
-  - Sensitive data (PII/PCI) scanning
-  - Malware pattern recognition
-  - URL reputation checking
-  - Content filtering based on security policies
+**Best for**: Native integration with Claude's tool ecosystem
 
-  ## Support
+- Connects via Model Context Protocol (MCP)
+- Claude can invoke AIRS scanning tools autonomously
+- Regional endpoint support (US, EU, India, Singapore)
+- Simple JSON configuration
 
-  For questions about Anthropic integrations with Prisma
-  AIRS:
-  - Review individual integration documentation
-  - Contact Palo Alto Networks support
-  - Visit [Prisma AIRS Documentation](https://pan.dev/airs/)
+[View MCP Integration](./claude-code-mcp/)
 
-  ## Contributing
+### Claude Code Skill
 
-  Contributions are welcome! Please follow the repository's
-  contribution guidelines when submitting new integrations or
-   improvements.
+**Best for**: Developers wanting explicit, user-controlled scanning
+
+- User-invoked via `/prisma-airs-scan` command
+- Scan specific prompts, code, or responses as needed
+- Lightweight integration with minimal setup
+- Ideal for spot-checking generated code or sensitive content
+
+[View Skill Integration](./claude-code-skill/)
+
+## Comparison
+
+| Feature | Hooks | MCP Server | Skill |
+|---------|-------|------------|-------|
+| Automatic scanning | Yes | No (AI-driven) | No |
+| User invocation | No | Via conversation | `/prisma-airs-scan` |
+| Blocks threats | Yes | Informs user | Reports findings |
+| Setup complexity | Medium | Low | Low |
+| Best for | Enterprise security | AI-native workflows | Developer spot-checks |
+
+## Security Features
+
+All integrations provide protection against:
+
+- Prompt injection attacks
+- Sensitive data exposure (PII, credentials, secrets)
+- Malicious URL detection
+- Toxic or harmful content
+- Malicious code patterns
+- AI manipulation attempts
+
+## Getting Started
+
+1. Choose the integration method that fits your needs
+2. Follow the setup instructions in the respective directory
+3. Obtain API credentials from [Strata Cloud Manager](https://stratacloudmanager.paloaltonetworks.com)
+
+## Resources
+
+- [Prisma AIRS Documentation](https://pan.dev/airs/)
+- [Prisma AIRS Admin Guide](https://docs.paloaltonetworks.com/ai-runtime-security/administration/prisma-airs-overview)
+- [Prisma AIRS MCP Server Docs](https://docs.paloaltonetworks.com/ai-runtime-security/activation-and-onboarding/prisma-airs-mcp-server-for-centralized-ai-agent-security)
+- [Claude Code Hooks Reference](https://docs.anthropic.com/en/docs/claude-code/hooks)
