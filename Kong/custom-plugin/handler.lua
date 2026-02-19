@@ -118,7 +118,16 @@ local function perform_scan(config, scan_type, request_body, response_body)
     return "blocked", "'action' field not found in API response."
   end
 
-  return action, "Verdict received from security scan."
+  -- Build a detailed reason from the AIRS response fields.
+  local reason_parts = { "Verdict: " .. tostring(action) }
+  if res_body_json.category and res_body_json.category ~= "" then
+    table.insert(reason_parts, "Category: " .. tostring(res_body_json.category))
+  end
+  if res_body_json.scan_id and res_body_json.scan_id ~= "" then
+    table.insert(reason_parts, "Scan ID: " .. tostring(res_body_json.scan_id))
+  end
+
+  return action, table.concat(reason_parts, ". ") .. ".", res_body_json
 end
 
 -- ACCESS PHASE
@@ -133,11 +142,19 @@ function SecurePrismaAIRSHandler:access(config)
     return kong.response.exit(400, { message = "Invalid or unreadable request body." })
   end
 
-  local verdict, reason = perform_scan(config, "prompt", request_body)
+  local verdict, reason, airs_response = perform_scan(config, "prompt", request_body)
 
   if verdict ~= "allow" then
     log_error(reason, verdict)
-    return kong.response.exit(403, { message = "Request blocked by security policy.", reason = reason })
+    local response_body = {
+      message = "Request blocked by security policy.",
+      reason = reason,
+    }
+    if airs_response then
+      response_body.category = airs_response.category
+      response_body.scan_id = airs_response.scan_id
+    end
+    return kong.response.exit(403, response_body)
   end
 
   kong.log.info("SecurePrismaAIRSHandler: Prompt scan allowed.")
@@ -163,11 +180,19 @@ function SecurePrismaAIRSHandler:response(config)
   end
 
   -- Pass the original request body and the new response body for scanning.
-  local verdict, reason = perform_scan(config, "response", original_request_body, response_body_str)
+  local verdict, reason, airs_response = perform_scan(config, "response", original_request_body, response_body_str)
 
   if verdict ~= "allow" then
     log_error(reason, verdict)
-    return kong.response.exit(403, { message = "Response blocked by security policy.", reason = reason })
+    local response_body = {
+      message = "Response blocked by security policy.",
+      reason = reason,
+    }
+    if airs_response then
+      response_body.category = airs_response.category
+      response_body.scan_id = airs_response.scan_id
+    end
+    return kong.response.exit(403, response_body)
   else
     kong.log.info("SecurePrismaAIRSHandler: Response scan in response phase was allowed.")
   end
