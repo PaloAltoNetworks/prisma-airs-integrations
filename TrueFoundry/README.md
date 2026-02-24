@@ -2,6 +2,19 @@
 
 This document provides instructions for integrating Prisma AIRS with the TrueFoundry AI Gateway. This integration allows you to use Prisma AIRS as a security guardrail, scanning AI requests and responses for threats directly from the gateway.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Gateway scans AI requests before forwarding to LLM |
+| Response | ✅ | Gateway validates responses with block/allow actions |
+| Streaming | ❌ | Gateway operates on complete request/response cycles |
+| Pre-tool call | ❌ | Request and response scanning only |
+| Post-tool call | ❌ | Tool result scanning not documented |
+| MCP | ❌ | No MCP integration |
+
 ---
 
 ## Prerequisites

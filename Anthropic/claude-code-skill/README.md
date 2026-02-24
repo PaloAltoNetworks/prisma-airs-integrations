@@ -2,6 +2,19 @@
 
 A Claude Code skill that integrates Palo Alto Networks Prisma AI Runtime Security (AIRS) for scanning prompts, code, and AI responses for security threats.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | User-invoked via `/airs-scan` command with `--type prompt` |
+| Response | ✅ | User-invoked scanning of AI-generated content |
+| Streaming | ❌ | Synchronous blocking scan only |
+| Pre-tool call | ❌ | Not designed for pre-tool validation |
+| Post-tool call | ❌ | Not designed for post-tool validation |
+| MCP | ❌ | Not designed for MCP interactions |
+
 ## Features
 
 - **Prompt Injection Detection**: Identifies attempts to manipulate AI behavior

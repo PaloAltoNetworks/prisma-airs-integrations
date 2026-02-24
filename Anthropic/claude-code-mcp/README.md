@@ -2,6 +2,19 @@
 
 Connect Claude Code to Prisma AIRS via the Model Context Protocol (MCP) for on-demand security scanning through native MCP tools.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Claude can invoke `pan_inline_scan` to scan user prompts on-demand |
+| Response | ✅ | Claude can invoke `pan_inline_scan` to scan LLM outputs on-demand |
+| Streaming | ❌ | MCP tools are blocking synchronous calls |
+| Pre-tool call | ❌ | Not automatic - Claude must explicitly invoke scanning |
+| Post-tool call | ❌ | Not automatic - Claude must explicitly invoke scanning |
+| MCP | ❌ | Provides MCP tools but does not intercept MCP interactions |
+
 ## Overview
 
 The Prisma AIRS MCP Server provides Claude Code with security scanning tools via the MCP protocol. Once configured, Claude can invoke AIRS scanning tools directly during conversations.

@@ -2,6 +2,19 @@
 
 This document provides instructions for using the Prisma AIRS community node within n8n to add a layer of security to your automation workflows. This node allows you to scan prompts and responses for threats directly within a workflow.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | "Prompt Scan" operation scans user input for threats |
+| Response | ✅ | "Response Scan" operation scans AI-generated responses |
+| Streaming | ❌ | Node processes complete responses after generation |
+| Pre-tool call | ❌ | Workflow-based - not automatic tool interception |
+| Post-tool call | ❌ | Tool result scanning not implemented |
+| MCP | ❌ | MCP tools in workflows are not scanned by this node |
+
 ---
 
 ## Prerequisites

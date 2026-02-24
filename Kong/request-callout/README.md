@@ -3,6 +3,19 @@
 
 Enterprise-grade AI security scanning for Kong Konnect using PAN.dev AI Runtime Security (AIRS) API. This integration provides real-time threat detection and blocking for AI API requests and responses through Kong's managed cloud platform.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Request phase scans user prompts before forwarding to AI service |
+| Response | ❌ | Request-side scanning only (see custom-plugin for response scanning) |
+| Streaming | ❌ | Single-phase synchronous scanning only |
+| Pre-tool call | ❌ | Not implemented - designed for API request scanning |
+| Post-tool call | ❌ | Not implemented - no tool result scanning |
+| MCP | ❌ | Not implemented - no MCP support |
+
 ## 🚀 Getting Started
 
 ### What You Need

@@ -2,6 +2,19 @@
 
 This document describes how to integrate Prisma AIRS as a security guardrail within the Portkey AI Gateway. This setup allows for the automatic scanning of LLM inputs and outputs to detect and block threats in real-time.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | `input_guardrails` scans prompts before sending to LLM |
+| Response | ✅ | `output_guardrails` scans LLM responses before returning |
+| Streaming | ❌ | Guardrails process complete requests/responses only |
+| Pre-tool call | ❌ | Guardrails intercept at input/output level only |
+| Post-tool call | ❌ | Tool/function result scanning not supported |
+| MCP | ❌ | No MCP scanning |
+
 ---
 
 ## Prerequisites
