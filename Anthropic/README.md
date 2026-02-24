@@ -1,6 +1,6 @@
-# Claude Code Integrations for Prisma AIRS
+# Anthropic Integrations for Prisma AIRS
 
-This directory contains integrations between Claude Code and Palo Alto Networks Prisma AI Runtime Security (AIRS).
+This directory contains integrations between Anthropic products (Claude Code) and Palo Alto Networks Prisma AI Runtime Security (AIRS).
 
 ## Overview
 

@@ -9,7 +9,7 @@ This is a **documentation-first repository** - primarily markdown guides, config
 ## Structure
 
 ```
-├── Claude-Code/        # Claude Code integrations (hooks, MCP, skill)
+├── Anthropic/          # Anthropic integrations (Claude Code hooks, MCP, skill)
 ├── Microsoft/          # Microsoft integrations (Azure APIM)
 ├── Google/             # Google Cloud integrations (Apigee)
 ├── Kong/               # Kong custom plugin & request callout
