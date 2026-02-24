@@ -134,6 +134,22 @@ Scan this code for security issues using Prisma AIRS:
 
 Claude will invoke the MCP tool automatically.
 
+### app_name Parameter
+
+When invoking the MCP tools, use `app_name: "claude-code-mcp"` to identify scans from the MCP integration:
+
+```json
+{
+  "prompt": "content to scan",
+  "app_name": "claude-code-mcp"
+}
+```
+
+This distinguishes MCP scans from other Claude Code integrations:
+- `claude-code-hook` - Hooks integration
+- `claude-code-skill` - Skill integration
+- `claude-code-mcp` - MCP integration
+
 ---
 
 ## Verification

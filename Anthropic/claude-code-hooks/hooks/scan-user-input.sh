@@ -46,7 +46,7 @@ PAYLOAD=$(cat << EOF
   },
   "metadata": {
     "app_user": "claude-code-user",
-    "app_name": "Claude Code",
+    "app_name": "claude-code-hook",
     "ai_model": "sonnet",
     "source": "user-prompt-submit"
   },
