@@ -43,8 +43,8 @@ The Prisma AIRS MCP Server provides Claude Code with security scanning tools via
 Add to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 
 ```bash
-export PAN_TOKEN="your-prisma-airs-api-key"
-export PAN_PROFILE="your-security-profile-name"  # Optional
+export PRISMA_AIRS_API_KEY="your-prisma-airs-api-key"
+export PRISMA_AIRS_PROFILE_NAME="your-security-profile-name"
 ```
 
 ### MCP Server Configuration
@@ -69,8 +69,8 @@ Edit `~/.claude.json` and add the `mcpServers` section:
       "type": "http",
       "url": "https://service.api.aisecurity.paloaltonetworks.com/mcp",
       "headers": {
-        "x-pan-token": "${PAN_TOKEN}",
-        "x-pan-profile": "${PAN_PROFILE}"
+        "x-pan-token": "${PRISMA_AIRS_API_KEY}",
+        "x-pan-profile": "${PRISMA_AIRS_PROFILE_NAME}"
       }
     }
   }
@@ -88,15 +88,15 @@ Create or edit `.claude/settings.json` in your project root:
       "type": "http",
       "url": "https://service.api.aisecurity.paloaltonetworks.com/mcp",
       "headers": {
-        "x-pan-token": "${PAN_TOKEN}",
-        "x-pan-profile": "${PAN_PROFILE}"
+        "x-pan-token": "${PRISMA_AIRS_API_KEY}",
+        "x-pan-profile": "${PRISMA_AIRS_PROFILE_NAME}"
       }
     }
   }
 }
 ```
 
-> **Note:** Environment variables (`${PAN_TOKEN}`) are resolved at runtime. Team members set their own credentials via environment variables.
+> **Note:** Environment variables (`${PRISMA_AIRS_API_KEY}`) are resolved at runtime. Team members set their own credentials via environment variables.
 
 ---
 
@@ -149,7 +149,7 @@ Claude will invoke the MCP tool automatically.
 
 ### Server Not Appearing
 
-- Verify environment variables are set: `echo $PAN_TOKEN`
+- Verify environment variables are set: `echo $PRISMA_AIRS_API_KEY`
 - Check JSON syntax in config file
 - Restart Claude Code after config changes
 

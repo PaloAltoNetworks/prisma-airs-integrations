@@ -1,11 +1,11 @@
 #!/bin/bash
 
-LOG_FILE="/Users/jpro/demos/cc_hooks/.claude/hooks/security.log"
-
-# Prisma AIRS API Configuration
-AIRS_API_URL="https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request"
-AIRS_API_KEY="${AIRS_API_KEY}"
-PROFILE_NAME="dev-block-all-profile"
+# Configuration with environment variable support
+LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/security.log}"
+AIRS_BASE_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}"
+AIRS_API_URL="${AIRS_BASE_URL%/}/v1/scan/sync/request"
+AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
+PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME}"
 
 # === FD HARDENING FOR CLEAN JSON OUTPUT ===
 # Save original stdout to FD 3 for JSON responses
@@ -15,7 +15,7 @@ exec 1>>"$LOG_FILE"
 # Keep stderr available for user messages (shows in terminal Claude Code)
 
 # Create log file if it doesn't exist
-mkdir -p "/Users/jpro/demos/cc_hooks/.claude/hooks"
+mkdir -p "$(dirname "$LOG_FILE")"
 touch "$LOG_FILE"
 
 # Read JSON input from stdin
@@ -71,7 +71,7 @@ if [[ -z "$RESPONSE_CONTENT" || ${#RESPONSE_CONTENT} -lt 5 ]]; then
 fi
 
 # Fail-closed guard for API key
-: "${AIRS_API_KEY:?AIRS_API_KEY not set}"
+: "${AIRS_API_KEY:?PRISMA_AIRS_API_KEY not set}"
 
 # Extract URLs from response content with better regex
 URLS=$(echo "$RESPONSE_CONTENT" | grep -oE 'https?://[^\s<>"'"'"'()]+' | sort -u)

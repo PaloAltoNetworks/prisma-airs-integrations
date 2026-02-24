@@ -1,120 +1,92 @@
 ---
-name: airs-scan
+name: prisma-airs
 description: |
-  Scan code, prompts, and AI responses for security threats using Prisma AIRS (AI Runtime Security).
-  Use this skill when: generating code that handles user input, creating API endpoints, writing authentication logic,
-  processing external data, generating prompts for AI models, or reviewing code for security vulnerabilities.
-  Detects prompt injection attacks, sensitive data leakage (PII, credentials, secrets), malicious URLs,
-  toxic content, and other AI-specific security threats.
+  Scan prompts, AI responses, and code for security threats using Prisma AIRS.
+  Auto-invoke when: checking content for prompt injection, detecting sensitive data (PII, credentials, secrets),
+  identifying malicious URLs, filtering toxic or harmful content, or validating AI-generated responses.
+  Auto-invoke when: user asks to "scan this", "check for sensitive data", "is this safe",
+  "check for injection", "review for security", or mentions DLP, PII, or credentials.
+  Auto-invoke when: generating code that handles user input or authentication.
 allowed-tools:
   - Bash
   - Read
+  - Write
 ---
 
 # Prisma AIRS Security Scanner
 
-Scan prompts, code, and AI responses for security threats using Palo Alto Networks Prisma AIRS.
+Detect security threats in prompts, AI responses, and code using Palo Alto Networks Prisma AIRS.
+
+## What It Detects
+
+- **Prompt Injection** - Attempts to manipulate AI behavior
+- **Data Loss Prevention (DLP)** - PII, credentials, API keys, secrets
+- **Malicious URLs** - Phishing, malware, command & control
+- **Toxic Content** - Harmful, offensive, or inappropriate content
+- **Malicious Code** - Exploits, malware patterns
 
 ## Prerequisites
 
-Ensure the following environment variables are set:
-- `PRISMA_AIRS_API_KEY` - Your AIRS API key from Strata Cloud Manager
-- `PRISMA_AIRS_PROFILE` - Your security profile name (e.g., "default")
-- `PRISMA_AIRS_ENDPOINT` - (Optional) API endpoint, defaults to US region
+Environment variables required:
+- `PRISMA_AIRS_API_KEY` - API key from Strata Cloud Manager
+- `PRISMA_AIRS_PROFILE_NAME` - Security profile name
+- `PRISMA_AIRS_URL` - (Optional) Regional API endpoint
 
-## When to Use This Skill
+## How to Pass Content
 
-Invoke this skill in the following scenarios:
+Choose the method based on content complexity:
 
-1. **Before executing user-provided code or scripts**
-2. **When generating API endpoints** that accept user input
-3. **When writing authentication or authorization logic**
-4. **Before processing prompts** that will be sent to AI models
-5. **When handling sensitive data** (PII, credentials, secrets)
-6. **During code review** for security vulnerabilities
-7. **When generating code** that interacts with external systems
+### Method 1: Heredoc (recommended for most content)
 
-## Usage
-
-### Scan a prompt or text for threats
+Use heredoc to avoid shell escaping issues:
 
 ```bash
-python ~/.claude/skills/prisma-airs-skill/scripts/scan.py --type prompt --content "USER_INPUT_HERE"
+python scripts/scan.py --type prompt <<'EOF'
+Content to scan goes here.
+Can include "quotes", newlines, and special chars.
+EOF
 ```
 
-### Scan code for security issues
+### Method 2: File (recommended for code or large content)
+
+Write content to a temp file, then scan:
 
 ```bash
-python ~/.claude/skills/prisma-airs-skill/scripts/scan.py --type code --file path/to/file.py
+# First write content to temp file, then:
+python scripts/scan.py --type code --file /tmp/scan-content.py
 ```
 
-### Scan AI model response
+### Method 3: Direct argument (simple content only)
+
+Only use for short, simple strings without special characters:
 
 ```bash
-python ~/.claude/skills/prisma-airs-skill/scripts/scan.py --type response --content "MODEL_RESPONSE_HERE"
-```
-
-### Scan both prompt and response together
-
-```bash
-python ~/.claude/skills/prisma-airs-skill/scripts/scan.py --type conversation --prompt "USER_PROMPT" --response "AI_RESPONSE"
+python scripts/scan.py --type prompt --content "simple text here"
 ```
 
 ## Scan Types
 
-| Type | Description |
-|------|-------------|
-| `prompt` | Scan user prompts for injection attacks, malicious content |
-| `response` | Scan AI responses for data leakage, harmful content |
-| `code` | Scan generated code for security vulnerabilities |
-| `conversation` | Scan both prompt and response in context |
+| Type | Use Case |
+|------|----------|
+| `prompt` | User input - check for injection, DLP, malicious content |
+| `response` | AI output - check for sensitive data leakage, toxic content |
+| `code` | Generated code - security vulnerabilities, malicious patterns |
+| `conversation` | Full context - prompt and response together |
 
 ## Interpreting Results
 
-The scanner returns a JSON object with:
+| Action | Meaning |
+|--------|---------|
+| `allow` | Safe to proceed |
+| `alert` | Review findings before proceeding |
+| `block` | Threat detected - do not proceed without remediation |
 
-```json
-{
-  "status": "safe|threat_detected|error",
-  "action": "allow|block|alert",
-  "threats": [
-    {
-      "category": "prompt_injection|dlp|malicious_url|toxic_content",
-      "severity": "low|medium|high|critical",
-      "description": "Details about the detected threat"
-    }
-  ],
-  "scan_id": "unique-scan-identifier"
-}
-```
+## Workflow
 
-### Actions Based on Results
+1. Extract content to scan from the conversation
+2. Choose appropriate scan type and method
+3. Run the scanner
+4. Check the `action` field in the result
+5. If `block` or `alert`: address the issue before proceeding
 
-- **allow**: Content is safe, proceed with the operation
-- **alert**: Potential issue detected, review before proceeding
-- **block**: Threat detected, do not proceed without remediation
-
-## Example Workflow
-
-When generating code that handles user input:
-
-1. Generate the initial code
-2. Run AIRS scan on the generated code
-3. If threats detected, remediate and re-scan
-4. Only present code to user after it passes security scan
-
-## Threat Categories
-
-| Category | Description |
-|----------|-------------|
-| `prompt_injection` | Attempts to manipulate AI behavior through crafted input |
-| `dlp` | Sensitive data exposure (PII, credentials, API keys, secrets) |
-| `malicious_url` | URLs linked to malware, phishing, or other threats |
-| `toxic_content` | Harmful, offensive, or inappropriate content |
-| `jailbreak` | Attempts to bypass AI safety measures |
-
-## Limitations
-
-- Maximum 2MB payload per synchronous scan request
-- Maximum 100 URLs per request
-- Requires network access to AIRS API endpoint
+For threat category details, see [references/threat-categories.md](references/threat-categories.md).

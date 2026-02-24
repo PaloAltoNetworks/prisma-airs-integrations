@@ -6,9 +6,10 @@
 
 # Configuration with environment variable support
 LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/security.log}"
-AIRS_API_URL="${AIRS_API_URL:-https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request}"
-AIRS_API_KEY="${AIRS_API_KEY}"
-PROFILE_NAME="${AIRS_PROFILE_NAME}"
+AIRS_BASE_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}"
+AIRS_API_URL="${AIRS_BASE_URL%/}/v1/scan/sync/request"
+AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
+PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME}"
 
 # Create log file if it doesn't exist
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -16,12 +17,12 @@ touch "$LOG_FILE"
 
 # Check if required environment variables are configured
 if [[ -z "$AIRS_API_KEY" ]]; then
-    echo "[$(date)] ERROR: AIRS_API_KEY environment variable not set" >> "$LOG_FILE"
+    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY environment variable not set" >> "$LOG_FILE"
     exit 0  # Allow but log error
 fi
 
 if [[ -z "$PROFILE_NAME" ]]; then
-    echo "[$(date)] ERROR: AIRS_PROFILE_NAME environment variable not set" >> "$LOG_FILE"
+    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME environment variable not set" >> "$LOG_FILE"
     exit 0  # Allow but log error
 fi
 

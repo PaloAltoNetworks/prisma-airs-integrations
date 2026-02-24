@@ -7,14 +7,23 @@ Palo Alto Networks Prisma AI Runtime Security (AIRS) API.
 
 Environment Variables:
     PRISMA_AIRS_API_KEY: Required - API key from Strata Cloud Manager
-    PRISMA_AIRS_PROFILE: Required - Security profile name
-    PRISMA_AIRS_ENDPOINT: Optional - API endpoint (defaults to US region)
+    PRISMA_AIRS_PROFILE_NAME: Required - Security profile name
+    PRISMA_AIRS_URL: Optional - API base URL (defaults to US region)
 
 Usage:
-    python scan.py --type prompt --content "text to scan"
+    # Via heredoc (recommended):
+    python scan.py --type prompt <<'EOF'
+    content to scan
+    EOF
+
+    # Via file:
     python scan.py --type code --file path/to/file.py
-    python scan.py --type response --content "AI response text"
-    python scan.py --type conversation --prompt "user prompt" --response "AI response"
+
+    # Via argument (simple content only):
+    python scan.py --type prompt --content "simple text"
+
+    # Conversation (prompt + response):
+    python scan.py --type conversation --prompt "user" --response "ai"
 """
 
 import argparse
@@ -41,16 +50,16 @@ def get_config() -> tuple[str, str, str]:
         }))
         sys.exit(1)
 
-    profile = os.environ.get("PRISMA_AIRS_PROFILE")
+    profile = os.environ.get("PRISMA_AIRS_PROFILE_NAME")
     if not profile:
         print(json.dumps({
             "status": "error",
-            "error": "PRISMA_AIRS_PROFILE environment variable not set",
+            "error": "PRISMA_AIRS_PROFILE_NAME environment variable not set",
             "action": "block"
         }))
         sys.exit(1)
 
-    endpoint = os.environ.get("PRISMA_AIRS_ENDPOINT", DEFAULT_ENDPOINT)
+    endpoint = os.environ.get("PRISMA_AIRS_URL", DEFAULT_ENDPOINT)
     return api_key, profile, endpoint
 
 
@@ -92,7 +101,13 @@ def build_scan_request(
         "ai_profile": {
             "profile_name": profile
         },
-        "tr_id": f"claude-skill-{os.urandom(8).hex()}"
+        "tr_id": f"claude-skill-{os.urandom(8).hex()}",
+        "metadata": {
+            "app_name": "claude-code-skill",
+            "app_user": os.environ.get("USER", "claude-code-user"),
+            "ai_model": "claude",
+            "source": f"skill-{scan_type}"
+        }
     }
 
     if scan_type == "prompt":
@@ -117,7 +132,7 @@ def build_scan_request(
         request_payload["contents"] = [{
             "prompt": content or ""
         }]
-    print(request_payload)
+
     return request_payload
 
 
@@ -159,104 +174,36 @@ def perform_scan(api_key: str, endpoint: str, payload: dict) -> dict:
 
 
 def parse_response(api_response: dict) -> dict:
-    """Parse AIRS API response into standardized format."""
+    """Parse AIRS API response - pass through with minimal transformation."""
 
-    if "error" in api_response:
+    # Check for actual errors (not just the presence of "error" key)
+    if api_response.get("error") or api_response.get("status") == "error":
         return api_response
 
+    # Extract core fields from API response
+    action = api_response.get("action", "allow").lower()
+    category = api_response.get("category", "unknown")
+    scan_id = api_response.get("scan_id", "unknown")
+
+    # Extract detected categories (true values only)
+    prompt_detected = [k for k, v in api_response.get("prompt_detected", {}).items() if v]
+    response_detected = [k for k, v in api_response.get("response_detected", {}).items() if v]
+
     result = {
-        "status": "safe",
-        "action": "allow",
-        "threats": [],
-        "scan_id": api_response.get("scan_id", "unknown"),
-        "request_id": api_response.get("req_id", "unknown")
+        "action": action,
+        "category": category,
+        "scan_id": scan_id,
+        "prompt_detected": prompt_detected,
+        "response_detected": response_detected
     }
 
-    # Extract result from API response
-    api_result = api_response.get("result", {})
-
-    # Check action from API
-    action = api_result.get("action", "allow").lower()
-    result["action"] = action
-
-    # Check for detected threats
-    prompt_detected = api_result.get("prompt_detected", {})
-    response_detected = api_result.get("response_detected", {})
-
-    threats = []
-
-    # Check prompt threats
-    if prompt_detected.get("injection"):
-        threats.append({
-            "category": "prompt_injection",
-            "severity": "high",
-            "location": "prompt",
-            "description": "Potential prompt injection attack detected"
-        })
-
-    if prompt_detected.get("dlp"):
-        threats.append({
-            "category": "dlp",
-            "severity": "high",
-            "location": "prompt",
-            "description": "Sensitive data detected in prompt (PII, credentials, or secrets)"
-        })
-
-    if prompt_detected.get("url_cats"):
-        threats.append({
-            "category": "malicious_url",
-            "severity": "medium",
-            "location": "prompt",
-            "description": "Potentially malicious or suspicious URL detected in prompt"
-        })
-
-    # Check response threats
-    if response_detected.get("injection"):
-        threats.append({
-            "category": "prompt_injection",
-            "severity": "high",
-            "location": "response",
-            "description": "Potential prompt injection detected in response"
-        })
-
-    if response_detected.get("dlp"):
-        threats.append({
-            "category": "dlp",
-            "severity": "high",
-            "location": "response",
-            "description": "Sensitive data detected in response (PII, credentials, or secrets)"
-        })
-
-    if response_detected.get("url_cats"):
-        threats.append({
-            "category": "malicious_url",
-            "severity": "medium",
-            "location": "response",
-            "description": "Potentially malicious or suspicious URL detected in response"
-        })
-
-    # Update status based on threats
-    if threats:
+    # Add status for convenience
+    if action == "block":
+        result["status"] = "blocked"
+    elif action == "alert" or prompt_detected or response_detected:
         result["status"] = "threat_detected"
-        result["threats"] = threats
-
-        # Determine overall severity
-        if any(t["severity"] == "critical" for t in threats):
-            result["overall_severity"] = "critical"
-        elif any(t["severity"] == "high" for t in threats):
-            result["overall_severity"] = "high"
-        elif any(t["severity"] == "medium" for t in threats):
-            result["overall_severity"] = "medium"
-        else:
-            result["overall_severity"] = "low"
-
-    # Include profile info if available
-    if api_result.get("profile_name"):
-        result["profile"] = api_result["profile_name"]
-
-    # Include category if specified
-    if api_result.get("category"):
-        result["category"] = api_result["category"]
+    else:
+        result["status"] = "safe"
 
     return result
 
@@ -295,7 +242,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate arguments
+    # Validate arguments and handle stdin
     if args.type == "conversation":
         if not args.prompt or not args.response:
             print(json.dumps({
@@ -305,12 +252,16 @@ def main():
             }))
             sys.exit(1)
     elif not args.content and not args.file:
-        print(json.dumps({
-            "status": "error",
-            "error": "Either --content or --file is required",
-            "action": "block"
-        }))
-        sys.exit(1)
+        # Try reading from stdin (supports heredoc pattern)
+        if not sys.stdin.isatty():
+            args.content = sys.stdin.read().strip()
+        if not args.content:
+            print(json.dumps({
+                "status": "error",
+                "error": "Provide content via --content, --file, or stdin (heredoc)",
+                "action": "block"
+            }))
+            sys.exit(1)
 
     # Load configuration
     api_key, profile, endpoint = get_config()
