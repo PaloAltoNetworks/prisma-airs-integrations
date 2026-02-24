@@ -14,9 +14,9 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 
 | Partner | Category | Documentation Link |
 | :--- | :--- | :--- |
-| **Anthropic (Claude Code Hooks)** | AI Coding Assistant | [./Anthropic/claude-code-hooks/](./Anthropic/claude-code-hooks/README.md) |
-| **Anthropic (Claude Code MCP)** | AI Coding Assistant | [./Anthropic/claude-code-mcp/](./Anthropic/claude-code-mcp/README.md) |
-| **Anthropic (Claude Code Skill)** | AI Coding Assistant | [./Anthropic/claude-code-skill/](./Anthropic/claude-code-skill/README.md) |
+| **Claude Code (Hooks)** | AI Coding Assistant | [./Claude-Code/claude-code-hooks/](./Claude-Code/claude-code-hooks/README.md) |
+| **Claude Code (MCP)** | AI Coding Assistant | [./Claude-Code/claude-code-mcp/](./Claude-Code/claude-code-mcp/README.md) |
+| **Claude Code (Skill)** | AI Coding Assistant | [./Claude-Code/claude-code-skill/](./Claude-Code/claude-code-skill/README.md) |
 | **Azure (APIM AI Gateway)** | API Gateway | [./Azure/README.md](./Azure/README.md) |
 | **Google (Apigee X)** | API Gateway | [./Google/README.md](./Google/README.md) |
 | **Kong (Custom Plugin)** | API Gateway | [./Kong/custom-plugin/README.md](./Kong/custom-plugin/README.md) |
