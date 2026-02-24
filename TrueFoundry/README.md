@@ -10,7 +10,7 @@ This document provides instructions for integrating Prisma AIRS with the TrueFou
 |----------------|:---------:|-------------|
 | Prompt | ✅ | Gateway scans AI requests before forwarding to LLM |
 | Response | ✅ | Gateway validates responses with block/allow actions |
-| Streaming | ❌ | Gateway operates on complete request/response cycles |
+| Streaming | ⚠️ | Supported for `v1/messages` API signature only |
 | Pre-tool call | ❌ | Request and response scanning only |
 | Post-tool call | ❌ | Tool result scanning not documented |
 | MCP | ❌ | No MCP integration |
