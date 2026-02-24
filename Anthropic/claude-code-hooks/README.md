@@ -4,6 +4,19 @@
 
 A comprehensive defense-in-depth security framework that protects Claude Code interactions from advanced AI-specific threats including prompt injection, data exfiltration, malicious code execution, and indirect attacks through external content.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Scans user prompts via `UserPromptSubmit` hook before Claude processes |
+| Response | ✅ | Scans LLM responses via `PostToolUse` hook with JSON blocking |
+| Streaming | ❌ | Not implemented - processes complete responses only |
+| Pre-tool call | ✅ | Scans MCP tool parameters and URLs via `PreToolUse` hook |
+| Post-tool call | ✅ | Scans tool responses from MCP and WebFetch via `PostToolUse` hook |
+| MCP | ✅ | Advanced MCP scanning with regex-based tool matching |
+
 ## 🛡️ Executive Summary
 
 This repository implements a multi-layer security architecture that intercepts and analyzes all interactions with Claude Code using [Palo Alto Networks Prisma AIRS](https://www.paloaltonetworks.com/prisma/prisma-ai-runtime-security). The system provides real-time protection against both traditional cybersecurity threats and emerging AI-specific attack vectors.

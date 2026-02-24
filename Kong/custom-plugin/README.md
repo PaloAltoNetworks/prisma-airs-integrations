@@ -5,6 +5,19 @@
 
 A Kong Gateway custom plugin that provides real-time security scanning for AI/LLM traffic using Palo Alto Networks Prisma AI Runtime Security.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Access phase scans user prompts before forwarding to LLM |
+| Response | ✅ | Response phase scans LLM completions before returning to client |
+| Streaming | ❌ | Synchronous scanning with 5-second timeout, requires buffering |
+| Pre-tool call | ❌ | Not implemented - designed for chat completion format |
+| Post-tool call | ❌ | Not implemented - no tool result scanning |
+| MCP | ❌ | Not implemented - no MCP support |
+
 ## Overview
 
 This plugin intercepts LLM API requests and responses, scanning both prompts and completions for security threats before allowing them through. It operates in two phases:

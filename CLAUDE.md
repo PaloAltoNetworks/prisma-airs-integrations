@@ -43,6 +43,11 @@ Every integration README must include a Coverage section after the title/descrip
 | MCP | ❌ | Scans Model Context Protocol interactions |
 ```
 
+**Support icons:**
+- ✅ Full support
+- ⚠️ Partial/conditional support (describe conditions in Description column)
+- ❌ No support
+
 **Column definitions:**
 - **Prompt**: Scans user input before sending to LLM
 - **Response**: Scans LLM output before returning to user

@@ -2,6 +2,19 @@
 
 This document provides instructions for configuring Prisma AIRS as a security guardrail within the LiteLLM Proxy (LLM Gateway). This integration enables real-time scanning of prompts and responses to protect against threats like prompt injection, malicious content, and data loss.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | `mode: "pre_call"` scans user input before LLM call |
+| Response | ✅ | `mode: "post_call"` scans LLM output after response |
+| Streaming | ⚠️ | Supported for `v1/messages` API signature only |
+| Pre-tool call | ❌ | Guardrails wrap LLM invocation, not tool calls |
+| Post-tool call | ❌ | Tool/function call scanning not implemented |
+| MCP | ❌ | No MCP integration |
+
 ---
 
 ## Prerequisites

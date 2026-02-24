@@ -2,6 +2,19 @@
 
 A policy fragment that can be integrated into an Azure AI Gateway (part of APIM) as part of a larger AI Gateway policy.
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Scans user prompts in inbound policy before LLM call |
+| Response | ✅ | Scans LLM responses in outbound policy with masking support |
+| Streaming | ❌ | Synchronous scanning with 10-second timeout |
+| Pre-tool call | ❌ | Not applicable - designed for direct LLM gateway requests |
+| Post-tool call | ❌ | Not applicable - only scans user input and LLM responses |
+| MCP | ❌ | Not applicable - no MCP support |
+
 ## 🎯 What This Does
 The fragments handle handles scanning of prompts and responses on the following OpenAI API Calls
 * **POST** Creates a model response for the given chat conversation.
