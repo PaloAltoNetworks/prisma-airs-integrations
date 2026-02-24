@@ -26,6 +26,25 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 | **Portkey** | AI Gateway & Observability | [./Portkey/README.md](./Portkey/README.md) |
 | **TrueFoundry** | AI Gateway | [./TrueFoundry/README.md](./TrueFoundry/README.md) |
 
+## Coverage Matrix
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Integration | Prompt | Response | Streaming | Pre-tool | Post-tool | MCP |
+|-------------|:------:|:--------:|:---------:|:--------:|:---------:|:---:|
+| [Anthropic (Hooks)](./Anthropic/claude-code-hooks/) | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Anthropic (Skill)](./Anthropic/claude-code-skill/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Google (Apigee)](./Google/apigee/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Kong (Custom Plugin)](./Kong/custom-plugin/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Kong (Request Callout)](./Kong/request-callout/) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| [LiteLLM](./LiteLLM/) | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ |
+| [n8n](./n8n/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Portkey](./Portkey/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [TrueFoundry](./TrueFoundry/) | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ |
+
+**Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
 
 ---
 
