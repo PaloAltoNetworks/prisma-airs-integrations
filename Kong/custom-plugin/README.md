@@ -23,6 +23,8 @@ A Kong Gateway plugin that scans AI/LLM traffic using Prisma AIRS. Supports both
 | `app_name` | No | - | Application identifier (sent as `kong-{app_name}`) |
 | `api_endpoint` | No | `https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request` | AIRS API endpoint |
 | `ssl_verify` | No | `true` | Verify SSL certificates |
+| `timeout_ms` | No | `5000` | AIRS API request timeout in milliseconds |
+| `debug` | No | `false` | Enable debug logging (logs prompts, payloads, responses) |
 
 ## Installation
 
@@ -180,9 +182,8 @@ The plugin fails closed (blocks requests) when:
 
 ## Limitations
 
-- OpenAI chat completion format only
-- Scans first user message in conversation
-- 5-second timeout (hardcoded)
+- OpenAI chat completion format only (Anthropic/Gemini support coming soon)
+- Scans last user message in conversation
 - Response scanning requires response buffering
 
 ## Troubleshooting
