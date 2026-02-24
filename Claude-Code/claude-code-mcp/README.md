@@ -53,8 +53,8 @@ Edit `~/.claude.json` and add the `mcpServers` section:
 {
   "mcpServers": {
     "prisma-airs": {
-      "type": "sse",
-      "url": "https://service.api.aisecurity.paloaltonetworks.com/mcp/sse",
+      "type": "http",
+      "url": "https://service.api.aisecurity.paloaltonetworks.com/mcp",
       "headers": {
         "x-pan-token": "${PAN_TOKEN}",
         "x-pan-profile": "${PAN_PROFILE}"
@@ -72,8 +72,8 @@ Create or edit `.claude/settings.json` in your project root:
 {
   "mcpServers": {
     "prisma-airs": {
-      "type": "sse",
-      "url": "https://service.api.aisecurity.paloaltonetworks.com/mcp/sse",
+      "type": "http",
+      "url": "https://service.api.aisecurity.paloaltonetworks.com/mcp",
       "headers": {
         "x-pan-token": "${PAN_TOKEN}",
         "x-pan-profile": "${PAN_PROFILE}"
@@ -91,12 +91,12 @@ Create or edit `.claude/settings.json` in your project root:
 
 Choose the endpoint closest to your location:
 
-| Region | SSE Endpoint |
+| Region | HTTP Endpoint |
 |--------|--------------|
-| **US** (default) | `https://service.api.aisecurity.paloaltonetworks.com/mcp/sse` |
-| **EU** | `https://service-de.api.aisecurity.paloaltonetworks.com/mcp/sse` |
-| **India** | `https://service-in.api.aisecurity.paloaltonetworks.com/mcp/sse` |
-| **Singapore** | `https://service-sg.api.aisecurity.paloaltonetworks.com/mcp/sse` |
+| **US** (default) | `https://service.api.aisecurity.paloaltonetworks.com/mcp` |
+| **EU** | `https://service-de.api.aisecurity.paloaltonetworks.com/mcp` |
+| **India** | `https://service-in.api.aisecurity.paloaltonetworks.com/mcp` |
+| **Singapore** | `https://service-sg.api.aisecurity.paloaltonetworks.com/mcp` |
 
 ---
 
