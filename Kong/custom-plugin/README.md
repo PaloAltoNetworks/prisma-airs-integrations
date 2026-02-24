@@ -180,11 +180,57 @@ The plugin fails closed (blocks requests) when:
 - AIRS API unreachable or returns error
 - AIRS verdict is not `allow`
 
+## Multi-Provider Support (Kong AI Gateway)
+
+When used with Kong's [AI Proxy plugin](https://developer.konghq.com/plugins/ai-proxy/), this plugin automatically supports all LLM providers:
+
+- OpenAI / Azure OpenAI
+- Anthropic Claude
+- Google Gemini / Vertex AI
+- AWS Bedrock
+- Mistral, Cohere, and more
+
+Kong AI Proxy normalizes all requests/responses to OpenAI format. The AIRS plugin (priority 760) runs after AI Proxy (priority 770) in the response phase, ensuring responses are already transformed.
+
+### Setup with AI Gateway
+
+1. **Configure AI Proxy** for your provider:
+```bash
+curl -X POST "https://us.api.konghq.com/v2/control-planes/${CONTROL_PLANE_ID}/core-entities/plugins" \
+  -H "Authorization: Bearer ${KONNECT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "ai-proxy",
+    "service": {"id": "YOUR_SERVICE_ID"},
+    "config": {
+      "route_type": "llm/v1/chat",
+      "model": {
+        "provider": "anthropic",
+        "name": "claude-3-5-sonnet-latest"
+      },
+      "auth": {
+        "header_name": "x-api-key",
+        "header_value": "YOUR_ANTHROPIC_KEY"
+      }
+    }
+  }'
+```
+
+2. **Add AIRS plugin** to the same service (see Installation above)
+
+3. **Send requests** in OpenAI format - Kong handles translation:
+```bash
+curl -X POST http://kong-gateway/llm/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Hello Claude"}]}'
+```
+
 ## Limitations
 
-- OpenAI chat completion format only (Anthropic/Gemini support coming soon)
+- Requires OpenAI chat completion format (use AI Proxy for other providers)
 - Scans last user message in conversation
 - Response scanning requires response buffering
+- No streaming support
 
 ## Troubleshooting
 
