@@ -26,6 +26,8 @@ local schema = {
             },
           },
           { ssl_verify = { type = "boolean", required = true, default = true }, },
+          { timeout_ms = { type = "number", required = false, default = 5000 }, },
+          { debug = { type = "boolean", required = false, default = false }, },
         },
       },
     },

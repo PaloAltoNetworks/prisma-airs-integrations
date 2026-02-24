@@ -5,7 +5,7 @@ local cjson = require("cjson")
 
 local SecurePrismaAIRSHandler = {
   PRIORITY = 1000,
-  VERSION = "0.1.1",
+  VERSION = "0.2.0",
 }
 
 -- A dedicated, protected function for logging errors safely.
@@ -15,17 +15,28 @@ local function log_error(reason, verdict)
   end)
 end
 
+-- Debug logging helper (only logs when debug mode is enabled)
+local function log_debug(config, message)
+  if config and config.debug then
+    pcall(function()
+      kong.log.debug("SecurePrismaAIRSHandler: " .. tostring(message))
+    end)
+  end
+end
+
 local function perform_scan(config, scan_type, request_body, response_body)
   -- 1. Extract the prompt and response from the chat completion format.
+  -- Scan the LAST user message (most recent prompt in conversation)
   local prompt_to_scan = ""
   if request_body and request_body.messages and type(request_body.messages) == "table" then
     for _, message in ipairs(request_body.messages) do
       if message.role == "user" then
         prompt_to_scan = message.content
-        break
+        -- Continue iterating to get the last user message
       end
     end
   end
+  log_debug(config, "Extracted prompt: " .. string.sub(prompt_to_scan, 1, 100) .. (string.len(prompt_to_scan) > 100 and "..." or ""))
 
   local response_to_scan = ""
   if response_body then
@@ -71,11 +82,13 @@ local function perform_scan(config, scan_type, request_body, response_body)
     return "blocked", "Internal plugin error: Could not encode payload."
   end
 
-  print("Prisma AIRS Payload: " .. request_payload_json)
+  log_debug(config, "AIRS request payload: " .. request_payload_json)
 
   -- 3. Make the HTTP request.
   local httpc = http.new()
-  httpc:set_timeout(5000)
+  local timeout = config.timeout_ms or 5000
+  httpc:set_timeout(timeout)
+  log_debug(config, "Sending scan request to AIRS API (timeout: " .. timeout .. "ms)")
 
   local res, err = httpc:request_uri(config.api_endpoint, {
       method = "POST",
@@ -127,7 +140,10 @@ local function perform_scan(config, scan_type, request_body, response_body)
     table.insert(reason_parts, "Scan ID: " .. tostring(res_body_json.scan_id))
   end
 
-  return action, table.concat(reason_parts, ". ") .. ".", res_body_json
+  local reason = table.concat(reason_parts, ". ") .. "."
+  log_debug(config, "AIRS response: " .. reason)
+
+  return action, reason, res_body_json
 end
 
 -- ACCESS PHASE
