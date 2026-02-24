@@ -22,7 +22,7 @@ try {
 
 // Build AIRS scan payload
 var sessionId = context.getVariable('request.header.X-Session-ID') || context.getVariable('messageid');
-var airsProfile = context.getVariable('request.header.X-Pan-Profile') || context.getVariable('private.airs.profile') || 'default';
+var airsProfile = context.getVariable('request.header.X-Pan-Profile') || context.getVariable('private.prisma.airs.profile') || 'default';
 var vertexModel = context.getVariable('private.vertex.model') || 'gemini-2.5-flash';
 
 var payload = {

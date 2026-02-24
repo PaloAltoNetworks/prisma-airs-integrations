@@ -14,17 +14,23 @@ ENV="${APIGEE_ENV:-eval}"
 PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-panw-gcp-team-testing}"
 
 # Prisma AIRS configuration
-AIRS_TOKEN="${PANW_PRISMA_AIRS_API_KEY}"
-AIRS_PROFILE="${AIRS_API_PROFILE_NAME:-default}"
+PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
+PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME}"
+PRISMA_AIRS_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}"
 
 # Validate required secrets/credentials
-if [[ -z "$AIRS_TOKEN" ]]; then
-  echo "❌ PANW_PRISMA_AIRS_API_KEY is not set"
+if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
+  echo "ERROR: PRISMA_AIRS_API_KEY is not set"
+  exit 1
+fi
+
+if [[ -z "$PRISMA_AIRS_PROFILE_NAME" ]]; then
+  echo "ERROR: PRISMA_AIRS_PROFILE_NAME is not set"
   exit 1
 fi
 
 if [[ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
-  echo "❌ GOOGLE_APPLICATION_CREDENTIALS not found: $GOOGLE_APPLICATION_CREDENTIALS"
+  echo "ERROR: GOOGLE_APPLICATION_CREDENTIALS not found: $GOOGLE_APPLICATION_CREDENTIALS"
   exit 1
 fi
 
@@ -39,12 +45,13 @@ echo "Organization: $ORG"
 echo "Environment: $ENV"
 echo "Project: $PROJECT_ID"
 echo "Vertex Model: $VERTEX_MODEL"
-echo "AIRS Profile: $AIRS_PROFILE"
+echo "AIRS Profile: $PRISMA_AIRS_PROFILE_NAME"
+echo "AIRS URL: $PRISMA_AIRS_URL"
 echo ""
 
 # Step 1: Create or update KVM
 echo "== Setting up KVM =="
-apigeecli kvms create -o "$ORG" -e "$ENV" --name private 2>/dev/null || echo "✓ KVM 'private' already exists"
+apigeecli kvms create -o "$ORG" -e "$ENV" --name private 2>/dev/null || echo "OK: KVM 'private' already exists"
 
 # Helper function to update KVM entry
 update_kvm_entry() {
@@ -59,12 +66,13 @@ update_kvm_entry() {
 }
 
 echo "Setting KVM entries..."
-update_kvm_entry "airs.token" "$AIRS_TOKEN"
-update_kvm_entry "airs.profile" "$AIRS_PROFILE"
+update_kvm_entry "prisma.airs.token" "$PRISMA_AIRS_API_KEY"
+update_kvm_entry "prisma.airs.profile" "$PRISMA_AIRS_PROFILE_NAME"
+update_kvm_entry "prisma.airs.url" "$PRISMA_AIRS_URL"
 update_kvm_entry "vertex.project" "$VERTEX_PROJECT"
 update_kvm_entry "vertex.model" "$VERTEX_MODEL"
 
-echo "✓ KVM configured"
+echo "OK: KVM configured"
 echo ""
 
 # Step 2: Verify Vertex AI permissions
@@ -82,9 +90,9 @@ if [[ -n "$RUNTIME_SA" ]]; then
     --format="value(bindings.role)")
   
   if [[ -n "$HAS_VERTEX_ROLE" ]]; then
-    echo "✓ Runtime SA has Vertex AI access"
+    echo "OK: Runtime SA has Vertex AI access"
   else
-    echo "⚠ Runtime SA needs roles/aiplatform.user on $PROJECT_ID"
+    echo "WARN: Runtime SA needs roles/aiplatform.user on $PROJECT_ID"
     
     if [[ "${SKIP_IAM_GRANT:-}" == "1" ]]; then
       echo "  SKIP_IAM_GRANT=1, skipping automatic grant."
@@ -100,11 +108,11 @@ if [[ -n "$RUNTIME_SA" ]]; then
         --member="serviceAccount:$RUNTIME_SA" \
         --role="roles/aiplatform.user" \
         --condition=None
-      echo "✓ Granted roles/aiplatform.user to runtime SA"
+      echo "OK: Granted roles/aiplatform.user to runtime SA"
     fi
   fi
 else
-  echo "⚠ Could not determine runtime SA - ensure it has Vertex AI access"
+  echo "WARN: Could not determine runtime SA - ensure it has Vertex AI access"
 fi
 echo ""
 
@@ -113,7 +121,7 @@ echo "== Packaging proxy =="
 cd "$(dirname "$0")"
 rm -f vertex-simple.zip
 zip -r vertex-simple.zip apiproxy -q
-echo "✓ Created vertex-simple.zip"
+echo "OK: Created vertex-simple.zip"
 echo ""
 
 echo "== Deploying to Apigee =="
@@ -128,14 +136,14 @@ IMPORT_RESPONSE=$(curl -s -X POST \
 
 # Check for error in response
 if echo "$IMPORT_RESPONSE" | grep -q '"error"'; then
-  echo "❌ Failed to import proxy"
+  echo "ERROR: Failed to import proxy"
   echo "$IMPORT_RESPONSE"
   exit 1
 fi
 
 REVISION=$(echo "$IMPORT_RESPONSE" | jq -r '.revision')
 
-echo "✓ Imported as revision $REVISION"
+echo "OK: Imported as revision $REVISION"
 
 # Deploy the proxy with service account
 # Use the deployment SA (from GOOGLE_APPLICATION_CREDENTIALS)
@@ -145,7 +153,7 @@ apigeecli apis deploy -o "$ORG" -e "$ENV" -n vertex-simple --rev "$REVISION" --s
 
 echo ""
 echo "=========================================="
-echo "✅ Deployment complete!"
+echo "OK: Deployment complete!"
 echo "=========================================="
 echo ""
 echo "Test with:"

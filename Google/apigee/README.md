@@ -66,7 +66,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed Mermaid diagrams showing:
 cp .env.sample .env
 # Edit .env with your values:
 # - APIGEE_ORG, APIGEE_ENV
-# - PANW_PRISMA_AIRS_API_KEY
+# - PRISMA_AIRS_API_KEY, PRISMA_AIRS_PROFILE_NAME, PRISMA_AIRS_URL
 # - GOOGLE_CLOUD_PROJECT
 ```
 
@@ -121,8 +121,11 @@ APIGEE_ORG="your-apigee-org"
 APIGEE_ENV="eval"  # or test, prod
 
 # Prisma AIRS Configuration
-PANW_PRISMA_AIRS_API_KEY="your-airs-api-key"
-AIRS_API_PROFILE_NAME="your-profile-name"
+PRISMA_AIRS_API_KEY="your-airs-api-key"
+PRISMA_AIRS_PROFILE_NAME="your-profile-name"
+# Regional endpoints (uncomment one):
+PRISMA_AIRS_URL="https://service.api.aisecurity.paloaltonetworks.com"        # US (default)
+# PRISMA_AIRS_URL="https://service.api.eu.aisecurity.paloaltonetworks.com"   # EU
 
 # GCP/Vertex AI Configuration
 GOOGLE_CLOUD_PROJECT="your-gcp-project"
@@ -135,8 +138,9 @@ GOOGLE_APPLICATION_CREDENTIALS="/path/to/sa.json"
 ### KVM Entries (Auto-Created by deploy.sh)
 
 The deployment script creates an encrypted KVM named `private` with:
-- `airs.token` - Your Prisma AIRS API key
-- `airs.profile` - AIRS profile name
+- `prisma.airs.token` - Your Prisma AIRS API key
+- `prisma.airs.profile` - AIRS profile name
+- `prisma.airs.url` - AIRS API endpoint
 - `vertex.project` - GCP project ID
 - `vertex.model` - Vertex AI model name
 
