@@ -200,6 +200,36 @@ Common issues and solutions...
 - **Validation**: Ensure configurations are syntactically correct
 - **Documentation**: Comment complex configuration options
 
+## 🔧 Standard Environment Variables
+
+All integrations should use these standardized environment variable names for Prisma AIRS configuration:
+
+| Variable | Description |
+|----------|-------------|
+| `PRISMA_AIRS_API_KEY` | API key for Prisma AIRS authentication |
+| `PRISMA_AIRS_PROFILE_NAME` | Security profile name configured in Strata Cloud Manager |
+| `PRISMA_AIRS_URL` | Regional API endpoint (see table below) |
+
+### Regional Endpoints
+
+| Region | URL |
+|--------|-----|
+| US (default) | `https://service.api.aisecurity.paloaltonetworks.com` |
+| EU | `https://service.api.eu.aisecurity.paloaltonetworks.com` |
+
+### Example `.env` File
+
+```bash
+# Required
+export PRISMA_AIRS_API_KEY="your-api-key-here"
+export PRISMA_AIRS_PROFILE_NAME="your-profile-name"
+
+# Optional - uncomment for non-US regions
+# export PRISMA_AIRS_URL="https://service.api.eu.aisecurity.paloaltonetworks.com"
+```
+
+---
+
 ## 🔒 Security Considerations
 
 - **Never commit real credentials** - Use placeholders like `YOUR_API_KEY_HERE`
