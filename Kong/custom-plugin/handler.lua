@@ -4,8 +4,8 @@ local http = require("resty.http")
 local cjson = require("cjson")
 
 local SecurePrismaAIRSHandler = {
-  PRIORITY = 1000,
-  VERSION = "0.2.0",
+  PRIORITY = 760,  -- Below ai-proxy (770) for AI Gateway response phase compatibility
+  VERSION = "0.3.0",
 }
 
 -- A dedicated, protected function for logging errors safely.

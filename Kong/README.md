@@ -4,10 +4,22 @@ Integrate Kong Gateway with Palo Alto Networks Prisma AI Runtime Security (AIRS)
 
 ## Available Integrations
 
-| Integration | Prompt Scan | Response Scan | Best For |
-|-------------|:-----------:|:-------------:|----------|
-| [Custom Plugin](custom-plugin/) | Yes | Yes | Full coverage, self-managed Kong |
-| [Request Callout](request-callout/) | Yes | No | Kong Konnect SaaS, no custom code |
+| Integration | Prompt Scan | Response Scan | Multi-Provider | Best For |
+|-------------|:-----------:|:-------------:|:--------------:|----------|
+| [Custom Plugin](custom-plugin/) | ✅ | ✅ | ✅ (via AI Gateway) | Full coverage, any provider |
+| [Request Callout](request-callout/) | ✅ | ❌ | ❌ | Kong Konnect SaaS, OpenAI only |
+
+### Multi-Provider Support
+
+The custom plugin supports all LLM providers when used with [Kong AI Gateway](https://developer.konghq.com/ai-gateway/):
+
+- OpenAI / Azure OpenAI
+- Anthropic Claude
+- Google Gemini / Vertex AI
+- AWS Bedrock
+- Mistral, Cohere, and more
+
+Kong's AI Proxy plugin normalizes requests/responses to OpenAI format. See [custom-plugin README](custom-plugin/README.md#multi-provider-support-kong-ai-gateway) for setup.
 
 ## Quick Start
 
