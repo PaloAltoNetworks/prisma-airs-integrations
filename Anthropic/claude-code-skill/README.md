@@ -41,9 +41,11 @@ Add the following to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 
 ```bash
 export PRISMA_AIRS_API_KEY="your-api-key-here"
-export PRISMA_AIRS_PROFILE="your-profile-name"
-# Optional: EU endpoint
-# export PRISMA_AIRS_ENDPOINT="https://eu.service.api.aisecurity.paloaltonetworks.com"
+export PRISMA_AIRS_PROFILE_NAME="your-profile-name"
+# Optional: Regional endpoints
+# export PRISMA_AIRS_URL="https://service-de.api.aisecurity.paloaltonetworks.com"  # EU
+# export PRISMA_AIRS_URL="https://service-in.api.aisecurity.paloaltonetworks.com"  # India
+# export PRISMA_AIRS_URL="https://service-sg.api.aisecurity.paloaltonetworks.com"  # Singapore
 ```
 
 Or copy the environment template:
@@ -66,34 +68,30 @@ source .env
 ### As a Slash Command
 
 ```
-/airs-scan
+/prisma-airs
 ```
 
-Claude will automatically invoke this skill when appropriate based on the context.
+Claude will also automatically invoke this skill when appropriate based on context (e.g., when generating security-sensitive code or handling user input).
 
-### Manual Invocation
+### Input Methods
+
+The scanner accepts content via three methods:
 
 ```bash
-# Scan a prompt
-python ~/.claude/skills/prisma-airs-skill/scripts/scan.py \
-  --type prompt \
-  --content "user input to scan"
+# Method 1: Heredoc (recommended - handles quotes and newlines)
+python scripts/scan.py --type prompt <<'EOF'
+Content with "quotes" and
+multiple lines works fine.
+EOF
 
-# Scan code from a file
-python ~/.claude/skills/prisma-airs-skill/scripts/scan.py \
-  --type code \
-  --file path/to/generated-code.py
+# Method 2: File (recommended for code)
+python scripts/scan.py --type code --file path/to/file.py
 
-# Scan AI response
-python ~/.claude/skills/prisma-airs-skill/scripts/scan.py \
-  --type response \
-  --content "AI generated response"
+# Method 3: Direct argument (simple content only)
+python scripts/scan.py --type prompt --content "simple text"
 
-# Scan conversation (prompt + response)
-python ~/.claude/skills/prisma-airs-skill/scripts/scan.py \
-  --type conversation \
-  --prompt "user prompt" \
-  --response "AI response"
+# Conversation (prompt + response together)
+python scripts/scan.py --type conversation --prompt "user" --response "ai"
 ```
 
 ## Scan Types
@@ -109,19 +107,16 @@ python ~/.claude/skills/prisma-airs-skill/scripts/scan.py \
 
 ```json
 {
-  "status": "safe|threat_detected|error",
+  "status": "safe|threat_detected|blocked",
   "action": "allow|block|alert",
-  "threats": [
-    {
-      "category": "prompt_injection",
-      "severity": "high",
-      "location": "prompt",
-      "description": "Potential prompt injection attack detected"
-    }
-  ],
-  "scan_id": "unique-identifier"
+  "category": "benign|malicious",
+  "scan_id": "unique-identifier",
+  "prompt_detected": ["injection", "dlp"],
+  "response_detected": ["toxic_content"]
 }
 ```
+
+Use `--verbose` to include the full AIRS API response.
 
 ## Exit Codes
 

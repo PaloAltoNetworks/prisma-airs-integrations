@@ -147,8 +147,10 @@ chmod +x *.sh
 
 2. **Configure Environment**
 ```bash
-export AIRS_API_KEY="your-prisma-airs-token"
-export PROFILE_NAME="your-security-profile"  
+export PRISMA_AIRS_API_KEY="your-prisma-airs-api-key"
+export PRISMA_AIRS_PROFILE_NAME="your-security-profile"
+# Optional: Regional endpoint (default is US)
+# export PRISMA_AIRS_URL="https://service-de.api.aisecurity.paloaltonetworks.com"  # EU
 ```
 
 3. **Configure Claude Code Hooks** (in `.claude/claude_config.yaml`):
@@ -183,9 +185,10 @@ Control detection sensitivity via Prisma AIRS profiles:
 - **`audit-only-profile`**: Log threats without blocking (monitoring mode)
 
 ### Customizing Detection
+
+Set your security profile via environment variable:
 ```bash
-# In each hook file, modify:
-PROFILE_NAME="your-custom-profile"
+export PRISMA_AIRS_PROFILE_NAME="your-custom-profile"
 ```
 
 ### Log Configuration
