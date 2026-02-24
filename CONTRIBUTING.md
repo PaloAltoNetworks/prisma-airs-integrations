@@ -109,6 +109,8 @@ Brief description of what this integration does.
 | Post-tool call | ❌ | Scans tool/function results |
 | MCP | ❌ | Scans Model Context Protocol interactions |
 
+**Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
+
 ---
 
 ## Prerequisites
