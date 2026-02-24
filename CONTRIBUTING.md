@@ -96,6 +96,21 @@ Brief description of what this integration does.
 
 ---
 
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Scans user prompts before sending to LLM |
+| Response | ✅ | Scans LLM responses before returning to user |
+| Streaming | ❌ | Real-time scanning of streamed responses |
+| Pre-tool call | ❌ | Scans before tool/function execution |
+| Post-tool call | ❌ | Scans tool/function results |
+| MCP | ❌ | Scans Model Context Protocol interactions |
+
+---
+
 ## Prerequisites
 
 * Requirement 1
