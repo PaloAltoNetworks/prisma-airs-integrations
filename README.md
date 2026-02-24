@@ -1,48 +1,30 @@
 # Prisma AIRS Integrations
 
-Welcome to the central documentation repository for all integrations with Palo Alto Networks Prisma AIRS (AI Runtime Security).
+Integration guides for Palo Alto Networks Prisma AIRS (AI Runtime Security) with third-party platforms.
 
 ## Overview
 
-Prisma AIRS is a comprehensive AI security platform designed to protect the entire AI application lifecycle. It secures AI and traditional applications, agents, models, and datasets against a wide range of threats.
+Prisma AIRS provides inline security for AI applications, scanning prompts, responses, and tool interactions in real-time. It detects threats like prompt injection, sensitive data exposure, malicious URLs, and toxic content before they impact your AI workflows.
 
-This repository contains step-by-step setup guides for integrating Prisma AIRS with various third-party MLOps, AI Gateway, and automation platforms. These integrations allow you to embed security directly into your AI workflows, enforcing policies and scanning for threats in real-time.
+This repository contains setup guides for embedding Prisma AIRS security into AI gateways, LLM proxies, coding assistants, and automation platforms.
 
-## Available Integrations
-
-Below is a list of documented integrations. Each guide provides detailed prerequisites and configuration steps.
-
-| Partner | Category | Documentation Link |
-| :--- | :--- | :--- |
-| **Anthropic (Claude Code Hooks)** | AI Coding Assistant | [./Anthropic/claude-code-hooks/](./Anthropic/claude-code-hooks/README.md) |
-| **Anthropic (Claude Code MCP)** | AI Coding Assistant | [./Anthropic/claude-code-mcp/](./Anthropic/claude-code-mcp/README.md) |
-| **Anthropic (Claude Code Skill)** | AI Coding Assistant | [./Anthropic/claude-code-skill/](./Anthropic/claude-code-skill/README.md) |
-| **Microsoft (Azure APIM)** | API Gateway | [./Microsoft/azure-apim/](./Microsoft/azure-apim/README.md) |
-| **Google (Apigee)** | API Gateway | [./Google/apigee/](./Google/apigee/README.md) |
-| **Kong (Custom Plugin)** | API Gateway | [./Kong/custom-plugin/README.md](./Kong/custom-plugin/README.md) |
-| **Kong (Request Callout)** | API Gateway | [./Kong/request-callout/README.md](./Kong/request-callout/README.md) |
-| **LiteLLM** | LLM Gateway | [./LiteLLM/README.md](./LiteLLM/README.md) |
-| **n8n** | Workflow Automation | [./n8n/README.md](./n8n/README.md) |
-| **Portkey** | AI Gateway & Observability | [./Portkey/README.md](./Portkey/README.md) |
-| **TrueFoundry** | AI Gateway | [./TrueFoundry/README.md](./TrueFoundry/README.md) |
-
-## Coverage Matrix
+## Integration Matrix
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
 
-| Integration | Prompt | Response | Streaming | Pre-tool | Post-tool | MCP |
-|-------------|:------:|:--------:|:---------:|:--------:|:---------:|:---:|
-| [Anthropic (Hooks)](./Anthropic/claude-code-hooks/) | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Anthropic (Skill)](./Anthropic/claude-code-skill/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Google (Apigee)](./Google/apigee/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Kong (Custom Plugin)](./Kong/custom-plugin/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Kong (Request Callout)](./Kong/request-callout/) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| [LiteLLM](./LiteLLM/) | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ |
-| [n8n](./n8n/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Portkey](./Portkey/) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [TrueFoundry](./TrueFoundry/) | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ |
+| Integration | Category | Prompt | Response | Streaming | Pre-tool | Post-tool | MCP |
+|-------------|----------|:------:|:--------:|:---------:|:--------:|:---------:|:---:|
+| [Anthropic (Hooks)](./Anthropic/claude-code-hooks/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Kong (Custom Plugin)](./Kong/custom-plugin/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Kong (Request Callout)](./Kong/request-callout/) | API Gateway | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ |
+| [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [Portkey](./Portkey/) | AI Gateway | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [TrueFoundry](./TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ |
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
 
@@ -50,12 +32,12 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 
 ## Key Concepts
 
-* **AI Runtime Security (AIRS):** A platform that provides inline, real-time security for AI applications, protecting against threats like prompt injection, malicious code, and sensitive data leakage.
-* **Strata Cloud Manager:** The central management interface for configuring Prisma AIRS, including creating security profiles and generating API keys.
-* **Security Profile:** A named configuration within Strata Cloud Manager that defines the specific threat detection rules and policies to be applied during a scan.
-* **Guardrail:** A security control or policy implemented within a partner platform (like an AI Gateway) that leverages the Prisma AIRS API to scan and validate requests and responses.
+* **AI Runtime Security (AIRS):** Inline security that scans AI traffic in real-time, detecting prompt injection, data leakage, malicious code, and policy violations.
+* **Strata Cloud Manager:** Management interface for configuring Prisma AIRS security profiles and generating API keys.
+* **Security Profile:** Configuration that defines detection rules and actions (block, allow, alert) for scanned content.
+* **Guardrail:** Security control in a partner platform that invokes Prisma AIRS to scan and validate AI requests/responses.
 
-## External Resources
+## Resources
 
 * [Prisma AIRS Developer Documentation](https://pan.dev/airs)
 * [Prisma AIRS Administrator Guide](https://docs.paloaltonetworks.com/ai-runtime-security/administration/prisma-airs-overview)
