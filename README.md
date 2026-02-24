@@ -6,11 +6,11 @@ Integration guides for Palo Alto Networks Prisma AIRS (AI Runtime Security) with
 
 Prisma AIRS provides inline security for AI applications, scanning prompts, responses, and tool interactions in real-time. It detects threats like prompt injection, sensitive data exposure, malicious URLs, and toxic content before they impact your AI workflows.
 
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
 This repository contains setup guides for embedding Prisma AIRS security into AI gateways, LLM proxies, coding assistants, and automation platforms.
 
-## Integration Matrix
-
-> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+## Integration Support Matrix
 
 | Integration | Category | Prompt | Response | Streaming | Pre-tool | Post-tool | MCP |
 |-------------|----------|:------:|:--------:|:---------:|:--------:|:---------:|:---:|
