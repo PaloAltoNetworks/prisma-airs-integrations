@@ -1,12 +1,12 @@
-# Google Integrations for Prisma AIRS
+# Google Cloud Integrations for Prisma AIRS
 
-Integrations between Google AI technologies and Palo Alto Networks Prisma AIRS.
+Integrations between Google Cloud services and Palo Alto Networks Prisma AI Runtime Security (AIRS).
 
 ## Available Integrations
 
 | Integration | Description | Documentation |
 |-------------|-------------|---------------|
-| **Apigee X + Prisma AIRS API Intercept + Vertex AI** | Production-ready proxy with dual-layer security scanning for Vertex AI Model Garden models | [apigee-prisma-airs/simple-vertex/](apigee-prisma-airs/simple-vertex/) |
+| **Apigee** | Production-ready API proxy with dual-layer security scanning for Vertex AI models | [apigee/](apigee/) |
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ Integrations between Google AI technologies and Palo Alto Networks Prisma AIRS.
 - Configured Security Profile in Strata Cloud Manager
 - Appropriate GCP IAM permissions
 
-## Support
+## Resources
 
 - [Prisma AIRS Documentation](https://pan.dev/airs/)
-- [Google Cloud AI Documentation](https://cloud.google.com/ai-platform)
+- [Apigee Documentation](https://cloud.google.com/apigee/docs)

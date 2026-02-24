@@ -1,5 +1,6 @@
-# Azure-AIGW-and-Prisma-AIRS
-A  policy fragment that can be integrated into an Azure AI Gateway (part of APIM) as part of a larger AI Gateway policy
+# Azure API Management Integration with Prisma AIRS
+
+A policy fragment that can be integrated into an Azure AI Gateway (part of APIM) as part of a larger AI Gateway policy.
 
 ## 🎯 What This Does
 The fragments handle handles scanning of prompts and responses on the following OpenAI API Calls

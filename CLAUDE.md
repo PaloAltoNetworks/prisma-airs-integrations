@@ -9,9 +9,9 @@ This is a **documentation-first repository** - primarily markdown guides, config
 ## Structure
 
 ```
-├── Anthropic/          # Claude Code integration
-├── Azure/              # Azure APIM AI Gateway
-├── Google/             # Apigee X integration
+├── Claude-Code/        # Claude Code integrations (hooks, MCP, skill)
+├── Microsoft/          # Microsoft integrations (Azure APIM)
+├── Google/             # Google Cloud integrations (Apigee)
 ├── Kong/               # Kong custom plugin & request callout
 ├── LiteLLM/            # LiteLLM proxy integration
 ├── n8n/                # Workflow automation
@@ -20,9 +20,36 @@ This is a **documentation-first repository** - primarily markdown guides, config
 ```
 
 Each integration follows the template in CONTRIBUTING.md:
-- `README.md` - Main setup guide
+- `README.md` - Main setup guide with Coverage table
 - `config/` or `examples/` - Sample configurations
 - `scripts/` - Setup/test scripts
+
+## Coverage Table Format
+
+Every integration README must include a Coverage section after the title/description. Use this format:
+
+```markdown
+## Coverage
+
+> For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Scans user prompts before sending to LLM |
+| Response | ✅ | Scans LLM responses before returning to user |
+| Streaming | ❌ | Real-time scanning of streamed responses |
+| Pre-tool call | ❌ | Scans before tool/function execution |
+| Post-tool call | ❌ | Scans tool/function results |
+| MCP | ❌ | Scans Model Context Protocol interactions |
+```
+
+**Column definitions:**
+- **Prompt**: Scans user input before sending to LLM
+- **Response**: Scans LLM output before returning to user
+- **Streaming**: Real-time scanning of streamed LLM responses
+- **Pre-tool**: Scans before tool/function calls are executed
+- **Post-tool**: Scans results returned from tool/function calls
+- **MCP**: Scans Model Context Protocol server/tool interactions
 
 ## Working in This Repo
 
@@ -59,5 +86,6 @@ test: add validation examples for [Platform]
 ## External Resources
 
 - [Prisma AIRS API Docs](https://pan.dev/airs)
+- [Prisma AIRS Use Cases & Detection Categories](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/)
 - [Prisma AIRS Admin Guide](https://docs.paloaltonetworks.com/ai-runtime-security/administration/prisma-airs-overview)
 - Repo: `PaloAltoNetworks/prisma-airs-integrations`
