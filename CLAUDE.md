@@ -10,8 +10,8 @@ This is a **documentation-first repository** - primarily markdown guides, config
 
 ```
 ├── Claude-Code/        # Claude Code integrations (hooks, MCP, skill)
-├── Azure/              # Azure APIM AI Gateway
-├── Google/             # Apigee X integration
+├── Microsoft/          # Microsoft integrations (Azure APIM)
+├── Google/             # Google Cloud integrations (Apigee)
 ├── Kong/               # Kong custom plugin & request callout
 ├── LiteLLM/            # LiteLLM proxy integration
 ├── n8n/                # Workflow automation

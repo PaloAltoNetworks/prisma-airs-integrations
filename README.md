@@ -17,8 +17,8 @@ Below is a list of documented integrations. Each guide provides detailed prerequ
 | **Claude Code (Hooks)** | AI Coding Assistant | [./Claude-Code/claude-code-hooks/](./Claude-Code/claude-code-hooks/README.md) |
 | **Claude Code (MCP)** | AI Coding Assistant | [./Claude-Code/claude-code-mcp/](./Claude-Code/claude-code-mcp/README.md) |
 | **Claude Code (Skill)** | AI Coding Assistant | [./Claude-Code/claude-code-skill/](./Claude-Code/claude-code-skill/README.md) |
-| **Azure (APIM AI Gateway)** | API Gateway | [./Azure/README.md](./Azure/README.md) |
-| **Google (Apigee X)** | API Gateway | [./Google/README.md](./Google/README.md) |
+| **Microsoft (Azure APIM)** | API Gateway | [./Microsoft/azure-apim/](./Microsoft/azure-apim/README.md) |
+| **Google (Apigee)** | API Gateway | [./Google/apigee/](./Google/apigee/README.md) |
 | **Kong (Custom Plugin)** | API Gateway | [./Kong/custom-plugin/README.md](./Kong/custom-plugin/README.md) |
 | **Kong (Request Callout)** | API Gateway | [./Kong/request-callout/README.md](./Kong/request-callout/README.md) |
 | **LiteLLM** | LLM Gateway | [./LiteLLM/README.md](./LiteLLM/README.md) |
