@@ -12,19 +12,19 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 
 ## Integration Support Matrix
 
-| Integration | Category | Prompt | Response | Streaming | Pre-tool | Post-tool | MCP |
-|-------------|----------|:------:|:--------:|:---------:|:--------:|:---------:|:---:|
-| [Anthropic (Hooks)](./Anthropic/claude-code-hooks/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Kong (Custom Plugin)](./Kong/custom-plugin/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Kong (Request Callout)](./Kong/request-callout/) | API Gateway | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ |
-| [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [Portkey](./Portkey/) | AI Gateway | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [TrueFoundry](./TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ |
+| Integration | Category | Prompt | Response | Streaming | Pre-tool | Post-tool | 
+|-------------|----------|:------:|:--------:|:---------:|:--------:|:---------:|
+| [Anthropic (Hooks)](./Anthropic/claude-code-hooks/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Kong (Custom Plugin)](./Kong/custom-plugin/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Kong (Request Callout)](./Kong/request-callout/) | API Gateway | ✅ | ❌ | ❌ | ❌ | ❌ |
+| [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
+| [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Portkey](./Portkey/) | AI Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [TrueFoundry](./TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
 
