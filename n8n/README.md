@@ -13,7 +13,6 @@ This document provides instructions for using the Prisma AIRS community node wit
 | Streaming | ❌ | Node processes complete responses after generation |
 | Pre-tool call | ❌ | Workflow-based - not automatic tool interception |
 | Post-tool call | ❌ | Tool result scanning not implemented |
-| MCP | ❌ | MCP tools in workflows are not scanned by this node |
 
 ---
 

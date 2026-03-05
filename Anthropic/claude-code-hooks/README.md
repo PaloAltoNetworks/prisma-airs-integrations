@@ -15,7 +15,6 @@ A comprehensive defense-in-depth security framework that protects Claude Code in
 | Streaming | ❌ | Not implemented - processes complete responses only |
 | Pre-tool call | ✅ | Scans MCP tool parameters and URLs via `PreToolUse` hook |
 | Post-tool call | ✅ | Scans tool responses from MCP and WebFetch via `PostToolUse` hook |
-| MCP | ✅ | Advanced MCP scanning with regex-based tool matching |
 
 ## 🛡️ Executive Summary
 

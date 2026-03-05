@@ -13,7 +13,6 @@ This document provides instructions for integrating Prisma AIRS with the TrueFou
 | Streaming | ⚠️ | Supported for `v1/messages` API signature only |
 | Pre-tool call | ❌ | Request and response scanning only |
 | Post-tool call | ❌ | Tool result scanning not documented |
-| MCP | ❌ | No MCP integration |
 
 ---
 

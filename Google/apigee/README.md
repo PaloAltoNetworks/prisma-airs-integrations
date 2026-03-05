@@ -15,7 +15,6 @@ A production-ready Apigee X proxy that integrates **Prisma AIRS security scannin
 | Streaming | ❌ | Synchronous ServiceCallout with 5-second timeout |
 | Pre-tool call | ❌ | Not applicable - designed for Vertex AI API calls |
 | Post-tool call | ❌ | Not applicable - only scans final LLM responses |
-| MCP | ❌ | Not applicable - no MCP support |
 
 ## 🎯 What This Does
 

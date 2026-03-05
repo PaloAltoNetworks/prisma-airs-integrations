@@ -13,7 +13,6 @@ This document describes how to integrate Prisma AIRS as a security guardrail wit
 | Streaming | ❌ | Guardrails process complete requests/responses only |
 | Pre-tool call | ❌ | Guardrails intercept at input/output level only |
 | Post-tool call | ❌ | Tool/function result scanning not supported |
-| MCP | ❌ | No MCP scanning |
 
 ---
 

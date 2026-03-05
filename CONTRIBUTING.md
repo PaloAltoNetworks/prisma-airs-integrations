@@ -107,7 +107,6 @@ Brief description of what this integration does.
 | Streaming | ❌ | Real-time scanning of streamed responses |
 | Pre-tool call | ❌ | Scans before tool/function execution |
 | Post-tool call | ❌ | Scans tool/function results |
-| MCP | ❌ | Scans Model Context Protocol interactions |
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
 
