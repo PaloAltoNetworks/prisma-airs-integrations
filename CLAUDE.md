@@ -40,7 +40,6 @@ Every integration README must include a Coverage section after the title/descrip
 | Streaming | ❌ | Real-time scanning of streamed responses |
 | Pre-tool call | ❌ | Scans before tool/function execution |
 | Post-tool call | ❌ | Scans tool/function results |
-| MCP | ❌ | Scans Model Context Protocol interactions |
 ```
 
 **Support icons:**
@@ -54,7 +53,6 @@ Every integration README must include a Coverage section after the title/descrip
 - **Streaming**: Real-time scanning of streamed LLM responses
 - **Pre-tool**: Scans before tool/function calls are executed
 - **Post-tool**: Scans results returned from tool/function calls
-- **MCP**: Scans Model Context Protocol server/tool interactions
 
 ## Working in This Repo
 

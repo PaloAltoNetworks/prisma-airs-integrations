@@ -13,7 +13,6 @@ A Claude Code skill that integrates Palo Alto Networks Prisma AI Runtime Securit
 | Streaming | ❌ | Synchronous blocking scan only |
 | Pre-tool call | ❌ | Not designed for pre-tool validation |
 | Post-tool call | ❌ | Not designed for post-tool validation |
-| MCP | ❌ | Not designed for MCP interactions |
 
 ## Features
 

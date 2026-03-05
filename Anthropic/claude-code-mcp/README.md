@@ -13,7 +13,6 @@ Connect Claude Code to Prisma AIRS via the Model Context Protocol (MCP) for on-d
 | Streaming | ❌ | MCP tools are blocking synchronous calls |
 | Pre-tool call | ❌ | Not automatic - Claude must explicitly invoke scanning |
 | Post-tool call | ❌ | Not automatic - Claude must explicitly invoke scanning |
-| MCP | ❌ | Provides MCP tools but does not intercept MCP interactions |
 
 ## Overview
 

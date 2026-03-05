@@ -13,7 +13,6 @@ This document provides instructions for configuring Prisma AIRS as a security gu
 | Streaming | ⚠️ | Supported for `v1/messages` API signature only |
 | Pre-tool call | ❌ | Guardrails wrap LLM invocation, not tool calls |
 | Post-tool call | ❌ | Tool/function call scanning not implemented |
-| MCP | ❌ | No MCP integration |
 
 ---
 
