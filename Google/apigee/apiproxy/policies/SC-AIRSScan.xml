@@ -4,6 +4,6 @@
   <Response>airs.response</Response>
   <Timeout>5000</Timeout>
   <HTTPTargetConnection>
-    <URL>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</URL>
+    <URL>{private.prisma.airs.url}/v1/scan/sync/request</URL>
   </HTTPTargetConnection>
 </ServiceCallout>

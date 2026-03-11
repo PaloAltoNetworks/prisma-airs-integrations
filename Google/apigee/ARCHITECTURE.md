@@ -36,8 +36,8 @@ This deployment uses Apigee's **modern, recommended pattern** where:
 │  │ PREFLOW (Request Pipeline)                              │    │
 │  │                                                         │    │
 │  │ 1. [KVM-GetConfig]                                       │  │
-│  │    ├─ private.airs.token                                 │  │
-│  │    ├─ private.airs.profile                               │  │
+│  │    ├─ private.prisma.airs.token                                 │  │
+│  │    ├─ private.prisma.airs.profile                               │  │
 │  │    ├─ private.vertex.project                             │  │
 │  │    └─ private.vertex.model                               │  │
 │  │                                                          │  │
@@ -45,7 +45,7 @@ This deployment uses Apigee's **modern, recommended pattern** where:
 │  │    Extract prompt & build AIRS payload              │    │  │
 │  │                                                     │    │  │
 │  │ 3. [AM-AIRSRequest]                                 │    │  │
-│  │    Set X-Pan-Token: {private.airs.token}            │    │  │
+│  │    Set X-Pan-Token: {private.prisma.airs.token}            │    │  │
 │  │                                                     │    │  │
 │  │ 4. [SC-AIRSScan] ────────────────────────┐          │    │  │
 │  │    POST /v1/scan/sync/request            │          │    │  │
@@ -88,7 +88,7 @@ This deployment uses Apigee's **modern, recommended pattern** where:
 │  │    Extract response & build AIRS payload             │  │  │
 │  │                                                      │  │  │
 │  │ 9. [AM-AIRSResponseRequest]                          │  │  │
-│  │    Set X-Pan-Token: {private.airs.token              │  │  │
+│  │    Set X-Pan-Token: {private.prisma.airs.token              │  │  │
 │  │                                                      │  │  │
 │  │ 10. [SC-AIRSResponseScan] ──────────────┐            │  │  │
 │  │     POST /v1/scan/sync/request          │            │  │  │
@@ -172,8 +172,8 @@ LEGEND:
 │  │  Encrypted KVM   │                           │ Google Auth  │ │
 │  │  (private)       │                           │ (OAuth 2.0)  │ │
 │  │                  │                           │              │ │
-│  │ • airs.token     │                           │ Auto-gen     │ │
-│  │ • airs.profile   │                           │ token for    │ │
+│  │ • prisma.airs.token     │                           │ Auto-gen     │ │
+│  │ • prisma.airs.profile   │                           │ token for    │ │
 │  │ • vertex.project │                           │ Vertex AI    │ │
 │  │ • vertex.model   │                           │              │ │
 │  └──────────────────┘                           └──────────────┘ │
@@ -454,7 +454,7 @@ KEY POINTS:
    - Token auto-generated per request
 
 2. **Apigee → Prisma AIRS**: X-Pan-Token header
-   - Stored in encrypted KVM: `airs.token`
+   - Stored in encrypted KVM: `prisma.airs.token`
    - Retrieved once per request in PreFlow
    - Used for both prompt and response scans
 

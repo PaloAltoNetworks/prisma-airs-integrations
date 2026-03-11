@@ -3,7 +3,7 @@
   <Set>
     <Headers>
       <Header name="Content-Type">application/json</Header>
-      <Header name="X-Pan-Token">{private.airs.token}</Header>
+      <Header name="X-Pan-Token">{private.prisma.airs.token}</Header>
     </Headers>
     <Payload contentType="application/json">{airs.request.payload}</Payload>
     <Verb>POST</Verb>

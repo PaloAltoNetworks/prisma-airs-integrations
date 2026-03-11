@@ -1,14 +1,19 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <KeyValueMapOperations name="KVM-GetConfig" mapIdentifier="private">
   <Scope>environment</Scope>
-  <Get assignTo="private.airs.token">
+  <Get assignTo="private.prisma.airs.token">
     <Key>
-      <Parameter>airs.token</Parameter>
+      <Parameter>prisma.airs.token</Parameter>
     </Key>
   </Get>
-  <Get assignTo="private.airs.profile">
+  <Get assignTo="private.prisma.airs.profile">
     <Key>
-      <Parameter>airs.profile</Parameter>
+      <Parameter>prisma.airs.profile</Parameter>
+    </Key>
+  </Get>
+  <Get assignTo="private.prisma.airs.url">
+    <Key>
+      <Parameter>prisma.airs.url</Parameter>
     </Key>
   </Get>
   <Get assignTo="private.vertex.project">
