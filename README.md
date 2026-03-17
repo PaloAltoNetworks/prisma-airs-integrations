@@ -25,8 +25,11 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 | [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Portkey](./Portkey/) | AI Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [TrueFoundry](./TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
+| [GitHub (Actions)](./GitHub/github-actions/) | CI/CD Pipeline | N/A | N/A | N/A | N/A | N/A |
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
+
+**N/A** — [GitHub Actions](./GitHub/github-actions/) uses Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See the [integration README](./GitHub/github-actions/) for model scanning coverage.
 
 ---
 
