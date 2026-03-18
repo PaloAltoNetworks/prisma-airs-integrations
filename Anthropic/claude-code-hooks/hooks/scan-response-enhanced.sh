@@ -1,11 +1,18 @@
 #!/bin/bash
 
-# Configuration with environment variable support
 LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/security.log}"
-AIRS_BASE_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}"
-AIRS_API_URL="${AIRS_BASE_URL%/}/v1/scan/sync/request"
-AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
-PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME}"
+
+# Prisma AIRS API Configuration
+PRISMA_AIRS_API_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}/v1/scan/sync/request"
+PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
+PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME:-}"
+
+# Set app name with optional custom suffix
+if [[ -n "$CLAUDE_CODE_APP_SUFFIX" ]]; then
+    APP_NAME="Claude Code-${CLAUDE_CODE_APP_SUFFIX}"
+else
+    APP_NAME="Claude Code"
+fi
 
 # === FD HARDENING FOR CLEAN JSON OUTPUT ===
 # Save original stdout to FD 3 for JSON responses
@@ -24,6 +31,31 @@ INPUT_JSON=$(cat)
 # Parse the hook input
 TOOL_NAME=$(echo "$INPUT_JSON" | jq -r '.tool_name // "unknown"')
 TOOL_RESPONSE=$(echo "$INPUT_JSON" | jq -r '.tool_response // ""')
+
+# Detect MCP tools and extract server/tool from pattern: mcp__<server>__<tool>
+IS_MCP=false
+if [[ "$TOOL_NAME" == mcp__* ]]; then
+    IS_MCP=true
+    MCP_SERVER=$(echo "$TOOL_NAME" | awk -F'__' '{print $2}')
+    TOOL_INVOKED=$(echo "$TOOL_NAME" | awk -F'__' '{print $3}')
+    TOOL_INPUT_STR=$(echo "$INPUT_JSON" | jq -c '.tool_input // {}' 2>/dev/null)
+fi
+
+# Extract transcript_path for session ID (if available)
+TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
+
+# Generate session UUID
+if [[ -n "$TRANSCRIPT_PATH" ]]; then
+    # Extract session ID from transcript path (e.g., /path/to/.claude/sessions/abc-123/transcript.jsonl)
+    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
+    # If extraction failed, use path hash as fallback
+    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
+        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
+    fi
+else
+    # Fallback: use working directory hash for session correlation
+    SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
+fi
 
 # Log that we're processing this tool
 echo "[$(date)] 🔍 $TOOL_NAME: PostToolUse hook triggered"
@@ -71,10 +103,11 @@ if [[ -z "$RESPONSE_CONTENT" || ${#RESPONSE_CONTENT} -lt 5 ]]; then
 fi
 
 # Fail-closed guard for API key
-: "${AIRS_API_KEY:?PRISMA_AIRS_API_KEY not set}"
+: "${PRISMA_AIRS_API_KEY:?PRISMA_AIRS_API_KEY environment variable not set}"
 
-# Extract URLs from response content with better regex
-URLS=$(echo "$RESPONSE_CONTENT" | grep -oE 'https?://[^\s<>"'"'"'()]+' | sort -u)
+# Extract URLs from response content with improved regex
+# Pattern allows common URL characters while stopping at structural delimiters
+URLS=$(echo "$RESPONSE_CONTENT" | grep -oE 'https?://[a-zA-Z0-9./?#%&=_~:@!$+,;*-]+' | sort -u)
 
 # Scan URLs if found
 if [[ -n "$URLS" ]]; then
@@ -84,9 +117,9 @@ if [[ -n "$URLS" ]]; then
         
         URL_PAYLOAD=$(cat << EOF
 {
-  "tr_id": "response-url-$(date +%s)",
-  "ai_profile": {"profile_name": "$PROFILE_NAME"},
-  "metadata": {"app_user": "claude-code-user", "tool_name": "$TOOL_NAME", "source": "response-url"},
+  "tr_id": "$SESSION_ID",
+  "ai_profile": {"profile_name": "$PRISMA_AIRS_PROFILE_NAME"},
+  "metadata": {"app_user": "claude-code-user", "app_name": "$APP_NAME", "tool_name": "$TOOL_NAME", "source": "response-url"},
   "contents": [{"response": "$URL"}]
 }
 EOF
@@ -94,8 +127,8 @@ EOF
         
         # Curl with timeouts and retries
         CURL_OPTS=(--silent --show-error --location --max-time 10 --retry 1)
-        URL_RESULT=$(curl "${CURL_OPTS[@]}" "$AIRS_API_URL" \
-          -H "Content-Type: application/json" -H "x-pan-token: $AIRS_API_KEY" -d "$URL_PAYLOAD")
+        URL_RESULT=$(curl "${CURL_OPTS[@]}" "$PRISMA_AIRS_API_URL" \
+          -H "Content-Type: application/json" -H "x-pan-token: $PRISMA_AIRS_API_KEY" -d "$URL_PAYLOAD")
         URL_ACTION=$(echo "$URL_RESULT" | jq -r '.action // "unknown"')
         URL_CATEGORY=$(echo "$URL_RESULT" | jq -r '.category // "unknown"')
         URL_SCAN_ID=$(echo "$URL_RESULT" | jq -r '.scan_id // "unknown"')
@@ -147,20 +180,51 @@ fi
 # Scan response content if reasonable size (truncate and optimize)
 TRUNCATED_CONTENT="$(echo "$RESPONSE_CONTENT" | head -c 2000 | tr '\n' ' ')"
 if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
-    CONTENT_PAYLOAD=$(cat << EOF
+    if [[ "$IS_MCP" == true ]]; then
+        # Use tool_event for MCP tools (includes input + output)
+        CONTENT_PAYLOAD=$(jq -n \
+          --arg tr_id "$SESSION_ID" \
+          --arg profile "$PRISMA_AIRS_PROFILE_NAME" \
+          --arg app_user "claude-code-user" \
+          --arg app_name "$APP_NAME" \
+          --arg server_name "$MCP_SERVER" \
+          --arg tool_invoked "$TOOL_INVOKED" \
+          --arg input "$TOOL_INPUT_STR" \
+          --arg output "$TRUNCATED_CONTENT" \
+          '{
+            tr_id: $tr_id,
+            ai_profile: {profile_name: $profile},
+            metadata: {app_user: $app_user, app_name: $app_name},
+            contents: [{
+              response: $output,
+              tool_event: {
+                metadata: {
+                  ecosystem: "mcp",
+                  method: "tools/call",
+                  server_name: $server_name,
+                  tool_invoked: $tool_invoked
+                },
+                input: $input,
+                output: $output
+              }
+            }]
+          }')
+    else
+        CONTENT_PAYLOAD=$(cat << EOF
 {
-  "tr_id": "response-content-$(date +%s)",
-  "ai_profile": {"profile_name": "$PROFILE_NAME"},
-  "metadata": {"app_user": "claude-code-user", "tool_name": "$TOOL_NAME", "source": "response-content"},
+  "tr_id": "$SESSION_ID",
+  "ai_profile": {"profile_name": "$PRISMA_AIRS_PROFILE_NAME"},
+  "metadata": {"app_user": "claude-code-user", "app_name": "$APP_NAME", "tool_name": "$TOOL_NAME", "source": "response-content"},
   "contents": [{"response": $(echo "$TRUNCATED_CONTENT" | jq -R .)}]
 }
 EOF
 )
+    fi
     
     # Curl with timeouts and retries
     CURL_OPTS=(--silent --show-error --location --max-time 10 --retry 1)
-    CONTENT_RESULT=$(curl "${CURL_OPTS[@]}" "$AIRS_API_URL" \
-      -H "Content-Type: application/json" -H "x-pan-token: $AIRS_API_KEY" -d "$CONTENT_PAYLOAD")
+    CONTENT_RESULT=$(curl "${CURL_OPTS[@]}" "$PRISMA_AIRS_API_URL" \
+      -H "Content-Type: application/json" -H "x-pan-token: $PRISMA_AIRS_API_KEY" -d "$CONTENT_PAYLOAD")
     CONTENT_ACTION=$(echo "$CONTENT_RESULT" | jq -r '.action // "unknown"')
     CONTENT_CATEGORY=$(echo "$CONTENT_RESULT" | jq -r '.category // "unknown"')
     CONTENT_SCAN_ID=$(echo "$CONTENT_RESULT" | jq -r '.scan_id // "unknown"')

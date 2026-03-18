@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Prisma AIRS Task Completion Scanner for Cline
+# Hook: TaskComplete
+# Scans the completed task description for audit logging
+# Non-blocking - logs only
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/prisma-airs.sh"
+
+INPUT_JSON=$(cat)
+
+TASK=$(echo "$INPUT_JSON" | jq -r '.taskComplete.task // empty' 2>/dev/null)
+
+if [[ -z "$TASK" || ${#TASK} -lt 5 ]]; then
+    respond false
+    exit 0
+fi
+
+if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
+    respond false
+    exit 0
+fi
+
+SESSION_ID=$(get_session_id "$INPUT_JSON")
+
+log "TaskComplete: Scanning completed task (${#TASK} chars)"
+
+# Scan task content
+SCAN_RESULT=$(airs_scan "$TASK" "response" "task-complete" "TaskComplete" "$SESSION_ID")
+ACTION=$(echo "$SCAN_RESULT" | jq -r '.action // "unknown"')
+CATEGORY=$(echo "$SCAN_RESULT" | jq -r '.category // "unknown"')
+SCAN_ID=$(echo "$SCAN_RESULT" | jq -r '.scan_id // "unknown"')
+DETECTIONS=$(parse_detections "$SCAN_RESULT")
+
+if [[ "$ACTION" == "block" ]]; then
+    log "ALERT TaskComplete: $CATEGORY - detected: [$DETECTIONS] [scan:$SCAN_ID]"
+elif [[ -n "$DETECTIONS" ]]; then
+    log "TaskComplete: detected: [$DETECTIONS] [scan:$SCAN_ID]"
+fi
+
+respond false

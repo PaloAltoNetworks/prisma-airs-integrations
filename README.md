@@ -14,9 +14,12 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 
 | Integration | Category | Prompt | Response | Streaming | Pre-tool | Post-tool | 
 |-------------|----------|:------:|:--------:|:---------:|:--------:|:---------:|
-| [Anthropic (Hooks)](./Anthropic/claude-code-hooks/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Anthropic (Hooks)](./Anthropic/claude-code-hooks/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
 | [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Cline](./Cline/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
+| [Cursor](./Cursor/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Windsurf](./Windsurf/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ⚠️ |
 | [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Kong (Custom Plugin)](./Kong/custom-plugin/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
