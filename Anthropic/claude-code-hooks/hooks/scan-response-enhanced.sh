@@ -10,6 +10,22 @@ touch "$LOG_FILE"
 PRISMA_AIRS_API_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}/v1/scan/sync/request"
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
 PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME:-}"
+PRISMA_AIRS_PROFILE_ID="${PRISMA_AIRS_PROFILE_ID:-}"
+
+# Build ai_profile JSON: prefer profile_id over profile_name
+build_ai_profile() {
+    if [[ -n "$PRISMA_AIRS_PROFILE_ID" ]]; then
+        echo "{\"profile_id\": \"$PRISMA_AIRS_PROFILE_ID\"}"
+    elif [[ -n "$PRISMA_AIRS_PROFILE_NAME" ]]; then
+        echo "{\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"}"
+    else
+        echo ""
+    fi
+}
+
+has_profile() {
+    [[ -n "$PRISMA_AIRS_PROFILE_ID" || -n "$PRISMA_AIRS_PROFILE_NAME" ]]
+}
 
 # Set app name with optional custom suffix
 if [[ -n "$CLAUDE_CODE_APP_SUFFIX" ]]; then
@@ -106,9 +122,10 @@ TRUNCATED_CONTENT="$(echo "$RESPONSE_CONTENT" | head -c 20000 | tr '\n' ' ')"
 if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
     if [[ "$IS_MCP" == true ]]; then
         # Use tool_event for MCP tools (includes input + output)
+        AI_PROFILE_JSON=$(build_ai_profile)
         CONTENT_PAYLOAD=$(jq -n \
           --arg tr_id "$SESSION_ID" \
-          --arg profile "$PRISMA_AIRS_PROFILE_NAME" \
+          --argjson ai_profile "$AI_PROFILE_JSON" \
           --arg app_user "claude-code-user" \
           --arg app_name "$APP_NAME" \
           --arg server_name "$MCP_SERVER" \
@@ -117,7 +134,7 @@ if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
           --arg output "$TRUNCATED_CONTENT" \
           '{
             tr_id: $tr_id,
-            ai_profile: {profile_name: $profile},
+            ai_profile: $ai_profile,
             metadata: {app_user: $app_user, app_name: $app_name},
             contents: [{
               response: $output,
@@ -135,16 +152,17 @@ if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
           }')
     else
         # Use jq for safe JSON construction (no raw variable interpolation)
+        AI_PROFILE_JSON=$(build_ai_profile)
         CONTENT_PAYLOAD=$(jq -n \
           --arg tr_id "$SESSION_ID" \
-          --arg profile "$PRISMA_AIRS_PROFILE_NAME" \
+          --argjson ai_profile "$AI_PROFILE_JSON" \
           --arg app_user "claude-code-user" \
           --arg app_name "$APP_NAME" \
           --arg tool_name "$TOOL_NAME" \
           --arg response "$TRUNCATED_CONTENT" \
           '{
             tr_id: $tr_id,
-            ai_profile: {profile_name: $profile},
+            ai_profile: $ai_profile,
             metadata: {app_user: $app_user, app_name: $app_name, tool_name: $tool_name, source: "response-content"},
             contents: [{response: $response}]
           }')

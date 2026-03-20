@@ -95,6 +95,12 @@ if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
     exit 0
 fi
 
+if ! has_profile; then
+    log "SCAN-RESPONSE: WARNING: no profile configured, skipping scan"
+    allow
+    exit 0
+fi
+
 # === PARSE TOOL NAME ===
 parse_tool_name "$TOOL_NAME"
 # Sets MCP_SERVER and MCP_TOOL

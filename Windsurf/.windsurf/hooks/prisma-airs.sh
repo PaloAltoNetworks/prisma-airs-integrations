@@ -16,7 +16,23 @@ fi
 PRISMA_AIRS_API_URL="https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request"
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY:-}"
 PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME:-}"
+PRISMA_AIRS_PROFILE_ID="${PRISMA_AIRS_PROFILE_ID:-}"
 APP_NAME="Windsurf Cascade"
+
+# Build ai_profile JSON: prefer profile_id over profile_name
+build_ai_profile() {
+    if [[ -n "$PRISMA_AIRS_PROFILE_ID" ]]; then
+        echo "{\"profile_id\": \"$PRISMA_AIRS_PROFILE_ID\"}"
+    elif [[ -n "$PRISMA_AIRS_PROFILE_NAME" ]]; then
+        echo "{\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"}"
+    else
+        echo ""
+    fi
+}
+
+has_profile() {
+    [[ -n "$PRISMA_AIRS_PROFILE_ID" || -n "$PRISMA_AIRS_PROFILE_NAME" ]]
+}
 
 # Logging
 LOG_FILE="${HOOKS_DIR}/prisma-airs.log"
@@ -50,23 +66,21 @@ airs_scan() {
     local content_json
     content_json=$(printf '%s' "$content" | jq -Rs .)
 
-    local ai_profile="{}"
-    if [[ -n "$PRISMA_AIRS_PROFILE_NAME" ]]; then
-        ai_profile="{\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"}"
-    fi
+    local ai_profile_json
+    ai_profile_json=$(build_ai_profile)
 
     local payload
     if [[ "$content_type" == "response" ]]; then
         payload="{
   \"tr_id\": \"$session_id\",
-  \"ai_profile\": $ai_profile,
+  \"ai_profile\": $ai_profile_json,
   \"metadata\": {\"app_user\": \"windsurf-user\", \"app_name\": \"$APP_NAME\", \"source\": \"$source_label\", \"tool_name\": \"$tool_name\"},
   \"contents\": [{\"response\": $content_json}]
 }"
     else
         payload="{
   \"tr_id\": \"$session_id\",
-  \"ai_profile\": $ai_profile,
+  \"ai_profile\": $ai_profile_json,
   \"metadata\": {\"app_user\": \"windsurf-user\", \"app_name\": \"$APP_NAME\", \"source\": \"$source_label\", \"tool_name\": \"$tool_name\"},
   \"contents\": [{\"prompt\": $content_json}]
 }"
@@ -92,21 +106,23 @@ airs_scan_tool_event() {
     input_json=$(printf '%s' "$tool_input" | jq -Rs .)
     output_json=$(printf '%s' "$tool_output" | jq -Rs .)
 
+    local ai_profile_json
+    ai_profile_json=$(build_ai_profile)
+
     local payload
     payload=$(jq -n \
         --arg tr_id "$session_id" \
-        --arg profile "$PRISMA_AIRS_PROFILE_NAME" \
+        --argjson ai_profile "$ai_profile_json" \
         --arg app_name "$APP_NAME" \
         --arg server "$server_name" \
         --arg tool "$tool_invoked" \
         --argjson input "$input_json" \
         --argjson output "$output_json" \
-        '({
+        '{
   tr_id: $tr_id,
-  metadata: { app_user: "windsurf-user", app_name: $app_name }
-}
-+ (if $profile != "" then { ai_profile: { profile_name: $profile } } else {} end)
-+ { contents: [{
+  ai_profile: $ai_profile,
+  metadata: { app_user: "windsurf-user", app_name: $app_name },
+  contents: [{
     tool_event: {
       metadata: {
         ecosystem: "mcp",
@@ -118,7 +134,7 @@ airs_scan_tool_event() {
       output: $output
     }
   }]
-})')
+}')
 
     curl -s -L --max-time 10 --retry 1 "$PRISMA_AIRS_API_URL" \
         -H "Content-Type: application/json" \

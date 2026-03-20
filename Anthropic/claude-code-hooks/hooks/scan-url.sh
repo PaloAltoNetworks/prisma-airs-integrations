@@ -7,7 +7,23 @@
 LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/prisma-airs.log}"
 PRISMA_AIRS_API_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}/v1/scan/sync/request"
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
-PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME}"
+PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME:-}"
+PRISMA_AIRS_PROFILE_ID="${PRISMA_AIRS_PROFILE_ID:-}"
+
+# Build ai_profile JSON: prefer profile_id over profile_name
+build_ai_profile() {
+    if [[ -n "$PRISMA_AIRS_PROFILE_ID" ]]; then
+        echo "{\"profile_id\": \"$PRISMA_AIRS_PROFILE_ID\"}"
+    elif [[ -n "$PRISMA_AIRS_PROFILE_NAME" ]]; then
+        echo "{\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"}"
+    else
+        echo ""
+    fi
+}
+
+has_profile() {
+    [[ -n "$PRISMA_AIRS_PROFILE_ID" || -n "$PRISMA_AIRS_PROFILE_NAME" ]]
+}
 
 # Create log file if it doesn't exist
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -16,6 +32,11 @@ touch "$LOG_FILE"
 # Check if required environment variables are configured
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
     echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY environment variable not set" >> "$LOG_FILE"
+    exit 0  # Allow but log error
+fi
+
+if ! has_profile; then
+    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set" >> "$LOG_FILE"
     exit 0  # Allow but log error
 fi
 
@@ -38,13 +59,13 @@ fi
 
 echo "[$(date)] 🌐 $TOOL_NAME: $URL" >> "$LOG_FILE"
 
+AI_PROFILE=$(build_ai_profile)
+
 # Create JSON payload for URL scanning
 PAYLOAD=$(cat << EOF
 {
   "tr_id": "url-scan-$(date +%s)",
-  "ai_profile": {
-    "profile_name": "$PRISMA_AIRS_PROFILE_NAME"
-  },
+  "ai_profile": $AI_PROFILE,
   "metadata": {
     "app_user": "claude-code-user",
     "tool_name": "$TOOL_NAME",

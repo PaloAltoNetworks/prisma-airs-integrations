@@ -6,6 +6,22 @@ LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/prisma-airs.log}"
 PRISMA_AIRS_API_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}/v1/scan/sync/request"
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
 PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME:-}"
+PRISMA_AIRS_PROFILE_ID="${PRISMA_AIRS_PROFILE_ID:-}"
+
+# Build ai_profile JSON: prefer profile_id over profile_name
+build_ai_profile() {
+    if [[ -n "$PRISMA_AIRS_PROFILE_ID" ]]; then
+        echo "{\"profile_id\": \"$PRISMA_AIRS_PROFILE_ID\"}"
+    elif [[ -n "$PRISMA_AIRS_PROFILE_NAME" ]]; then
+        echo "{\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"}"
+    else
+        echo ""
+    fi
+}
+
+has_profile() {
+    [[ -n "$PRISMA_AIRS_PROFILE_ID" || -n "$PRISMA_AIRS_PROFILE_NAME" ]]
+}
 
 # Set app name with optional custom suffix
 if [[ -n "$CLAUDE_CODE_APP_SUFFIX" ]]; then
@@ -76,10 +92,12 @@ fi
 
 echo "[$(date)] MCP Request: Scanning '$MCP_REQUEST' for $TOOL_NAME (${#MCP_REQUEST} chars)" >> "$LOG_FILE"
 
+AI_PROFILE_JSON=$(build_ai_profile)
+
 # Create AIRS payload using tool_event for MCP tool scans
 MCP_PAYLOAD=$(jq -n \
   --arg tr_id "$SESSION_ID" \
-  --arg profile "$PRISMA_AIRS_PROFILE_NAME" \
+  --argjson ai_profile "$AI_PROFILE_JSON" \
   --arg app_user "claude-code-user" \
   --arg app_name "$APP_NAME" \
   --arg server_name "$MCP_SERVER" \
@@ -87,7 +105,7 @@ MCP_PAYLOAD=$(jq -n \
   --arg input "$TOOL_INPUT" \
   '{
     tr_id: $tr_id,
-    ai_profile: {profile_name: $profile},
+    ai_profile: $ai_profile,
     metadata: {app_user: $app_user, app_name: $app_name},
     contents: [{
       prompt: $input,

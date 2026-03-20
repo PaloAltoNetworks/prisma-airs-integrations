@@ -59,7 +59,11 @@ Edit `.env`:
 ```
 PRISMA_AIRS_API_KEY=your-api-key-here
 PRISMA_AIRS_PROFILE_NAME=your-security-profile-name
+# Or use profile UUID instead:
+# PRISMA_AIRS_PROFILE_ID=your-profile-uuid
 ```
+
+One of `PRISMA_AIRS_PROFILE_NAME` or `PRISMA_AIRS_PROFILE_ID` is required. If both are set, `profile_id` takes precedence.
 
 ### 2. Open in VS Code with Cline
 

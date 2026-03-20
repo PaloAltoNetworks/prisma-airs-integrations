@@ -38,8 +38,8 @@ TRUNCATED=$(printf '%s' "$RESPONSE_TEXT" | head -c 20000)
 log "AGENT-RESPONSE: Scanning assistant response (${#TRUNCATED} chars)"
 
 # Fail-open: warn and allow if credentials missing
-if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY not set — allowing response without scan"
+if [[ -z "$PRISMA_AIRS_API_KEY" ]] || ! has_profile; then
+    log "WARNING: PRISMA_AIRS_API_KEY or profile not set — allowing response without scan"
     exit 0
 fi
 

@@ -82,6 +82,12 @@ if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
     exit 0
 fi
 
+if ! has_profile; then
+    log "PRE-MCP: WARNING — no profile configured; skipping scan for tool=$TOOL_NAME (fail-open)"
+    print_allow
+    exit 0
+fi
+
 # --- Parse tool name into server + tool components ---
 
 parse_tool_name "$TOOL_NAME"

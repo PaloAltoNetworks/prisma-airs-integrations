@@ -39,8 +39,8 @@ TRUNCATED=$(printf '%s' "$PROMPT" | head -c 20000)
 log "PRE-PROMPT: Scanning user prompt (${#TRUNCATED} chars)"
 
 # Fail-open: warn and allow if credentials missing
-if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY not set — allowing prompt without scan"
+if [[ -z "$PRISMA_AIRS_API_KEY" ]] || ! has_profile; then
+    log "WARNING: PRISMA_AIRS_API_KEY or profile not set — allowing prompt without scan"
     print_allow
     exit 0
 fi

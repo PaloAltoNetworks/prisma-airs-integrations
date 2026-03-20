@@ -104,7 +104,10 @@ tail -f .claude/hooks/prisma-airs.log
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PRISMA_AIRS_API_KEY` | Yes | — | Prisma AIRS API token |
-| `PRISMA_AIRS_PROFILE_NAME` | No | — | Security profile name (omit if profile is linked to API key) |
+| `PRISMA_AIRS_PROFILE_NAME` | Yes* | — | Security profile name |
+| `PRISMA_AIRS_PROFILE_ID` | Yes* | — | Security profile UUID (takes precedence over name) |
+
+*One of `PRISMA_AIRS_PROFILE_NAME` or `PRISMA_AIRS_PROFILE_ID` is required.
 | `PRISMA_AIRS_URL` | No | US endpoint | API base URL (path appended automatically) |
 | `SECURITY_LOG_PATH` | No | `.claude/hooks/prisma-airs.log` | Log file location |
 

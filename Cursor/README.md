@@ -137,7 +137,10 @@ tail -f .cursor/hooks/prisma-airs.log
 |----------|----------|---------|-------------|
 | `PRISMA_AIRS_API_KEY` | Yes | — | API token for Prisma AIRS |
 | `PRISMA_AIRS_API_URL` | No | US endpoint | Sync scan endpoint URL |
-| `PRISMA_AIRS_PROFILE_NAME` | No | — | Security profile name (omit if profile is linked to API key) |
+| `PRISMA_AIRS_PROFILE_NAME` | Yes* | — | Security profile name |
+| `PRISMA_AIRS_PROFILE_ID` | Yes* | — | Security profile UUID (takes precedence over name) |
+
+*One of `PRISMA_AIRS_PROFILE_NAME` or `PRISMA_AIRS_PROFILE_ID` is required.
 
 ### Timeout
 
