@@ -141,9 +141,8 @@ tail -f .claude/hooks/prisma-airs.log
 
 - **No model response scanning.** There is no `Stop` or response-phase hook configured. If Claude generates sensitive content (e.g. DLP) without a tool call, it is not scanned.
 - **Content truncation.** `scan-response-enhanced.sh` truncates tool response content to 20,000 characters before scanning.
-- **Inconsistent fail behavior.** `scan-user-input.sh` and `scan-url.sh` fail open (exit 0) when `PRISMA_AIRS_API_KEY` is not set. `scan-response-enhanced.sh` fails closed (exits with error).
+- **Fail-open on errors.** All hooks fail open (exit 0) when `PRISMA_AIRS_API_KEY` is not set or on network/API errors — tool execution is not blocked.
 - **No timeout on prompt scan.** `scan-user-input.sh` does not set a curl timeout. `scan-response-enhanced.sh` uses 10 seconds.
-- **Fail-open on errors.** Network failures or AIRS API errors result in the action being allowed (except `scan-response-enhanced.sh` — see above).
 
 ---
 
