@@ -33,7 +33,9 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
 
-**N/A** — [GitHub Actions](./GitHub/github-actions/) and [Jenkins](./Jenkins/declarative-pipeline/) use Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See each integration's README for model scanning coverage.
+**N/A** — [GitHub Actions](./GitHub/github-actions/) uses Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See the [integration README](./GitHub/github-actions/) for model scanning coverage.
+
+**N/A** — [Jenkins](./Jenkins/declarative-pipeline/) uses Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See the [integration README](./Jenkins/declarative-pipeline/) for model scanning coverage.
 
 ---
 
