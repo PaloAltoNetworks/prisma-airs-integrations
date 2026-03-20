@@ -34,13 +34,13 @@ if [[ -z "$PROMPT" ]]; then
 fi
 
 # Truncate to 2000 chars
-TRUNCATED=$(printf '%s' "$PROMPT" | head -c 2000)
+TRUNCATED=$(printf '%s' "$PROMPT" | head -c 20000)
 
 log "PRE-PROMPT: Scanning user prompt (${#TRUNCATED} chars)"
 
 # Fail-open: warn and allow if credentials missing
-if [[ -z "$PRISMA_AIRS_API_KEY" ]] || [[ -z "$PROMPT_PROFILE" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY or PROMPT_PROFILE not set — allowing prompt without scan"
+if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
+    log "WARNING: PRISMA_AIRS_API_KEY not set — allowing prompt without scan"
     print_allow
     exit 0
 fi
@@ -50,7 +50,7 @@ TR_ID=$(printf '%s' "$INPUT_JSON" | jq -r '.conversation_id // empty' 2>/dev/nul
 TR_ID="${TR_ID:-cursor-prompt-$(date +%s)-$$}"
 
 # Call AIRS
-SCAN_RESULT=$(airs_scan "$TRUNCATED" "prompt" "$PROMPT_PROFILE" "$TR_ID")
+SCAN_RESULT=$(airs_scan "$TRUNCATED" "prompt" "$TR_ID")
 
 ACTION=$(printf '%s' "$SCAN_RESULT" | jq -r '.action // "unknown"' 2>/dev/null)
 CATEGORY=$(printf '%s' "$SCAN_RESULT" | jq -r '.category // "unknown"' 2>/dev/null)

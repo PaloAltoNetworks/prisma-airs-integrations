@@ -8,7 +8,7 @@
 #   stdout → JSON { permission: "allow" } or { permission: "deny", user_message, agent_message }
 #   exit 0 = allow, exit 2 = deny
 
-# Source shared AIRS helpers (sets PRISMA_AIRS_API_URL, PRISMA_AIRS_API_KEY, PROMPT_PROFILE,
+# Source shared AIRS helpers (sets PRISMA_AIRS_API_URL, PRISMA_AIRS_API_KEY, PRISMA_AIRS_PROFILE_NAME,
 # LOG_FILE, log(), parse_tool_name(), airs_scan_tool_event(), parse_detections())
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=prisma-airs.sh
@@ -82,12 +82,6 @@ if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
     exit 0
 fi
 
-if [[ -z "$PROMPT_PROFILE" ]]; then
-    log "PRE-MCP: WARNING — PRISMA_AIRS_PROMPT_PROFILE is not set; skipping scan for tool=$TOOL_NAME (fail-open)"
-    print_allow
-    exit 0
-fi
-
 # --- Parse tool name into server + tool components ---
 
 parse_tool_name "$TOOL_NAME"
@@ -102,7 +96,7 @@ TR_ID="${TR_ID:-cursor-mcp-$(date +%s)-$$}"
 
 log "PRE-MCP: Scanning tool=$TOOL_NAME server=$MCP_SERVER tr_id=$TR_ID"
 
-SCAN_RESULT=$(airs_scan_tool_event "$MCP_SERVER" "$MCP_TOOL" "$TOOL_INPUT_STR" "" "$TR_ID" "$PROMPT_PROFILE")
+SCAN_RESULT=$(airs_scan_tool_event "$MCP_SERVER" "$MCP_TOOL" "$TOOL_INPUT_STR" "" "$TR_ID")
 CURL_EXIT=$?
 
 if [[ $CURL_EXIT -ne 0 ]]; then

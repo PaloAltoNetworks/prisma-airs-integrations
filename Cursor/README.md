@@ -112,9 +112,6 @@ export PRISMA_AIRS_PROFILE_NAME="your-security-profile-name"
 # Optional: regional endpoint (default is US)
 # export PRISMA_AIRS_API_URL="https://service-de.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request"
 
-# Optional: split prompt and response into separate profiles
-# export PRISMA_AIRS_PROMPT_PROFILE="your-prompt-profile"
-# export PRISMA_AIRS_RESPONSE_PROFILE="your-response-profile"
 ```
 
 Add these to `~/.zshrc` or `~/.bashrc`. The scripts also load a `.env` file from the project root if present.
@@ -140,18 +137,7 @@ tail -f .cursor/hooks/prisma-airs.log
 |----------|----------|---------|-------------|
 | `PRISMA_AIRS_API_KEY` | Yes | — | API token for Prisma AIRS |
 | `PRISMA_AIRS_API_URL` | No | US endpoint | Sync scan endpoint URL |
-| `PRISMA_AIRS_PROFILE_NAME` | Yes* | — | Fallback security profile |
-| `PRISMA_AIRS_PROMPT_PROFILE` | No | `PRISMA_AIRS_PROFILE_NAME` | Profile for pre-hooks (prompts, tool inputs) |
-| `PRISMA_AIRS_RESPONSE_PROFILE` | No | `PRISMA_AIRS_PROFILE_NAME` | Profile for post-hooks (tool outputs, responses) |
-
-*Required if specific profiles are not set. If no profile resolves, hooks warn and fail-open.
-
-### Profile Split
-
-- **Prompt profile** — applied to user prompts and MCP tool inputs. Tune for injection and malicious-intent detection.
-- **Response profile** — applied to tool outputs and agent responses. Tune for DLP, malicious code, and URL categories.
-
-If only `PRISMA_AIRS_PROFILE_NAME` is set, both sides use it.
+| `PRISMA_AIRS_PROFILE_NAME` | No | — | Security profile name (omit if profile is linked to API key) |
 
 ### Timeout
 
@@ -169,7 +155,7 @@ All AIRS API calls are capped at **3 seconds** (`TIMEOUT_SECONDS` in `prisma-air
 | **allow** | `{"continue": true}` |
 | **block** | `{"continue": false, "user_message": "..."}` + exit 2 |
 | **AIRS content type** | `prompt` |
-| **Profile** | `PROMPT_PROFILE` |
+| **Profile** | `PRISMA_AIRS_PROFILE_NAME` |
 
 ### `beforeMCPExecution` → `pre_mcp_execution.sh`
 
@@ -179,7 +165,7 @@ All AIRS API calls are capped at **3 seconds** (`TIMEOUT_SECONDS` in `prisma-air
 | **allow** | `{"permission": "allow"}` |
 | **block** | `{"permission": "deny", "user_message": "...", "agent_message": "..."}` + exit 2 |
 | **AIRS content type** | `tool_event` (input populated, output empty) |
-| **Profile** | `PROMPT_PROFILE` |
+| **Profile** | `PRISMA_AIRS_PROFILE_NAME` |
 
 ### `postToolUse` → `scan_response.sh`
 
@@ -189,7 +175,7 @@ All AIRS API calls are capped at **3 seconds** (`TIMEOUT_SECONDS` in `prisma-air
 | **allow** | `{}` |
 | **block** | `{"updated_mcp_tool_output": "BLOCKED by Prisma AIRS: ..."}` |
 | **AIRS content type** | `tool_event` (input + output) for MCP tools; `response` for Shell; Cursor built-ins are skipped |
-| **Profile** | `RESPONSE_PROFILE` |
+| **Profile** | `PRISMA_AIRS_PROFILE_NAME` |
 
 Never emits `permission`, never emits `additional_context`, never exits 2.
 
@@ -201,7 +187,7 @@ Never emits `permission`, never emits `additional_context`, never exits 2.
 | **allow** | exit 0, no stdout |
 | **block** | exit 2, block text on stderr only |
 | **AIRS content type** | `response` |
-| **Profile** | `RESPONSE_PROFILE` |
+| **Profile** | `PRISMA_AIRS_PROFILE_NAME` |
 
 ---
 
@@ -272,7 +258,7 @@ This repo uses `postToolUse` as the single post-execution scanner. Legacy per-to
 
 ### Content Truncation
 
-Tool inputs and outputs are truncated to **2000 characters** before sending to AIRS. Additionally, tool outputs exceeding **50 KB** are skipped entirely (not truncated) to avoid excessive latency. Adjust `head -c 2000` and the 51200-byte guard in `scan_response.sh` if your threat model requires scanning larger payloads.
+Tool inputs and outputs are truncated to **20,000 characters** before sending to AIRS. Additionally, tool outputs exceeding **50 KB** are skipped entirely (not truncated) to avoid excessive latency.
 
 ### API Dependency
 

@@ -5,7 +5,7 @@
 # This provides first-line defense against malicious URLs
 
 # Configuration with environment variable support
-LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/security.log}"
+LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/prisma-airs.log}"
 PRISMA_AIRS_API_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}/v1/scan/sync/request"
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
 PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME}"

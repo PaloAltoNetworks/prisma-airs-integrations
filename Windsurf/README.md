@@ -2,17 +2,23 @@
 
 Windsurf Cascade hooks that scan prompts, commands, MCP tool calls, and responses via the [Prisma AIRS](https://docs.paloaltonetworks.com/ai-runtime-security) API.
 
+Part of the [Prisma AIRS IDE Integrations](https://github.com/PaloAltoNetworks/prisma-airs-integrations) project.
+
 ## What it does
 
-| Hook | Event | Action | AIRS Content Type | Note |
-|---|---|---|---|---|
-| `scan-user-input.sh` | `pre_user_prompt` | **Block** (exit 2) | `prompt` | |
-| `scan-run-command.sh` | `pre_run_command` | **Block** (exit 2) | `prompt` | ⚠️ See [Limitations](#limitations) |
-| `scan-mcp-request.sh` | `pre_mcp_tool_use` | **Block** (exit 2) | `tool_event` (input only) | |
-| `scan-mcp-response.sh` | `post_mcp_tool_use` | Alert only | `tool_event` (input + output) | |
-| `scan-cascade-response.sh` | `post_cascade_response` | Log only | `response` | No user-visible alert |
+| Hook | Event | Action | AIRS Content Type |
+|---|---|---|---|
+| `scan-user-input.sh` | `pre_user_prompt` | **Block** (exit 2) | `prompt` |
+| `scan-run-command.sh` | `pre_run_command` | **Block** (exit 2) | `prompt` |
+| `scan-mcp-request.sh` | `pre_mcp_tool_use` | **Block** (exit 2) | `prompt` |
+| `scan-mcp-response.sh` | `post_mcp_tool_use` | Alert only | `tool_event` |
+| `scan-cascade-response.sh` | `post_cascade_response` | Alert only | `response` |
 
 Pre-hooks can block by exiting with code 2. Post-hooks are audit/alert only.
+
+### MCP response scanning
+
+The `post_mcp_tool_use` hook sends MCP tool results to AIRS as a single `tool_event` scan with structured server/tool metadata and both input + output. Response content scanning (DLP, toxic content) is handled separately by the `post_cascade_response` hook.
 
 ## Setup
 
@@ -31,7 +37,7 @@ Edit `.env` with your values:
 
 ```
 PRISMA_AIRS_API_KEY=your-api-key
-PRISMA_AIRS_PROFILE_NAME=your-security-profile-name
+PRISMA_AIRS_PROFILE_NAME=your-profile-name
 ```
 
 The hooks are configured in `.windsurf/hooks.json` and activate automatically when opening the project in Windsurf.
@@ -57,10 +63,9 @@ All scan results are logged to `.windsurf/hooks/prisma-airs.log` with timestamps
 
 ## Limitations
 
-- **Post-hooks cannot block or modify content.** Windsurf does not support `exit 2`, output replacement, or any enforcement mechanism on `post_mcp_tool_use` or `post_cascade_response` hooks. Flagged content is logged but not prevented from reaching the user. `scan-mcp-response.sh` alerts the user via `show_output: true` in `hooks.json`; `scan-cascade-response.sh` logs only (no user-visible alert). This is a Windsurf platform constraint.
-- **No MCP response redaction.** Unlike Cursor (which supports `updated_mcp_tool_output`), Windsurf has no way to replace or redact MCP tool results after execution. Blocking MCP responses requires an external MCP proxy.
+- **Post-hooks cannot block or modify content.** Windsurf does not support `exit 2`, output replacement, or any enforcement mechanism on `post_mcp_tool_use` or `post_cascade_response` hooks. Flagged MCP responses and Cascade output are logged and alerted but not prevented from reaching the user. This is a [Windsurf platform constraint](https://docs.windsurf.com/windsurf/cascade/hooks).
+- **No MCP response redaction.** Windsurf has no way to replace or redact MCP tool results after execution. Blocking MCP responses requires an external MCP proxy.
 - **`show_output: true` is user-facing only.** Stdout from post-hooks is displayed in the Windsurf UI for the user to see. It is not injected into Cascade's model context and does not influence Cascade's behavior.
-- **Post-hook content is truncated to 2000 characters** before being sent to AIRS. `scan-mcp-response.sh` and `scan-cascade-response.sh` truncate output to stay within API limits and keep latency low. Pre-hooks (`scan-user-input.sh`, `scan-run-command.sh`, `scan-mcp-request.sh`) send full content without truncation.
-- **`pre_run_command` hook is not registered.** The `scan-run-command.sh` script is provided but is not wired up in `.windsurf/hooks.json`. To enable terminal command scanning, add a `pre_run_command` entry to `hooks.json` (see the `pre_user_prompt` entry as a template).
+- **Post-hook content is truncated to 20,000 characters** before being sent to AIRS. `scan-mcp-response.sh` and `scan-cascade-response.sh` truncate to keep latency low. Pre-hooks send full content without truncation.
 - **Fail-open on errors.** If the AIRS API is unreachable, returns an error, or the API key is not configured, all hooks allow the action to proceed (exit 0) and log the failure.
-- **`tool_event` vs `response` detection coverage may differ.** The AIRS `tool_event` content type may not trigger the same detection rules (e.g., DLP, toxic content) as the `response` content type, depending on your AIRS profile configuration.
+- **`tool_event` vs `response` detection coverage may differ.** The AIRS `tool_event` content type may not trigger the same detection rules (e.g., DLP, toxic content) as the `response` content type, depending on your AIRS profile configuration. The post-hook scans with both types to maximize coverage.

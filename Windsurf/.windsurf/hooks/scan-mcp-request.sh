@@ -2,7 +2,7 @@
 
 # Prisma AIRS MCP Tool Request Scanner for Windsurf Cascade
 # Hook: pre_mcp_tool_use
-# Scans MCP tool arguments before execution using AIRS tool_event content type
+# Scans MCP tool arguments before execution as prompt content
 # Blocks requests containing malicious content (exit 2)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -26,20 +26,46 @@ if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
 fi
 
 SESSION_ID=$(get_session_id "$INPUT_JSON")
+SCAN_CONTENT=""
 
-# Serialize tool input for scanning
-TOOL_INPUT=$(echo "$MCP_ARGS" | jq -r 'if type == "string" then . else tostring end' 2>/dev/null || echo "$MCP_ARGS")
+# Check for URL-bearing tools
+case "$MCP_TOOL" in
+    *web_search*|*WebSearch*|*search*)
+        SCAN_CONTENT=$(echo "$MCP_ARGS" | jq -r '.query // .search_query // .q // empty' 2>/dev/null)
+        ;;
+    *web_fetch*|*WebFetch*|*fetch*|*get_url*)
+        SCAN_CONTENT=$(echo "$MCP_ARGS" | jq -r '.url // .uri // empty' 2>/dev/null)
+        ;;
+esac
+
+# Fallback: try common content fields
+if [[ -z "$SCAN_CONTENT" || "$SCAN_CONTENT" == "null" ]]; then
+    SCAN_CONTENT=$(echo "$MCP_ARGS" | jq -r '.query // .prompt // .message // .content // empty' 2>/dev/null)
+fi
+
+# Fallback: try path/resource fields
+if [[ -z "$SCAN_CONTENT" || "$SCAN_CONTENT" == "null" ]]; then
+    PATH_PARAM=$(echo "$MCP_ARGS" | jq -r '.path // .file // .resource // .url // .uri // empty' 2>/dev/null)
+    if [[ -n "$PATH_PARAM" && "$PATH_PARAM" != "null" ]]; then
+        SCAN_CONTENT="Accessing resource: $PATH_PARAM"
+    fi
+fi
+
+# Fallback: serialize full arguments
+if [[ -z "$SCAN_CONTENT" || "$SCAN_CONTENT" == "null" ]]; then
+    SCAN_CONTENT=$(echo "$MCP_ARGS" | jq -r 'tostring' 2>/dev/null || echo "$MCP_ARGS")
+fi
 
 # Nothing meaningful to scan
-if [[ -z "$TOOL_INPUT" || "$TOOL_INPUT" == "null" || "$TOOL_INPUT" == "{}" ]]; then
+if [[ -z "$SCAN_CONTENT" || "$SCAN_CONTENT" == "null" || "$SCAN_CONTENT" == "{}" ]]; then
     log "MCP Request: No scannable content for $TOOL_LABEL - allowing"
     exit 0
 fi
 
-log "MCP Request: Scanning $TOOL_LABEL (${#TOOL_INPUT} chars)"
+log "MCP Request: Scanning $TOOL_LABEL (${#SCAN_CONTENT} chars)"
 
-# Scan using tool_event content type — input only, no output yet
-SCAN_RESULT=$(airs_scan_tool_event "$MCP_SERVER" "$MCP_TOOL" "$TOOL_INPUT" "" "$SESSION_ID")
+# Scan as prompt content (pre-scan — no output available yet)
+SCAN_RESULT=$(airs_scan "$SCAN_CONTENT" "prompt" "mcp-request" "$TOOL_LABEL" "$SESSION_ID")
 
 if [[ -z "$SCAN_RESULT" ]]; then
     log "ERROR: Empty response from AIRS for $TOOL_LABEL"
@@ -59,14 +85,12 @@ if [[ "$ACTION" == "block" ]]; then
     fi
     echo "Blocked by Prisma AIRS: MCP request to $TOOL_LABEL blocked due to $CATEGORY content (detected: $DETECTIONS)" >&2
     exit 2
-elif [[ "$ACTION" == "allow" ]]; then
-    if [[ -n "$DETECTIONS" ]]; then
-        log "ALLOWED MCP REQUEST: $TOOL_LABEL - detected: [$DETECTIONS] [scan:$SCAN_ID]"
-    else
-        log "ALLOWED MCP REQUEST: $TOOL_LABEL [scan:$SCAN_ID]"
-    fi
+fi
+
+if [[ -n "$DETECTIONS" ]]; then
+    log "ALLOWED MCP REQUEST: $TOOL_LABEL - detected: [$DETECTIONS] [scan:$SCAN_ID]"
 else
-    log "WARNING MCP REQUEST: $TOOL_LABEL - inconclusive ($ACTION/$CATEGORY) [scan:$SCAN_ID]"
+    log "ALLOWED MCP REQUEST: $TOOL_LABEL [scan:$SCAN_ID]"
 fi
 
 exit 0

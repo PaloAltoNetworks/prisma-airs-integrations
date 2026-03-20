@@ -95,12 +95,6 @@ if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
     exit 0
 fi
 
-if [[ -z "$RESPONSE_PROFILE" ]]; then
-    log "SCAN-RESPONSE: WARNING: RESPONSE_PROFILE not set, skipping scan"
-    allow
-    exit 0
-fi
-
 # === PARSE TOOL NAME ===
 parse_tool_name "$TOOL_NAME"
 # Sets MCP_SERVER and MCP_TOOL
@@ -115,8 +109,8 @@ if [[ -n "$URLS" ]]; then
 fi
 
 # === TRUNCATE CONTENT TO 2000 CHARS BEFORE SCANNING ===
-TRUNCATED_OUTPUT=$(printf '%s' "$TOOL_OUTPUT" | head -c 2000)
-TRUNCATED_INPUT=$(printf '%s' "$TOOL_INPUT" | head -c 2000)
+TRUNCATED_OUTPUT=$(printf '%s' "$TOOL_OUTPUT" | head -c 20000)
+TRUNCATED_INPUT=$(printf '%s' "$TOOL_INPUT" | head -c 20000)
 
 # === SESSION ID: use Cursor's conversation_id to group all scans in one session ===
 TR_ID=$(printf '%s' "$INPUT_JSON" | jq -r '.conversation_id // empty' 2>/dev/null)
@@ -132,14 +126,12 @@ if [[ "$TOOL_NAME" == MCP:* ]]; then
         "$MCP_TOOL" \
         "$TRUNCATED_INPUT" \
         "$TRUNCATED_OUTPUT" \
-        "$TR_ID" \
-        "$RESPONSE_PROFILE")
+        "$TR_ID")
 else
     log "SCAN-RESPONSE: Scanning tool=$TOOL_NAME as response"
     SCAN_RESULT=$(airs_scan \
         "$TRUNCATED_OUTPUT" \
         "response" \
-        "$RESPONSE_PROFILE" \
         "$TR_ID")
 fi
 

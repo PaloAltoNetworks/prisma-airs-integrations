@@ -33,13 +33,13 @@ if [[ -z "$RESPONSE_TEXT" ]]; then
 fi
 
 # Truncate to 2000 chars
-TRUNCATED=$(printf '%s' "$RESPONSE_TEXT" | head -c 2000)
+TRUNCATED=$(printf '%s' "$RESPONSE_TEXT" | head -c 20000)
 
 log "AGENT-RESPONSE: Scanning assistant response (${#TRUNCATED} chars)"
 
 # Fail-open: warn and allow if credentials missing
-if [[ -z "$PRISMA_AIRS_API_KEY" ]] || [[ -z "$RESPONSE_PROFILE" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY or RESPONSE_PROFILE not set — allowing response without scan"
+if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
+    log "WARNING: PRISMA_AIRS_API_KEY not set — allowing response without scan"
     exit 0
 fi
 
@@ -48,7 +48,7 @@ TR_ID=$(printf '%s' "$INPUT_JSON" | jq -r '.conversation_id // empty' 2>/dev/nul
 TR_ID="${TR_ID:-cursor-response-$(date +%s)-$$}"
 
 # Call AIRS
-SCAN_RESULT=$(airs_scan "$TRUNCATED" "response" "$RESPONSE_PROFILE" "$TR_ID")
+SCAN_RESULT=$(airs_scan "$TRUNCATED" "response" "$TR_ID")
 
 ACTION=$(printf '%s' "$SCAN_RESULT" | jq -r '.action // "unknown"' 2>/dev/null)
 CATEGORY=$(printf '%s' "$SCAN_RESULT" | jq -r '.category // "unknown"' 2>/dev/null)

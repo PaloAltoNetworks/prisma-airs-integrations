@@ -68,22 +68,75 @@ airs_scan() {
     local content_json
     content_json=$(echo "$content" | jq -Rs .)
 
+    local ai_profile="{}"
+    if [[ -n "$PRISMA_AIRS_PROFILE_NAME" ]]; then
+        ai_profile="{\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"}"
+    fi
+
     local payload
     if [[ "$content_type" == "response" ]]; then
         payload="{
   \"tr_id\": \"$session_id\",
-  \"ai_profile\": {\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"},
+  \"ai_profile\": $ai_profile,
   \"metadata\": {\"app_user\": \"cline-user\", \"app_name\": \"$APP_NAME\", \"source\": \"$source_label\", \"tool_name\": \"$tool_name\"},
   \"contents\": [{\"response\": $content_json}]
 }"
     else
         payload="{
   \"tr_id\": \"$session_id\",
-  \"ai_profile\": {\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"},
+  \"ai_profile\": $ai_profile,
   \"metadata\": {\"app_user\": \"cline-user\", \"app_name\": \"$APP_NAME\", \"source\": \"$source_label\", \"tool_name\": \"$tool_name\"},
   \"contents\": [{\"prompt\": $content_json}]
 }"
     fi
+
+    curl -s -L --max-time 10 --retry 1 "$PRISMA_AIRS_API_URL" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
+        -H "x-pan-token: $PRISMA_AIRS_API_KEY" \
+        -d "$payload"
+}
+
+# Call AIRS API with a tool_event payload (tool interactions)
+# Usage: airs_scan_tool_event "server" "tool" "input" "output" "session-id"
+airs_scan_tool_event() {
+    local server_name="${1:-unknown}"
+    local tool_invoked="${2:-unknown}"
+    local tool_input="$3"
+    local tool_output="$4"
+    local session_id="${5:-$(echo "$PWD" | md5 | cut -c1-32)}"
+
+    local input_json output_json
+    input_json=$(printf '%s' "$tool_input" | jq -Rs .)
+    output_json=$(printf '%s' "$tool_output" | jq -Rs .)
+
+    local payload
+    payload=$(jq -n \
+        --arg tr_id "$session_id" \
+        --arg profile "$PRISMA_AIRS_PROFILE_NAME" \
+        --arg app_name "$APP_NAME" \
+        --arg server "$server_name" \
+        --arg tool "$tool_invoked" \
+        --argjson input "$input_json" \
+        --argjson output "$output_json" \
+        '({
+  tr_id: $tr_id,
+  metadata: { app_user: "cline-user", app_name: $app_name }
+}
++ (if $profile != "" then { ai_profile: { profile_name: $profile } } else {} end)
++ { contents: [{
+    tool_event: {
+      metadata: {
+        ecosystem: "mcp",
+        method: "tools/call",
+        server_name: $server,
+        tool_invoked: $tool
+      },
+      input: $input,
+      output: $output
+    }
+  }]
+})')
 
     curl -s -L --max-time 10 --retry 1 "$PRISMA_AIRS_API_URL" \
         -H "Content-Type: application/json" \

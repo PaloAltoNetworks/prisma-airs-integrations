@@ -2,7 +2,7 @@
 
 # Prisma AIRS Post-Tool Response Scanner for Cline
 # Hook: PostToolUse
-# Scans tool responses for malicious content and URLs
+# Scans tool responses for malicious content
 # CAN BLOCK via cancel:true - prevents malicious content from influencing the model
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/lib/prisma-airs.sh"
 
 INPUT_JSON=$(cat)
 
-TOOL=$(echo "$INPUT_JSON" | jq -r '.postToolUse.tool // "unknown"' 2>/dev/null)
+TOOL=$(echo "$INPUT_JSON" | jq -r '.postToolUse.toolName // "unknown"' 2>/dev/null)
 RESULT=$(echo "$INPUT_JSON" | jq -r '.postToolUse.result // empty' 2>/dev/null)
 SUCCESS=$(echo "$INPUT_JSON" | jq -r '.postToolUse.success // true' 2>/dev/null)
 
@@ -31,64 +31,51 @@ fi
 
 SESSION_ID=$(get_session_id "$INPUT_JSON")
 
-# Resolve tool label for MCP tools
+# Resolve tool label and MCP details
 TOOL_LABEL="$TOOL"
+IS_MCP=false
+MCP_SERVER=""
+MCP_TOOL=""
+MCP_ARGS=""
 if [[ "$TOOL" == "use_mcp_tool" ]]; then
+    IS_MCP=true
     PARAMS=$(echo "$INPUT_JSON" | jq -r '.postToolUse.parameters // {}' 2>/dev/null)
     MCP_SERVER=$(echo "$PARAMS" | jq -r '.server_name // "unknown"' 2>/dev/null)
     MCP_TOOL=$(echo "$PARAMS" | jq -r '.tool_name // "unknown"' 2>/dev/null)
+    MCP_ARGS=$(echo "$PARAMS" | jq -c '.arguments // {}' 2>/dev/null)
     TOOL_LABEL="${MCP_SERVER}__${MCP_TOOL}"
 fi
 
-SHOULD_BLOCK=false
-BLOCK_REASON=""
-
-# Phase 1: Extract and scan URLs from the response
-URLS=$(echo "$RESULT" | grep -oE 'https?://[a-zA-Z0-9./?#%&=_~:@!$+,;*-]+' | sort -u)
-
-if [[ -n "$URLS" ]]; then
-    log "PostToolUse: Found URLs in $TOOL_LABEL response"
-    while IFS= read -r URL; do
-        [[ -z "$URL" ]] && continue
-
-        URL_RESULT=$(airs_scan "$URL" "response" "response-url" "$TOOL_LABEL" "$SESSION_ID")
-        URL_ACTION=$(echo "$URL_RESULT" | jq -r '.action // "unknown"')
-        URL_CATEGORY=$(echo "$URL_RESULT" | jq -r '.category // "unknown"')
-        URL_SCAN_ID=$(echo "$URL_RESULT" | jq -r '.scan_id // "unknown"')
-        URL_DETECTIONS=$(parse_detections "$URL_RESULT")
-
-        if [[ "$URL_ACTION" == "block" ]]; then
-            log "MALICIOUS URL in $TOOL_LABEL response: $URL ($URL_CATEGORY) - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]"
-            echo "WARNING: Malicious URL detected in $TOOL_LABEL response: $URL" >&2
-            SHOULD_BLOCK=true
-            BLOCK_REASON="Malicious URL detected: $URL ($URL_CATEGORY)"
-        fi
-    done <<< "$URLS"
-fi
-
-# Phase 2: Scan response content (truncated)
-TRUNCATED_CONTENT="$(echo "$RESULT" | head -c 2000 | tr '\n' ' ')"
-if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
-    CONTENT_RESULT=$(airs_scan "$TRUNCATED_CONTENT" "response" "response-content" "$TOOL_LABEL" "$SESSION_ID")
-    CONTENT_ACTION=$(echo "$CONTENT_RESULT" | jq -r '.action // "unknown"')
-    CONTENT_CATEGORY=$(echo "$CONTENT_RESULT" | jq -r '.category // "unknown"')
-    CONTENT_SCAN_ID=$(echo "$CONTENT_RESULT" | jq -r '.scan_id // "unknown"')
-    RESP_DETECTIONS=$(parse_detections "$CONTENT_RESULT")
-
-    if [[ "$CONTENT_ACTION" == "block" ]]; then
-        log "MALICIOUS CONTENT in $TOOL_LABEL response: $CONTENT_CATEGORY - detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]"
-        echo "WARNING: Malicious content in $TOOL_LABEL response ($CONTENT_CATEGORY)" >&2
-        SHOULD_BLOCK=true
-        BLOCK_REASON="Malicious content detected in $TOOL_LABEL response: $CONTENT_CATEGORY (detected: $RESP_DETECTIONS)"
-    elif [[ -n "$RESP_DETECTIONS" ]]; then
-        log "PostToolUse $TOOL_LABEL: detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]"
-    fi
-fi
-
-# Block if any scan flagged malicious content
-if [[ "$SHOULD_BLOCK" == "true" ]]; then
-    respond true "Blocked by Prisma AIRS: $BLOCK_REASON"
+# Scan response content (truncated)
+# MCP tools → tool_event (structured input + output with server/tool metadata)
+# Other tools → response (plain text output)
+TRUNCATED_CONTENT="$(echo "$RESULT" | head -c 20000 | tr '\n' ' ')"
+if [[ ${#TRUNCATED_CONTENT} -lt 10 ]]; then
+    log "PostToolUse: Content too short for $TOOL_LABEL (${#TRUNCATED_CONTENT} chars)"
+    respond false
     exit 0
+fi
+
+if [[ "$IS_MCP" == "true" ]]; then
+    TRUNCATED_INPUT="$(echo "$MCP_ARGS" | head -c 20000)"
+    log "PostToolUse: Scanning $TOOL_LABEL as tool_event"
+    SCAN_RESULT=$(airs_scan_tool_event "$MCP_SERVER" "$MCP_TOOL" "$TRUNCATED_INPUT" "$TRUNCATED_CONTENT" "$SESSION_ID")
+else
+    SCAN_RESULT=$(airs_scan "$TRUNCATED_CONTENT" "response" "response-content" "$TOOL_LABEL" "$SESSION_ID")
+fi
+
+ACTION=$(echo "$SCAN_RESULT" | jq -r '.action // "unknown"')
+CATEGORY=$(echo "$SCAN_RESULT" | jq -r '.category // "unknown"')
+SCAN_ID=$(echo "$SCAN_RESULT" | jq -r '.scan_id // "unknown"')
+DETECTIONS=$(parse_detections "$SCAN_RESULT")
+
+if [[ "$ACTION" == "block" ]]; then
+    log "MALICIOUS CONTENT in $TOOL_LABEL response: $CATEGORY - detected: [$DETECTIONS] [scan:$SCAN_ID]"
+    echo "WARNING: Malicious content in $TOOL_LABEL response ($CATEGORY)" >&2
+    respond true "Blocked by Prisma AIRS: $TOOL_LABEL response blocked - $CATEGORY (detected: $DETECTIONS)"
+    exit 0
+elif [[ -n "$DETECTIONS" ]]; then
+    log "PostToolUse $TOOL_LABEL: detected: [$DETECTIONS] [scan:$SCAN_ID]"
 fi
 
 respond false

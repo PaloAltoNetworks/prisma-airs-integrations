@@ -20,7 +20,6 @@ APP_NAME="Windsurf Cascade"
 
 # Logging
 LOG_FILE="${HOOKS_DIR}/prisma-airs.log"
-mkdir -p "$HOOKS_DIR"
 touch "$LOG_FILE"
 
 log() {
@@ -49,20 +48,25 @@ airs_scan() {
     local session_id="${5:-$(echo "$PWD" | md5 | cut -c1-32)}"
 
     local content_json
-    content_json=$(echo "$content" | jq -Rs .)
+    content_json=$(printf '%s' "$content" | jq -Rs .)
+
+    local ai_profile="{}"
+    if [[ -n "$PRISMA_AIRS_PROFILE_NAME" ]]; then
+        ai_profile="{\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"}"
+    fi
 
     local payload
     if [[ "$content_type" == "response" ]]; then
         payload="{
   \"tr_id\": \"$session_id\",
-  \"ai_profile\": {\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"},
+  \"ai_profile\": $ai_profile,
   \"metadata\": {\"app_user\": \"windsurf-user\", \"app_name\": \"$APP_NAME\", \"source\": \"$source_label\", \"tool_name\": \"$tool_name\"},
   \"contents\": [{\"response\": $content_json}]
 }"
     else
         payload="{
   \"tr_id\": \"$session_id\",
-  \"ai_profile\": {\"profile_name\": \"$PRISMA_AIRS_PROFILE_NAME\"},
+  \"ai_profile\": $ai_profile,
   \"metadata\": {\"app_user\": \"windsurf-user\", \"app_name\": \"$APP_NAME\", \"source\": \"$source_label\", \"tool_name\": \"$tool_name\"},
   \"contents\": [{\"prompt\": $content_json}]
 }"
@@ -76,7 +80,7 @@ airs_scan() {
 }
 
 # Call AIRS API with a tool_event payload (MCP tool interactions)
-# Usage: airs_scan_tool_event "server_name" "tool_name" "input" "output" "session-id"
+# Usage: airs_scan_tool_event "server" "tool" "input" "output" "session-id"
 airs_scan_tool_event() {
     local server_name="${1:-unknown}"
     local tool_invoked="${2:-unknown}"
@@ -85,8 +89,8 @@ airs_scan_tool_event() {
     local session_id="${5:-$(echo "$PWD" | md5 | cut -c1-32)}"
 
     local input_json output_json
-    input_json=$(echo "$tool_input" | jq -Rs .)
-    output_json=$(echo "$tool_output" | jq -Rs .)
+    input_json=$(printf '%s' "$tool_input" | jq -Rs .)
+    output_json=$(printf '%s' "$tool_output" | jq -Rs .)
 
     local payload
     payload=$(jq -n \
@@ -97,11 +101,12 @@ airs_scan_tool_event() {
         --arg tool "$tool_invoked" \
         --argjson input "$input_json" \
         --argjson output "$output_json" \
-        '{
+        '({
   tr_id: $tr_id,
-  ai_profile: { profile_name: $profile },
-  metadata: { app_user: "windsurf-user", app_name: $app_name },
-  contents: [{
+  metadata: { app_user: "windsurf-user", app_name: $app_name }
+}
++ (if $profile != "" then { ai_profile: { profile_name: $profile } } else {} end)
++ { contents: [{
     tool_event: {
       metadata: {
         ecosystem: "mcp",
@@ -113,18 +118,16 @@ airs_scan_tool_event() {
       output: $output
     }
   }]
-}')
+})')
 
     curl -s -L --max-time 10 --retry 1 "$PRISMA_AIRS_API_URL" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json" \
         -H "x-pan-token: $PRISMA_AIRS_API_KEY" \
-
         -d "$payload"
 }
 
 # Parse all triggered detection categories from an AIRS scan result
-# Returns comma-separated list
 parse_detections() {
     local scan_result="$1"
     echo "$scan_result" | jq -r '

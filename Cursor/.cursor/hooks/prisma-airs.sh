@@ -15,8 +15,7 @@ fi
 # Prisma AIRS API Configuration
 PRISMA_AIRS_API_URL="${PRISMA_AIRS_API_URL:-https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request}"
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY:-}"
-PROMPT_PROFILE="${PRISMA_AIRS_PROMPT_PROFILE:-${PRISMA_AIRS_PROFILE_NAME:-}}"
-RESPONSE_PROFILE="${PRISMA_AIRS_RESPONSE_PROFILE:-${PRISMA_AIRS_PROFILE_NAME:-}}"
+PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME:-}"
 TIMEOUT_SECONDS=3
 APP_NAME="cursor-hooks"
 
@@ -45,12 +44,11 @@ parse_tool_name() {
 }
 
 # Call AIRS API with a prompt or response payload
-# Usage: airs_scan "content" "prompt|response" "profile" "session-id"
+# Usage: airs_scan "content" "prompt|response" "session-id"
 airs_scan() {
     local content="$1"
     local content_type="${2:-prompt}"
-    local profile="$3"
-    local session_id="${4:-cursor-$(date +%s)-$$}"
+    local session_id="${3:-cursor-$(date +%s)-$$}"
 
     local content_json
     content_json=$(printf '%s' "$content" | jq -Rs .)
@@ -58,25 +56,19 @@ airs_scan() {
     local payload
     payload=$(jq -n \
         --arg tr_id "$session_id" \
-        --arg profile "$profile" \
+        --arg profile "$PRISMA_AIRS_PROFILE_NAME" \
         --arg app_name "$APP_NAME" \
         --argjson content "$content_json" \
         --arg content_type "$content_type" \
-        'if $content_type == "response" then
-  {
+        '({
     tr_id: $tr_id,
-    ai_profile: { profile_name: $profile },
-    metadata: { app_user: "cursor-user", app_name: $app_name },
-    contents: [{ response: $content }]
+    metadata: { app_user: "cursor-user", app_name: $app_name }
   }
-else
-  {
-    tr_id: $tr_id,
-    ai_profile: { profile_name: $profile },
-    metadata: { app_user: "cursor-user", app_name: $app_name },
-    contents: [{ prompt: $content }]
-  }
-end')
+  + (if $profile != "" then { ai_profile: { profile_name: $profile } } else {} end)
+  + (if $content_type == "response"
+     then { contents: [{ response: $content }] }
+     else { contents: [{ prompt: $content }] }
+     end))')
 
     timeout "${TIMEOUT_SECONDS}s" curl -s -L \
         --max-time "$TIMEOUT_SECONDS" \
@@ -89,14 +81,13 @@ end')
 }
 
 # Call AIRS API with a tool_event payload (tool interactions)
-# Usage: airs_scan_tool_event "server" "tool" "input" "output" "session-id" "profile"
+# Usage: airs_scan_tool_event "server" "tool" "input" "output" "session-id"
 airs_scan_tool_event() {
     local server_name="${1:-unknown}"
     local tool_invoked="${2:-unknown}"
     local tool_input="$3"
     local tool_output="$4"
     local session_id="${5:-cursor-$(date +%s)-$$}"
-    local profile="$6"
 
     local input_json output_json
     input_json=$(printf '%s' "$tool_input" | jq -Rs .)
@@ -105,17 +96,18 @@ airs_scan_tool_event() {
     local payload
     payload=$(jq -n \
         --arg tr_id "$session_id" \
-        --arg profile "$profile" \
+        --arg profile "$PRISMA_AIRS_PROFILE_NAME" \
         --arg app_name "$APP_NAME" \
         --arg server "$server_name" \
         --arg tool "$tool_invoked" \
         --argjson input "$input_json" \
         --argjson output "$output_json" \
-        '{
+        '({
   tr_id: $tr_id,
-  ai_profile: { profile_name: $profile },
-  metadata: { app_user: "cursor-user", app_name: $app_name },
-  contents: [{
+  metadata: { app_user: "cursor-user", app_name: $app_name }
+}
++ (if $profile != "" then { ai_profile: { profile_name: $profile } } else {} end)
++ { contents: [{
     tool_event: {
       metadata: {
         ecosystem: "mcp",
@@ -127,7 +119,7 @@ airs_scan_tool_event() {
       output: $output
     }
   }]
-}')
+})')
 
     timeout "${TIMEOUT_SECONDS}s" curl -s -L \
         --max-time "$TIMEOUT_SECONDS" \

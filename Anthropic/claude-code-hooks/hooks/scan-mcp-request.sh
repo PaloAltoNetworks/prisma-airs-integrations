@@ -1,6 +1,6 @@
 #!/bin/bash
 
-LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/security.log}"
+LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/prisma-airs.log}"
 
 # Prisma AIRS API Configuration
 PRISMA_AIRS_API_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}/v1/scan/sync/request"

@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/lib/prisma-airs.sh"
 
 INPUT_JSON=$(cat)
 
-TOOL=$(echo "$INPUT_JSON" | jq -r '.preToolUse.tool // "unknown"' 2>/dev/null)
+TOOL=$(echo "$INPUT_JSON" | jq -r '.preToolUse.toolName // "unknown"' 2>/dev/null)
 PARAMS=$(echo "$INPUT_JSON" | jq -r '.preToolUse.parameters // {}' 2>/dev/null)
 
 log "PreToolUse: Scanning $TOOL request"

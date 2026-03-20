@@ -27,7 +27,7 @@ SESSION_ID=$(get_session_id "$INPUT_JSON")
 log "Scanning Cascade response (${#RESPONSE} chars)"
 
 # Single scan as response content
-TRUNCATED="$(echo "$RESPONSE" | head -c 2000 | tr '\n' ' ')"
+TRUNCATED="$(echo "$RESPONSE" | head -c 20000 | tr '\n' ' ')"
 SCAN_RESULT=$(airs_scan "$TRUNCATED" "response" "cascade-response" "cascade" "$SESSION_ID")
 
 if [[ -z "$SCAN_RESULT" ]]; then

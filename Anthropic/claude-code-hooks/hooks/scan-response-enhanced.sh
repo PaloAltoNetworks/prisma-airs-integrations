@@ -1,6 +1,6 @@
 #!/bin/bash
 
-LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/security.log}"
+LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/prisma-airs.log}"
 
 # Prisma AIRS API Configuration
 PRISMA_AIRS_API_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}/v1/scan/sync/request"
@@ -82,7 +82,7 @@ RESPONSE_CONTENT="$(echo "$INPUT_JSON" \
 # Fallback: If extraction failed, try simpler approach
 if [[ -z "$RESPONSE_CONTENT" || ${#RESPONSE_CONTENT} -lt 5 ]]; then
     # Try extracting all strings from tool_response
-    RESPONSE_CONTENT="$(echo "$INPUT_JSON" | jq -r '.tool_response | .. | strings' 2>/dev/null | tr '\n' ' ' | head -c 2000)"
+    RESPONSE_CONTENT="$(echo "$INPUT_JSON" | jq -r '.tool_response | .. | strings' 2>/dev/null | tr '\n' ' ' | head -c 20000)"
 fi
 
 # Final fallback: Convert entire tool_response to string if it's not null
@@ -103,82 +103,13 @@ if [[ -z "$RESPONSE_CONTENT" || ${#RESPONSE_CONTENT} -lt 5 ]]; then
 fi
 
 # Fail-closed guard for API key
-: "${PRISMA_AIRS_API_KEY:?PRISMA_AIRS_API_KEY environment variable not set}"
-
-# Extract URLs from response content with improved regex
-# Pattern allows common URL characters while stopping at structural delimiters
-URLS=$(echo "$RESPONSE_CONTENT" | grep -oE 'https?://[a-zA-Z0-9./?#%&=_~:@!$+,;*-]+' | sort -u)
-
-# Scan URLs if found
-if [[ -n "$URLS" ]]; then
-    echo "[$(date)] 🔗 $TOOL_NAME: Found URLs in response"
-    while IFS= read -r URL; do
-        [[ -z "$URL" ]] && continue
-        
-        URL_PAYLOAD=$(cat << EOF
-{
-  "tr_id": "$SESSION_ID",
-  "ai_profile": {"profile_name": "$PRISMA_AIRS_PROFILE_NAME"},
-  "metadata": {"app_user": "claude-code-user", "app_name": "$APP_NAME", "tool_name": "$TOOL_NAME", "source": "response-url"},
-  "contents": [{"response": "$URL"}]
-}
-EOF
-)
-        
-        # Curl with timeouts and retries
-        CURL_OPTS=(--silent --show-error --location --max-time 10 --retry 1)
-        URL_RESULT=$(curl "${CURL_OPTS[@]}" "$PRISMA_AIRS_API_URL" \
-          -H "Content-Type: application/json" -H "x-pan-token: $PRISMA_AIRS_API_KEY" -d "$URL_PAYLOAD")
-        URL_ACTION=$(echo "$URL_RESULT" | jq -r '.action // "unknown"')
-        URL_CATEGORY=$(echo "$URL_RESULT" | jq -r '.category // "unknown"')
-        URL_SCAN_ID=$(echo "$URL_RESULT" | jq -r '.scan_id // "unknown"')
-        
-        # Dynamically extract all true detection fields from both prompt_detected and response_detected
-        URL_DETECTIONS=$(echo "$URL_RESULT" | jq -r '
-          [
-            (.prompt_detected // {} | to_entries[] | select(.value == true) | .key),
-            (.response_detected // {} | to_entries[] | select(.value == true) | .key)
-          ] | unique | join(",")
-        ')
-
-        if [[ "$URL_ACTION" == "block" ]]; then
-          if [[ -n "$URL_DETECTIONS" ]]; then
-            echo "[$(date)] 🚫 BLOCKED URL in $TOOL_NAME response: $URL ($URL_CATEGORY) - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]"
-            BLOCK_MSG="🚫 Blocked by Prisma AIRS: URL in $TOOL_NAME response ($URL_CATEGORY) - detected: $URL_DETECTIONS"
-          else
-            echo "[$(date)] 🚫 BLOCKED URL in $TOOL_NAME response: $URL ($URL_CATEGORY) [scan:$URL_SCAN_ID]"
-            BLOCK_MSG="🚫 Blocked by Prisma AIRS: URL in $TOOL_NAME response ($URL_CATEGORY)"
-          fi
-          # Show user message on stderr (visible in terminal Claude Code)
-          echo "" >&2
-          echo "$BLOCK_MSG" >&2
-          echo "" >&2
-          # Output blocking JSON to FD 3 (original stdout)
-          printf '%s' '{
-  "continue": false,
-  "stopReason": "Prisma AIRS blocked tool response",
-  "systemMessage": "Operation blocked by Prisma AIRS policy",
-  "hookSpecificOutput": { "hookEventName": "PostToolUse" }
-}' >&3
-          exit 0
-        elif [[ "$URL_ACTION" != "allow" ]]; then
-          if [[ -n "$URL_DETECTIONS" ]]; then
-            echo "[$(date)] ⚠️  URL WARNING in $TOOL_NAME response: $URL - $URL_ACTION/$URL_CATEGORY - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]"
-          else
-            echo "[$(date)] ⚠️  URL WARNING in $TOOL_NAME response: $URL - $URL_ACTION/$URL_CATEGORY [scan:$URL_SCAN_ID]"
-          fi
-        else
-          if [[ -n "$URL_DETECTIONS" ]]; then
-            echo "[$(date)] ✅ URL in $TOOL_NAME response: $URL - detected: [$URL_DETECTIONS] [scan:$URL_SCAN_ID]"
-          else
-            echo "[$(date)] ✅ URL in $TOOL_NAME response: $URL [scan:$URL_SCAN_ID]"
-          fi
-        fi
-    done <<< "$URLS"
+if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
+    echo "[$(date)] WARNING: PRISMA_AIRS_API_KEY not set, skipping scan" >> "$LOG_FILE"
+    exit 0
 fi
 
 # Scan response content if reasonable size (truncate and optimize)
-TRUNCATED_CONTENT="$(echo "$RESPONSE_CONTENT" | head -c 2000 | tr '\n' ' ')"
+TRUNCATED_CONTENT="$(echo "$RESPONSE_CONTENT" | head -c 20000 | tr '\n' ' ')"
 if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
     if [[ "$IS_MCP" == true ]]; then
         # Use tool_event for MCP tools (includes input + output)
