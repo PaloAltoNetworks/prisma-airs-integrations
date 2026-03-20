@@ -1,0 +1,158 @@
+name: Model Security Scan & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'config/model-config.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'config/model-config.yaml'
+  workflow_dispatch:
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # Customer-specific: Detect whether the model config file changed.
+  # Adapt the path filter to match your own config structure.
+  # ---------------------------------------------------------------------------
+  detect-changes:
+    name: Detect Model Changes
+    runs-on: ubuntu-latest
+    outputs:
+      model_changed: ${{ steps.filter.outputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            model:
+              - 'config/model-config.yaml'
+
+  # ---------------------------------------------------------------------------
+  # AIRS Model Security Integration — Prisma AIRS Model Security Scan
+  #
+  # This job is the integration point with Palo Alto Networks Prisma AIRS.
+  # It installs the official Model Security SDK from a private PyPI,
+  # then scans the model. The scan returns ALLOWED or BLOCKED.
+  #
+  # To add Prisma AIRS scanning to your own pipeline, replicate this job:
+  #   1. Authenticate with SCM to get the private PyPI URL (get_pypi_url.sh)
+  #   2. Install the model-security-client SDK
+  #   3. Run the scan script (scan_model.py)
+  #
+  # Required secrets:
+  #   MODEL_SECURITY_CLIENT_ID      — Prisma AIRS OAuth client ID
+  #   MODEL_SECURITY_CLIENT_SECRET  — Prisma AIRS OAuth client secret
+  #   MODEL_SECURITY_API_ENDPOINT   — Prisma AIRS API endpoint URL
+  #   MODEL_SECURITY_PROFILE_ID     — Security group UUID for scan rules
+  #   TSG_ID                        — Tenant Service Group ID
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Prisma AIRS Model Security Scan
+    needs: detect-changes
+    if: needs.detect-changes.outputs.model_changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # AIRS Model Security Integration: Authenticate with Prisma AIRS to get the private PyPI URL
+      # for installing the Model Security SDK.
+      - name: Get Model Security SDK PyPI URL
+        id: pypi
+        env:
+          MODEL_SECURITY_CLIENT_ID: ${{ secrets.MODEL_SECURITY_CLIENT_ID }}
+          MODEL_SECURITY_CLIENT_SECRET: ${{ secrets.MODEL_SECURITY_CLIENT_SECRET }}
+          MODEL_SECURITY_API_ENDPOINT: ${{ secrets.MODEL_SECURITY_API_ENDPOINT }}
+          TSG_ID: ${{ secrets.TSG_ID }}
+        run: echo "url=$(bash scripts/get_pypi_url.sh)" >> "$GITHUB_OUTPUT"
+
+      # AIRS Model Security Integration: Install the Prisma AIRS Model Security SDK from private PyPI.
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install "model-security-client[all]" --extra-index-url "${{ steps.pypi.outputs.url }}"
+
+      # AIRS Model Security Integration: Run the security scan. Exits non-zero if the model is BLOCKED,
+      # which stops the pipeline and prevents deployment.
+      - name: Run Prisma AIRS Model Security Scan
+        env:
+          MODEL_SECURITY_CLIENT_ID: ${{ secrets.MODEL_SECURITY_CLIENT_ID }}
+          MODEL_SECURITY_CLIENT_SECRET: ${{ secrets.MODEL_SECURITY_CLIENT_SECRET }}
+          MODEL_SECURITY_API_ENDPOINT: ${{ secrets.MODEL_SECURITY_API_ENDPOINT }}
+          MODEL_SECURITY_PROFILE_ID: ${{ secrets.MODEL_SECURITY_PROFILE_ID }}
+          TSG_ID: ${{ secrets.TSG_ID }}
+        run: python scripts/scan_model.py --config config/model-config.yaml
+
+  # ---------------------------------------------------------------------------
+  # Customer-specific: Deploy the scanned model to Google Cloud Vertex AI.
+  # Replace this job with your own deployment logic (e.g., AWS SageMaker,
+  # Azure ML, on-prem infrastructure, etc.).
+  # Only runs on main branch pushes or manual triggers, after a passing scan.
+  # ---------------------------------------------------------------------------
+  deploy-model:
+    name: Deploy Model to Vertex AI
+    needs: security-scan
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Deploy Model to Vertex AI
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: bash scripts/deploy_model.sh
+
+  # ---------------------------------------------------------------------------
+  # Customer-specific: Validate the deployed endpoint by sending a test prompt.
+  # Replace with your own smoke tests or integration tests.
+  # ---------------------------------------------------------------------------
+  test-model:
+    name: Test Model Endpoint
+    needs: deploy-model
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Test Model Endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION }}
+        run: python scripts/test_model.py --config config/model-config.yaml

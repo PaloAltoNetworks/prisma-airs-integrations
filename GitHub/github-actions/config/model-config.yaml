@@ -1,0 +1,20 @@
+# Model Configuration
+# Changing this file triggers the Prisma AIRS Model Security Scan pipeline.
+# The pipeline will scan the specified model and only deploy it if the
+# security scan passes.
+
+model:
+  huggingface_id: "google/gemma-3-1b-it"
+  display_name: "gemma-3-1b-it"
+  description: "Google Gemma 3 1B Instruction-Tuned model deployed via Vertex AI Model Garden"
+  version: "2.1"
+
+deployment:
+  machine_type: "g2-standard-12"
+  accelerator_type: "NVIDIA_L4"
+  accelerator_count: 1
+  region: "us-central1"
+
+security:
+  scan_enabled: true
+  security_profile_id: ""  # Set via MODEL_SECURITY_PROFILE_ID env var or GitHub Variable
