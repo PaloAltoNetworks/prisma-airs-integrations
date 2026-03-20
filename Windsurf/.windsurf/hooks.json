@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "pre_user_prompt": [
+      {
+        "command": "bash .windsurf/hooks/scan-user-input.sh"
+      }
+    ],
+    "pre_run_command": [
+      {
+        "command": "bash .windsurf/hooks/scan-run-command.sh"
+      }
+    ],
+    "pre_mcp_tool_use": [
+      {
+        "command": "bash .windsurf/hooks/scan-mcp-request.sh",
+        "show_output": true
+      }
+    ],
+    "post_mcp_tool_use": [
+      {
+        "command": "bash .windsurf/hooks/scan-mcp-response.sh",
+        "show_output": true
+      }
+    ],
+    "post_cascade_response": [
+      {
+        "command": "bash .windsurf/hooks/scan-cascade-response.sh"
+      }
+    ]
+  }
+}

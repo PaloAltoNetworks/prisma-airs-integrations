@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# Prisma AIRS Pre-Tool Scanner for Cline
+# Hook: PreToolUse
+# Scans tool requests before execution (commands, MCP tools, file operations)
+# Blocks requests containing malicious content via cancel:true
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/prisma-airs.sh"
+
+INPUT_JSON=$(cat)
+
+TOOL=$(echo "$INPUT_JSON" | jq -r '.preToolUse.toolName // "unknown"' 2>/dev/null)
+PARAMS=$(echo "$INPUT_JSON" | jq -r '.preToolUse.parameters // {}' 2>/dev/null)
+
+log "PreToolUse: Scanning $TOOL request"
+
+if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
+    log "WARNING: PRISMA_AIRS_API_KEY not set"
+    respond false
+    exit 0
+fi
+
+SESSION_ID=$(get_session_id "$INPUT_JSON")
+SCAN_CONTENT=""
+SOURCE_LABEL=""
+
+case "$TOOL" in
+    execute_command)
+        SCAN_CONTENT=$(echo "$PARAMS" | jq -r '.command // empty' 2>/dev/null)
+        SOURCE_LABEL="run-command"
+        ;;
+    use_mcp_tool)
+        MCP_SERVER=$(echo "$PARAMS" | jq -r '.server_name // "unknown"' 2>/dev/null)
+        MCP_TOOL=$(echo "$PARAMS" | jq -r '.tool_name // "unknown"' 2>/dev/null)
+        MCP_ARGS=$(echo "$PARAMS" | jq -r '.arguments // {}' 2>/dev/null)
+        TOOL="${MCP_SERVER}__${MCP_TOOL}"
+        SOURCE_LABEL="mcp-request"
+
+        # Check for URL-bearing tools
+        case "$MCP_TOOL" in
+            *web_search*|*WebSearch*|*search*)
+                SCAN_CONTENT=$(echo "$MCP_ARGS" | jq -r '.query // .search_query // .q // empty' 2>/dev/null)
+                ;;
+            *web_fetch*|*WebFetch*|*fetch*|*get_url*)
+                SCAN_CONTENT=$(echo "$MCP_ARGS" | jq -r '.url // .uri // empty' 2>/dev/null)
+                ;;
+        esac
+
+        # Fallback: try common content fields
+        if [[ -z "$SCAN_CONTENT" || "$SCAN_CONTENT" == "null" ]]; then
+            SCAN_CONTENT=$(echo "$MCP_ARGS" | jq -r '.query // .prompt // .message // .content // empty' 2>/dev/null)
+        fi
+
+        # Fallback: try path/resource fields
+        if [[ -z "$SCAN_CONTENT" || "$SCAN_CONTENT" == "null" ]]; then
+            PATH_PARAM=$(echo "$MCP_ARGS" | jq -r '.path // .file // .resource // .url // .uri // empty' 2>/dev/null)
+            if [[ -n "$PATH_PARAM" && "$PATH_PARAM" != "null" ]]; then
+                SCAN_CONTENT="Accessing resource: $PATH_PARAM"
+            fi
+        fi
+
+        # Fallback: serialize full arguments
+        if [[ -z "$SCAN_CONTENT" || "$SCAN_CONTENT" == "null" ]]; then
+            SCAN_CONTENT=$(echo "$MCP_ARGS" | jq -r 'tostring' 2>/dev/null || echo "$MCP_ARGS")
+        fi
+        ;;
+    write_to_file)
+        # Scan file content being written
+        SCAN_CONTENT=$(echo "$PARAMS" | jq -r '.content // empty' 2>/dev/null)
+        SOURCE_LABEL="write-file"
+        ;;
+    *)
+        # Other tools - serialize parameters
+        SCAN_CONTENT=$(echo "$PARAMS" | jq -r 'tostring' 2>/dev/null)
+        SOURCE_LABEL="tool-request"
+        ;;
+esac
+
+# Nothing meaningful to scan
+if [[ -z "$SCAN_CONTENT" || "$SCAN_CONTENT" == "null" || "$SCAN_CONTENT" == "{}" ]]; then
+    log "PreToolUse: No scannable content for $TOOL - allowing"
+    respond false
+    exit 0
+fi
+
+log "PreToolUse: Scanning $TOOL (${#SCAN_CONTENT} chars)"
+
+SCAN_RESULT=$(airs_scan "$SCAN_CONTENT" "prompt" "$SOURCE_LABEL" "$TOOL" "$SESSION_ID")
+
+if [[ -z "$SCAN_RESULT" ]]; then
+    log "ERROR: Empty response from AIRS for $TOOL"
+    respond false
+    exit 0
+fi
+
+ACTION=$(echo "$SCAN_RESULT" | jq -r '.action // "unknown"')
+CATEGORY=$(echo "$SCAN_RESULT" | jq -r '.category // "unknown"')
+SCAN_ID=$(echo "$SCAN_RESULT" | jq -r '.scan_id // "unknown"')
+DETECTIONS=$(parse_detections "$SCAN_RESULT")
+
+if [[ "$ACTION" == "block" ]]; then
+    if [[ -n "$DETECTIONS" ]]; then
+        log "BLOCKED $TOOL: $CATEGORY - detected: [$DETECTIONS] [scan:$SCAN_ID]"
+    else
+        log "BLOCKED $TOOL: $CATEGORY [scan:$SCAN_ID]"
+    fi
+    respond true "Blocked by Prisma AIRS: $TOOL request blocked - $CATEGORY (detected: $DETECTIONS)"
+    exit 0
+fi
+
+if [[ -n "$DETECTIONS" ]]; then
+    log "ALLOWED $TOOL: detected: [$DETECTIONS] [scan:$SCAN_ID]"
+fi
+
+respond false

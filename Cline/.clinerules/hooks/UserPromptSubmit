@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Prisma AIRS User Input Scanner for Cline
+# Hook: UserPromptSubmit
+# Scans user prompts BEFORE they reach the model
+# Blocks prompts containing malicious content via cancel:true
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/prisma-airs.sh"
+
+INPUT_JSON=$(cat)
+
+# Extract user prompt (Cline format)
+USER_MESSAGE=$(echo "$INPUT_JSON" | jq -r '.userPromptSubmit.prompt // empty' 2>/dev/null)
+
+if [[ -z "$USER_MESSAGE" ]]; then
+    respond false
+    exit 0
+fi
+
+if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
+    log "WARNING: PRISMA_AIRS_API_KEY not set for user input scanning"
+    respond false
+    exit 0
+fi
+
+SESSION_ID=$(get_session_id "$INPUT_JSON")
+
+SCAN_RESULT=$(airs_scan "$USER_MESSAGE" "prompt" "user-prompt" "UserPromptSubmit" "$SESSION_ID")
+
+ACTION=$(echo "$SCAN_RESULT" | jq -r '.action // "unknown"')
+CATEGORY=$(echo "$SCAN_RESULT" | jq -r '.category // "unknown"')
+SCAN_ID=$(echo "$SCAN_RESULT" | jq -r '.scan_id // "unknown"')
+DETECTIONS=$(parse_detections "$SCAN_RESULT")
+
+if [[ "$ACTION" == "block" ]]; then
+    if [[ -n "$DETECTIONS" ]]; then
+        log "BLOCKED USER INPUT: $CATEGORY - detected: [$DETECTIONS] (scan_id: $SCAN_ID)"
+    else
+        log "BLOCKED USER INPUT: $CATEGORY (scan_id: $SCAN_ID)"
+    fi
+    respond true "Blocked by Prisma AIRS: User input contained $CATEGORY content (detected: $DETECTIONS)"
+    exit 0
+fi
+
+if [[ -n "$DETECTIONS" ]]; then
+    log "ALLOWED USER INPUT: detected: [$DETECTIONS] (scan_id: $SCAN_ID)"
+fi
+
+respond false

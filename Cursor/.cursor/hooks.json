@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {"command": "bash .cursor/hooks/pre_submit_prompt.sh", "timeout": 5000, "failClosed": false}
+    ],
+    "beforeMCPExecution": [
+      {"command": "bash .cursor/hooks/pre_mcp_execution.sh", "timeout": 5000, "failClosed": false}
+    ],
+    "postToolUse": [
+      {"command": "bash .cursor/hooks/scan_response.sh", "timeout": 5000, "failClosed": false}
+    ],
+    "afterAgentResponse": [
+      {"command": "bash .cursor/hooks/agent_response_scan.sh", "timeout": 5000, "failClosed": false}
+    ]
+  }
+}

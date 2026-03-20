@@ -1,0 +1,52 @@
+# Cursor Security Hooks - Git Ignore
+
+# Environment files (contain sensitive API keys)
+.env
+*.env
+!example.env
+
+# Security logs (may contain sensitive information)
+prisma-airs.log
+*.log
+
+# Temporary test files
+test_*.txt
+test_*.sh
+test_*.js
+test_*.py
+backdoor.*
+malware.*
+eicar.*
+harvest.*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node modules (if any)
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS generated files
+Thumbs.db
+Desktop.ini

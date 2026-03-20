@@ -1,0 +1,3 @@
+.env
+.windsurf/hooks/prisma-airs.log
+.DS_Store
