@@ -29,10 +29,13 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 | [Portkey](./Portkey/) | AI Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [TrueFoundry](./TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 | [GitHub (Actions)](./GitHub/github-actions/) | CI/CD Pipeline | N/A | N/A | N/A | N/A | N/A |
+| [Jenkins (Pipeline)](./Jenkins/declarative-pipeline/) | CI/CD Pipeline | N/A | N/A | N/A | N/A | N/A |
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
 
 **N/A** — [GitHub Actions](./GitHub/github-actions/) uses Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See the [integration README](./GitHub/github-actions/) for model scanning coverage.
+
+**N/A** — [Jenkins](./Jenkins/declarative-pipeline/) uses Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See the [integration README](./Jenkins/declarative-pipeline/) for model scanning coverage.
 
 ---
 
