@@ -18,7 +18,7 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 | [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Cline](./Cline/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
-| [Cursor](./Cursor/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Cursor](./Cursor/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
 | [Windsurf](./Windsurf/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ⚠️ |
 | [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
@@ -32,6 +32,9 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 | [Jenkins (Pipeline)](./Jenkins/declarative-pipeline/) | CI/CD Pipeline | N/A | N/A | N/A | N/A | N/A |
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
+
+> **_NOTE_**
+> In order to scan streamed responses via gateway integrations, the LLM response must be buffered at the gateway (then scanned by AIRS) before being forwarded to the downstream application.
 
 **N/A** — [GitHub Actions](./GitHub/github-actions/) uses Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See the [integration README](./GitHub/github-actions/) for model scanning coverage.
 
