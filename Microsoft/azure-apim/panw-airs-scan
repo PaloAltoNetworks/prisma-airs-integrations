@@ -6,6 +6,8 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 ## Features:
 - Scans either the prompt or the response based on the `ScanType` variable.
 - Handles both prompt and response scanning in a single fragment.
+- For requests containing tools, scans only the last user message as the prompt, ignoring tool definitions.
+- Passes through without scanning when: the inbound request is a tool result submission (last message role=tool), or the outbound response is a tool call (finish_reason=tool_calls).
 - Will keep the session of the prompt and response together using a session. If a header of x-session-id exists, this will become the session_id, which will group the coversation together.
 - Provides detailed error messages when a request is blocked.
 - Allows for fail-open or fail-closed behavior when the security scanner is unavailable.
@@ -144,16 +146,26 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                 var data = (JObject)context.Variables["requestData"];
                                 var body = context.Request.Body.As<JObject>(preserveContent: true);
                                 
-                                string promptContent = "";
-                                var contentToken = body["messages"]?.Last?["content"];
+                                var contents = new JArray();
+
                                 if (body["input"] != null) {
-                                    promptContent = body["input"].ToString();
-                                } else if (contentToken != null)
-                                {
-                                    promptContent = contentToken.ToString();
+                                    // Responses API format
+                                    contents.Add(new JObject(new JProperty("prompt", body["input"].ToString())));
+                                } else if (body["messages"] is JArray messages && messages.Count > 0) {
+                                    var lastMsg = messages.Last as JObject;
+                                    string lastRole = lastMsg?["role"]?.ToString() ?? "";
+
+                                    if (lastRole == "tool") {
+                                        // Tool result submission to LLM — pass through without scanning
+                                    } else {
+                                        // Normal first call: scan last user message as prompt
+                                        contents.Add(new JObject(new JProperty("prompt", lastMsg?["content"]?.ToString() ?? "")));
+                                    }
                                 }
-                                
-                                data.Add("contents", new JArray (new JObject(new JProperty("prompt", promptContent))));
+
+                                if (contents.Count > 0) {
+                                    data.Add("contents", contents);
+                                }
                                 return data;
                             } catch {
                                 return (JObject)context.Variables["requestData"];
@@ -169,17 +181,32 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                 var data = (JObject)context.Variables["requestData"];
                                 var body = context.Response.Body.As<JObject>(preserveContent: true);
                                 
-                                string responseContent = "";
+                                var contents = new JArray();
+
+                                // Responses API format
                                 var outputToken = body["output"]?.Last?["content"]?.Last?["text"];
-                                var choicesToken = ((JArray)body["choices"])?.Last?["message"]?["content"];
-                                if ( outputToken != null) {
-                                    responseContent = outputToken.ToString();
-                                } else if (choicesToken != null) 
-                                {
-                                    responseContent = choicesToken.ToString();
+                                if (outputToken != null) {
+                                    contents.Add(new JObject(new JProperty("response", outputToken.ToString())));
                                 }
-                                
-                                data.Add("contents", new JArray (new JObject(new JProperty("response", responseContent))));
+                                // Chat completions format
+                                else if (body["choices"] is JArray choices && choices.Count > 0) {
+                                    var message = choices.Last?["message"] as JObject;
+                                    var toolCalls = message?["tool_calls"] as JArray;
+                                    var textContent = message?["content"]?.ToString();
+
+                                    var finishReason = choices.Last?["finish_reason"]?.ToString();
+                                    if (finishReason == "tool_calls" || (toolCalls != null && toolCalls.Count > 0)) {
+                                        // LLM is requesting a tool call — pass through without scanning
+                                    } else if (!string.IsNullOrEmpty(textContent)) {
+                                        // Final text response
+                                        contents.Add(new JObject(new JProperty("response", textContent)));
+                                    }
+                                    // If content is null and no tool_calls, nothing to scan — skip
+                                }
+
+                                if (contents.Count > 0) {
+                                    data.Add("contents", contents);
+                                }
                                 return data;
                             } catch {
                                 return (JObject)context.Variables["requestData"];
@@ -189,7 +216,11 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 					</choose>
 					<!--
                 This section sends the request to the AIRS service.
+                Only called when requestData has a contents field — if contents is empty
+                (e.g. all tool calls were function-type and skipped), the scan is bypassed.
                 -->
+					<choose>
+						<when condition="@(((JObject)context.Variables["requestData"]).ContainsKey("contents"))">
 					<send-request id="panw-airs-scan" mode="new" response-variable-name="panwScanResponse" timeout="10" ignore-error="true">
 						<set-url>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</set-url>
 						<set-method>POST</set-method>
@@ -310,7 +341,12 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                 This `when` block handles the case where the AIRS service action is allow but Data Masking is enabled on the response. 
                                 It will replace the response contents with the masked text. A Trace message with the origional text will be created.
                             -->
-								<when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "allow" && ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true).ContainsKey("response_masked_data"))">
+								<when condition="@{
+                                        var panwBody = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
+                                        return panwBody["action"]?.ToString() == "allow"
+                                            && panwBody.ContainsKey("response_masked_data")
+                                            && panwBody["response_masked_data"]?["data"] != null;
+                                    }">
 									<trace source="SecurityScanner" severity="error">
 										<message>@("🛡️ PRISMA AIRS SECURITY ALERT:  Masked Response: " + ((JObject)context.Variables["requestData"])["contents"]?.Last?["response"])</message>
 									</trace>
@@ -353,15 +389,18 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 							</choose>
 						</otherwise>
 					</choose>
+						</when>
+						<!-- No contents to scan (e.g. all function-type tool calls) — pass through -->
+					</choose>
 				</when>
 				<!--
-            This `otherwise` block handles the case where the fragment inherits an error from a previous policy.
+            This `otherwise` block handles the case where shouldScan is false.
+            For response scanning this is normal — the backend returned a non-200 and the response is passed through unmodified.
             -->
 				<otherwise>
-					<trace source="PANW-Scanner" severity="error">
-						<message>Inherited an Error</message>
+					<trace source="PANW-Scanner" severity="information">
+						<message>@("AIRS scan skipped: ScanType=" + context.Variables.GetValueOrDefault<string>("ScanType", "unknown") + ", response status=" + (context.Response != null ? context.Response.StatusCode.ToString() : "N/A (inbound)"))</message>
 					</trace>
-					<set-body>@(context.Response.Body.As<string>(preserveContent: true))</set-body>
 				</otherwise>
 			</choose>
 		</when>
