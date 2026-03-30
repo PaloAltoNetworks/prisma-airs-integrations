@@ -12,26 +12,34 @@ A policy fragment that can be integrated into an Azure AI Gateway (part of APIM)
 | Response | ✅ | Scans LLM responses in outbound policy with masking support |
 | Streaming | ❌ | Synchronous scanning with 10-second timeout |
 | Pre-tool call | ❌ | Not applicable - designed for direct LLM gateway requests |
-| Post-tool call | ❌ | Not applicable - only scans user input and LLM responses |
+| Post-tool call | ✅ | Scans tool execution results as `tool_event` with full metadata |
 
 ## 🎯 What This Does
-The fragments handle handles scanning of prompts and responses on the following OpenAI API Calls
-* **POST** Creates a model response for the given chat conversation.
-* **POST** Creates a model response.
+The fragments handle scanning of prompts, responses, and tool events on the following OpenAI API Calls:
+* **POST /chat/completions** - Creates a model response for the given chat conversation
+* **POST /responses** - Creates a model response
 
-It will return bespoke responses dependant on the category detected. 
+**Scanning capabilities:**
+- **User prompts** before sending to the LLM
+- **LLM responses** before returning to the client
+- **Tool execution results** (when `role=tool`) before sending back to the LLM
+
+It will return bespoke responses dependent on the category detected. 
 
 ## 🚙 Flow
 1. **Client sends prompt** → Azure AI Gateway
 2. **Prompt scanned by Prisma AIRS** → Blocks injection attacks, malicious content
 3. **If safe** → Defined AI LLM generates response
 4. **Response scanned by Prisma AIRS** → Blocks PII leakage, sensitive data
-4. **If safe** → Return to client
+5. **If LLM requests tool execution** → Tool result scanned before sending back to LLM
+6. **If safe** → Return to client
 
 ## 🎁 Additional Features
 * Customise the responses per detected category
-* Define a different security profile for each scan
-* Group muli-turn communcation through a defined header in the request.
+* Define a different security profile for each scan (prompts, responses, and tool events)
+* Configure tool scanning behavior with `scanTools` variable (enable/disable)
+* Use dedicated security profiles for tool events via `toolProfile` variable
+* Group multi-turn communication through a defined header in the request
 * Return masked PII responses if the action is Allow and Masking is enabled
 * Define if the sidecar should FailOpen or FailClosed if Prisma AIRS is not responding or has an error
 
@@ -61,13 +69,16 @@ No special Azure AD/Entra permissions beyond standard Contributor
 
 2. **Create Policy Fragment**: Copy the contents of `panw-airs-scan` to a new policy fragment called `panw-airs-scan`
 
-3. **Configure the AI Gateway inbound policy** to call the fragment 
-```
+3. **Configure the AI Gateway inbound policy** to call the fragment
+```xml
         <set-variable name="ScanType" value="prompt" />
+        <!-- Optional: Configure tool scanning -->
+        <set-variable name="toolProfile" value="tool-security-profile" />
+        <set-variable name="scanTools" value="true" />
         <include-fragment fragment-id="panw-airs-scan" />
 ```
-4. **Configure the AI Gateway outbound policy** to call the fragment 
-```
+4. **Configure the AI Gateway outbound policy** to call the fragment
+```xml
         <set-variable name="ScanType" value="response" />
         <include-fragment fragment-id="panw-airs-scan" />
 ```
@@ -91,6 +102,8 @@ curl -X POST "https://<YOUR-HOSTNAME>/<YOUR API>/chat/completions" \
 Policy fragment is configured in the policy using the following variables:
 - `ScanType`: (string) "prompt" or "response". Defaults to "prompt".
 - `currentProfile`: (string) The name of the AIRS profile to use for scanning. Defaults to "example-profile".
+- `toolProfile`: (string) The name of the AIRS profile to use when scanning tool events. Defaults to `currentProfile` if not set.
+- `scanTools`: (boolean) `true` to scan tool result submissions, `false` to pass them through. Defaults to `true`.
 - `appName`: (string) The name of the application. Defaults to "APIM-Gateway".
 - `FailOpen`: (boolean) `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.
 - `airsDescriptions`: (JObject) A JObject containing custom error messages for detected threats. If not provided, the default messages in `scanDescriptions` will be used.
@@ -101,8 +114,9 @@ Policy fragment is configured in the policy using the following variables:
 **Prisma AIRS**: X-Pan-Token header stored as a Secret
 
 ### Scanning Coverage
-- ✅ ***Prompt Scanning**: Injection attacks, malicious instructions, sensitive data (standard or custom), undesirable URL's, undesirable SQL command types, topic guardrails
+- ✅ **Prompt Scanning**: Injection attacks, malicious instructions, sensitive data (standard or custom), undesirable URLs, undesirable SQL command types, topic guardrails
 - ✅ **Response Scanning**: PII Masking (SSN, credit cards), API keys, sensitive data, malicious code, undesirable SQL command types
+- ✅ **Tool Event Scanning**: Tool execution results scanned for sensitive data, malicious outputs, and policy violations before returning to LLM
 
 ### Blocking Behavior
 * Controlled Fail State
@@ -183,6 +197,63 @@ curl -X POST "https://mgollop-apim-svs.azure-api.net/myllm/responses" \
   }
 }
 ```
+
+### SAMPLE 4
+Tool Event Scanning - demonstrates scanning of tool execution results.
+#### First Request (LLM requests tool call)
+```bash
+curl -X POST "https://mgollop-apim-svs.azure-api.net/myllm/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "api-key: $APIM_KEY" \
+  -d '{
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "What files are in the current directory?"}
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "list_files",
+          "description": "List files in a directory",
+          "parameters": {"type": "object", "properties": {}}
+        }
+      }
+    ],
+    "model": "gpt-4o"
+  }'
+```
+
+#### Second Request (Tool result submission - scanned by AIRS)
+```bash
+curl -X POST "https://mgollop-apim-svs.azure-api.net/myllm/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "api-key: $APIM_KEY" \
+  -d '{
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "What files are in the current directory?"},
+      {"role": "assistant", "tool_calls": [
+        {"id": "call_123", "type": "function", "function": {"name": "list_files", "arguments": "{}"}}
+      ]},
+      {"role": "tool", "tool_call_id": "call_123", "content": "passwords.txt\nsecrets.env\napi_keys.json"}
+    ],
+    "model": "gpt-4o"
+  }'
+```
+
+#### Response (when tool output contains sensitive data)
+```json
+{
+  "error": "🛡️ PRISMA AIRS SECURITY ALERT: REQUEST BLOCKED",
+  "details": {
+    "dlp": "This contains content with sensitive data."
+  }
+}
+```
+
+**Note:** Tool scanning can be disabled by setting `scanTools` to `false`, or you can use a dedicated security profile via the `toolProfile` variable.
+
 ## 📸 Screenshots
 * AIRS API Secret ![AI Gateway - AIRS Secret](<images/Azure AI Gateway - AIRS Secret.png>)
 * Sample Testing in the Testing Window ![AI Gateway - Test](<images/Azure AI Gateway - API Test.png>)
