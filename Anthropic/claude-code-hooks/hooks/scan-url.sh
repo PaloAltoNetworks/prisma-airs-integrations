@@ -31,13 +31,15 @@ touch "$LOG_FILE"
 
 # Check if required environment variables are configured
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY environment variable not set" >> "$LOG_FILE"
-    exit 0  # Allow but log error
+    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY not set — blocking (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: API key not configured — blocking tool use (fail-closed)" >&2
+    exit 2
 fi
 
 if ! has_profile; then
-    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set" >> "$LOG_FILE"
-    exit 0  # Allow but log error
+    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set — blocking (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: profile not configured — blocking tool use (fail-closed)" >&2
+    exit 2
 fi
 
 # Set app name with optional custom suffix

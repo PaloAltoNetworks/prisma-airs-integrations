@@ -38,11 +38,12 @@ TRUNCATED=$(printf '%s' "$PROMPT" | head -c 20000)
 
 log "PRE-PROMPT: Scanning user prompt (${#TRUNCATED} chars)"
 
-# Fail-open: warn and allow if credentials missing
+# Fail-closed: block if credentials missing
 if [[ -z "$PRISMA_AIRS_API_KEY" ]] || ! has_profile; then
-    log "WARNING: PRISMA_AIRS_API_KEY or profile not set — allowing prompt without scan"
-    print_allow
-    exit 0
+    log "ERROR: PRISMA_AIRS_API_KEY or profile not set — blocking prompt (fail-closed)"
+    echo "Prisma AIRS: API key or profile not configured — blocking prompt (fail-closed)" >&2
+    print_deny "Prisma AIRS: API key or profile not configured — blocking prompt (fail-closed)"
+    exit 2
 fi
 
 # Use Cursor's conversation_id to group all scans in one session

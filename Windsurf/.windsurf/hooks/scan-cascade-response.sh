@@ -18,8 +18,9 @@ if [[ -z "$RESPONSE" || ${#RESPONSE} -lt 10 ]]; then
 fi
 
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY not set for Cascade response scanning"
-    exit 0
+    log "ERROR: PRISMA_AIRS_API_KEY not set — cannot scan Cascade response (fail-closed)"
+    echo "PRISMA AIRS ALERT: API key not configured — Cascade response not scanned (fail-closed)"
+    exit 1
 fi
 
 SESSION_ID=$(get_session_id "$INPUT_JSON")

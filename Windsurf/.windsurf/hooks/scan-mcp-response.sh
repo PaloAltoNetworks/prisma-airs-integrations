@@ -27,8 +27,9 @@ if [[ -z "$MCP_RESULT" || ${#MCP_RESULT} -lt 5 ]]; then
 fi
 
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "ERROR: PRISMA_AIRS_API_KEY not set for response scanning"
-    exit 0
+    log "ERROR: PRISMA_AIRS_API_KEY not set — cannot scan MCP response (fail-closed)"
+    echo "PRISMA AIRS ALERT: API key not configured — MCP response not scanned (fail-closed)"
+    exit 1
 fi
 
 SESSION_ID=$(get_session_id "$INPUT_JSON")

@@ -61,8 +61,9 @@ echo "[$(date)] PreToolUse MCP Hook: Scanning $TOOL_NAME request" >> "$LOG_FILE"
 
 # Check if API key is configured
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    echo "[$(date)] WARNING: PRISMA_AIRS_API_KEY environment variable not set for MCP request scanning" >> "$LOG_FILE"
-    exit 0
+    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY not set — blocking MCP request (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: API key not configured — blocking MCP request (fail-closed)" >&2
+    exit 2
 fi
 
 # Extract the actual request content to scan
@@ -173,7 +174,8 @@ if [[ -n "$SCAN_RESULT" ]]; then
         exit 0
     fi
 else
-    echo "[$(date)] ERROR: Empty response from AIRS for MCP request $TOOL_NAME" >> "$LOG_FILE"
-    exit 0
+    echo "[$(date)] ERROR: Empty response from AIRS for MCP request $TOOL_NAME — blocking (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: empty API response — blocking MCP request (fail-closed)" >&2
+    exit 2
 fi
 

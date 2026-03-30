@@ -88,16 +88,16 @@ if [[ ${#TOOL_OUTPUT} -gt 51200 ]]; then
     exit 0
 fi
 
-# === GUARDRAIL: API key and profile ===
+# === GUARDRAIL: API key and profile (fail-closed) ===
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "SCAN-RESPONSE: WARNING: PRISMA_AIRS_API_KEY not set, skipping scan"
-    allow
+    log "SCAN-RESPONSE: ERROR: PRISMA_AIRS_API_KEY not set — blocking (fail-closed)"
+    block "Prisma AIRS: API key not configured — blocking response (fail-closed)"
     exit 0
 fi
 
 if ! has_profile; then
-    log "SCAN-RESPONSE: WARNING: no profile configured, skipping scan"
-    allow
+    log "SCAN-RESPONSE: ERROR: no profile configured — blocking (fail-closed)"
+    block "Prisma AIRS: profile not configured — blocking response (fail-closed)"
     exit 0
 fi
 

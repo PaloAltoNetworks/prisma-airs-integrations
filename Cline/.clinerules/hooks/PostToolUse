@@ -24,8 +24,8 @@ if [[ -z "$RESULT" || ${#RESULT} -lt 5 ]]; then
 fi
 
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "ERROR: PRISMA_AIRS_API_KEY not set for response scanning"
-    respond false
+    log "ERROR: PRISMA_AIRS_API_KEY not set — blocking (fail-closed)"
+    respond true "Prisma AIRS: API key not configured — blocking response (fail-closed)"
     exit 0
 fi
 

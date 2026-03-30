@@ -77,15 +77,17 @@ fi
 # --- Validate required configuration ---
 
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "PRE-MCP: WARNING — PRISMA_AIRS_API_KEY is not set; skipping scan for tool=$TOOL_NAME (fail-open)"
-    print_allow
-    exit 0
+    log "PRE-MCP: ERROR — PRISMA_AIRS_API_KEY is not set; blocking tool=$TOOL_NAME (fail-closed)"
+    print_deny "Prisma AIRS: API key not configured — blocking MCP request (fail-closed)" \
+               "AIRS security scan could not run: API key not configured. Do not retry."
+    exit 2
 fi
 
 if ! has_profile; then
-    log "PRE-MCP: WARNING — no profile configured; skipping scan for tool=$TOOL_NAME (fail-open)"
-    print_allow
-    exit 0
+    log "PRE-MCP: ERROR — no profile configured; blocking tool=$TOOL_NAME (fail-closed)"
+    print_deny "Prisma AIRS: profile not configured — blocking MCP request (fail-closed)" \
+               "AIRS security scan could not run: profile not configured. Do not retry."
+    exit 2
 fi
 
 # --- Parse tool name into server + tool components ---

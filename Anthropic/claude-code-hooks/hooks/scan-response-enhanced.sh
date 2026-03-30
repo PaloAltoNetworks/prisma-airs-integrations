@@ -111,10 +111,11 @@ if [[ -z "$RESPONSE_CONTENT" || ${#RESPONSE_CONTENT} -lt 5 ]]; then
     exit 0
 fi
 
-# Fail-open guard for API key
+# Fail-closed: block if API key not configured
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    echo "[$(date)] WARNING: PRISMA_AIRS_API_KEY not set, skipping scan" >> "$LOG_FILE"
-    exit 0
+    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY not set — blocking (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: API key not configured — blocking response (fail-closed)" >&2
+    exit 2
 fi
 
 # Scan response content if reasonable size (truncate and optimize)
