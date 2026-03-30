@@ -17,6 +17,8 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 ## Context Variables:
 - `ScanType`: (string) "prompt" or "response". Defaults to "prompt".
 - `currentProfile`: (string) The name of the AIRS profile to use for scanning. Defaults to "example-profile".
+- `toolProfile`: (string) The name of the AIRS profile to use when scanning tool events. Defaults to `currentProfile` if not set.
+- `scanTools`: (boolean) `true` to scan tool result submissions, `false` to pass them through. Defaults to `true`.
 - `appName`: (string) The name of the application. Defaults to "Azure-APIM-Gateway".
 - `FailOpen`: (boolean) `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.
 - `airsDescriptions`: (JObject) A JObject containing custom error messages for detected threats. If not provided, the default messages in `scanDescriptions` will be used.
@@ -44,6 +46,8 @@ This APIM policy fragment is designed to be included in the inbound and outbound
     }" />
     <set-variable name="ScanType" value="prompt" />
     <set-variable name="currentProfile" value="prompt-profile" />
+    <set-variable name="toolProfile" value="tool-security-profile" />
+    <set-variable name="scanTools" value="true" />
     <set-variable name="FailOpen" value="true" />
     <include-fragment fragment-id="panw-airs-scan" />
 </inbound>
@@ -157,36 +161,50 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                     string lastRole = lastMsg?["role"]?.ToString() ?? "";
 
                                     if (lastRole == "tool") {
-                                        // Handle Tool Result Submission — scan the tool output
-                                        string toolCallId = lastMsg["tool_call_id"]?.ToString() ?? "unknown";
-                                        string toolOutput = lastMsg["content"]?.ToString() ?? "";
-                                        string toolName = "unknown_tool";
-                                        string toolInput = "{}";
+                                        bool scanTools = Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("scanTools", true));
 
-                                        // Lookback through history to find the matching tool_call by id
-                                        for (int i = messages.Count - 2; i >= 0; i--) {
-                                            var prevMsg = messages[i] as JObject;
-                                            var prevToolCalls = prevMsg?["tool_calls"] as JArray;
-                                            if (prevToolCalls != null) {
-                                                var matchingCall = prevToolCalls.FirstOrDefault(tc => tc["id"]?.ToString() == toolCallId);
-                                                if (matchingCall != null) {
-                                                    toolName = matchingCall["function"]?["name"]?.ToString() ?? "unknown_tool";
-                                                    toolInput = matchingCall["function"]?["arguments"]?.ToString() ?? "{}";
-                                                    break;
+                                        if (scanTools) {
+                                            // Handle Tool Result Submission — scan the tool output
+                                            string toolCallId = lastMsg["tool_call_id"]?.ToString() ?? "unknown";
+                                            string toolOutput = lastMsg["content"]?.ToString() ?? "";
+                                            string toolName = "unknown_tool";
+                                            string toolInput = "{}";
+
+                                            // Lookback through history to find the matching tool_call by id
+                                            for (int i = messages.Count - 2; i >= 0; i--) {
+                                                var prevMsg = messages[i] as JObject;
+                                                var prevToolCalls = prevMsg?["tool_calls"] as JArray;
+                                                if (prevToolCalls != null) {
+                                                    var matchingCall = prevToolCalls.FirstOrDefault(tc => tc["id"]?.ToString() == toolCallId);
+                                                    if (matchingCall != null) {
+                                                        toolName = matchingCall["function"]?["name"]?.ToString() ?? "unknown_tool";
+                                                        toolInput = matchingCall["function"]?["arguments"]?.ToString() ?? "{}";
+                                                        break;
+                                                    }
                                                 }
                                             }
-                                        }
 
-                                        contents.Add(new JObject(new JProperty("tool_event", new JObject(
-                                            new JProperty("metadata", new JObject(
-                                                new JProperty("ecosystem", "mcp"),
-                                                new JProperty("method", "tools/call"),
-                                                new JProperty("server_name", data["metadata"]?["app_name"]?.ToString() ?? "APIM-Gateway"),
-                                                new JProperty("tool_invoked", toolName)
-                                            )),
-                                            new JProperty("input", toolInput),
-                                            new JProperty("output", toolOutput)
-                                        ))));
+                                            // Use toolProfile if set, otherwise fall back to currentProfile
+                                            string toolProfileName = context.Variables.GetValueOrDefault<string>("toolProfile", null);
+                                            if (toolProfileName == null) {
+                                                toolProfileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+                                            }
+
+                                            // Update profile in data for tool scanning
+                                            data["ai_profile"]["profile_name"] = toolProfileName;
+
+                                            contents.Add(new JObject(new JProperty("tool_event", new JObject(
+                                                new JProperty("metadata", new JObject(
+                                                    new JProperty("ecosystem", "mcp"),
+                                                    new JProperty("method", "tools/call"),
+                                                    new JProperty("server_name", data["metadata"]?["app_name"]?.ToString() ?? "APIM-Gateway"),
+                                                    new JProperty("tool_invoked", toolName)
+                                                )),
+                                                new JProperty("input", toolInput),
+                                                new JProperty("output", toolOutput)
+                                            ))));
+                                        }
+                                        // If scanTools is false, contents remains empty and will be passed through
                                     } else {
                                         // Normal first call: scan last user message as prompt
                                         contents.Add(new JObject(new JProperty("prompt", lastMsg?["content"]?.ToString() ?? "")));
