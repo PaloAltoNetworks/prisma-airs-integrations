@@ -24,7 +24,7 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 | [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Kong (Custom Plugin)](./Kong/custom-plugin/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Kong (Request Callout)](./Kong/request-callout/) | API Gateway | ✅ | ❌ | ❌ | ❌ | ❌ |
-| [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
+| [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ❌ |
 | [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Portkey](./Portkey/) | AI Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [TrueFoundry](./TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
