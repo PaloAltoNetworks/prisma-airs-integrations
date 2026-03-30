@@ -7,7 +7,8 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 - Scans either the prompt or the response based on the `ScanType` variable.
 - Handles both prompt and response scanning in a single fragment.
 - For requests containing tools, scans only the last user message as the prompt, ignoring tool definitions.
-- Passes through without scanning when: the inbound request is a tool result submission (last message role=tool), or the outbound response is a tool call (finish_reason=tool_calls).
+- Scans tool result submissions (last message role=tool) as a tool_event with full metadata (ecosystem, method, server_name, tool_invoked), input arguments, and output — tool name and input resolved via lookback through message history.
+- Passes through without scanning when the outbound response is a tool call (finish_reason=tool_calls).
 - Will keep the session of the prompt and response together using a session. If a header of x-session-id exists, this will become the session_id, which will group the coversation together.
 - Provides detailed error messages when a request is blocked.
 - Allows for fail-open or fail-closed behavior when the security scanner is unavailable.
@@ -156,7 +157,36 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                     string lastRole = lastMsg?["role"]?.ToString() ?? "";
 
                                     if (lastRole == "tool") {
-                                        // Tool result submission to LLM — pass through without scanning
+                                        // Handle Tool Result Submission — scan the tool output
+                                        string toolCallId = lastMsg["tool_call_id"]?.ToString() ?? "unknown";
+                                        string toolOutput = lastMsg["content"]?.ToString() ?? "";
+                                        string toolName = "unknown_tool";
+                                        string toolInput = "{}";
+
+                                        // Lookback through history to find the matching tool_call by id
+                                        for (int i = messages.Count - 2; i >= 0; i--) {
+                                            var prevMsg = messages[i] as JObject;
+                                            var prevToolCalls = prevMsg?["tool_calls"] as JArray;
+                                            if (prevToolCalls != null) {
+                                                var matchingCall = prevToolCalls.FirstOrDefault(tc => tc["id"]?.ToString() == toolCallId);
+                                                if (matchingCall != null) {
+                                                    toolName = matchingCall["function"]?["name"]?.ToString() ?? "unknown_tool";
+                                                    toolInput = matchingCall["function"]?["arguments"]?.ToString() ?? "{}";
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        contents.Add(new JObject(new JProperty("tool_event", new JObject(
+                                            new JProperty("metadata", new JObject(
+                                                new JProperty("ecosystem", "mcp"),
+                                                new JProperty("method", "tools/call"),
+                                                new JProperty("server_name", data["metadata"]?["app_name"]?.ToString() ?? "APIM-Gateway"),
+                                                new JProperty("tool_invoked", toolName)
+                                            )),
+                                            new JProperty("input", toolInput),
+                                            new JProperty("output", toolOutput)
+                                        ))));
                                     } else {
                                         // Normal first call: scan last user message as prompt
                                         contents.Add(new JObject(new JProperty("prompt", lastMsg?["content"]?.ToString() ?? "")));
@@ -390,7 +420,7 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 						</otherwise>
 					</choose>
 						</when>
-						<!-- No contents to scan (e.g. all function-type tool calls) — pass through -->
+						<!-- No contents to scan (e.g. finish_reason=tool_calls or empty response) — pass through -->
 					</choose>
 				</when>
 				<!--
