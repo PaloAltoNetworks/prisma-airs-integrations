@@ -62,7 +62,24 @@ No special Azure AD/Entra permissions beyond standard Contributor
 * Prisma AIRS API key from Strata Cloud Manager. Saved as the named value `airs-api` under teh API of your AI Gateway
 * Prisma AIRS Security Profile within Strata Cloud Manager. Define with your own naming convention, or have a profile called `example-profile`
 
-* (Optional) For consolidation session reporting, a `x-session-id` header in the request, else the RequestID will be used to group prompts and responses.
+### Session Tracking
+
+The policy fragment automatically tracks multi-turn conversations (including tool calls) under the same session in AIRS:
+
+**Automatic tracking (no configuration needed):**
+- Generates a stable session ID from: user IP + system message + first user message
+- All requests in the same conversation get the same session_id
+- Works seamlessly across multiple HTTP requests (prompt → tool call → tool result → response)
+
+**Priority order:**
+1. **x-session-id header** (recommended for production) - Guarantees unique sessions
+2. **Conversation hash** (automatic) - Best-effort tracking based on IP + conversation content
+3. **RequestId** (fallback) - For non-conversational or simple requests
+
+**Known limitations:**
+- Same user asking identical questions multiple times may share a session (same IP + same content = same hash)
+- Users behind NAT/proxies with identical prompts may share a session (rare in practice)
+- **Recommendation:** For production deployments with strict session isolation, clients should send an `x-session-id` header
 
 ### Deploy in 5 Steps
 1. **Create a Named Value**: Create a named value called `airs-api` with your Prisma AIRS API Key
