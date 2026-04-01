@@ -19,10 +19,11 @@ if [[ -z "$USER_MESSAGE" ]]; then
     exit 0
 fi
 
-# Fail-open if API key not configured
+# Fail-closed: block if API key not configured
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY not set for user input scanning"
-    exit 0
+    log "ERROR: PRISMA_AIRS_API_KEY not set — blocking prompt (fail-closed)"
+    echo "Prisma AIRS: API key not configured — blocking prompt (fail-closed)" >&2
+    exit 2
 fi
 
 SESSION_ID=$(get_session_id "$INPUT_JSON")

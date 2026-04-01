@@ -16,8 +16,8 @@ PARAMS=$(echo "$INPUT_JSON" | jq -r '.preToolUse.parameters // {}' 2>/dev/null)
 log "PreToolUse: Scanning $TOOL request"
 
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY not set"
-    respond false
+    log "ERROR: PRISMA_AIRS_API_KEY not set — blocking (fail-closed)"
+    respond true "Prisma AIRS: API key not configured — blocking tool use (fail-closed)"
     exit 0
 fi
 

@@ -32,13 +32,22 @@ touch "$LOG_FILE"
 
 # Check if required environment variables are configured
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY environment variable not set" >> "$LOG_FILE"
-    exit 0  # Allow but log error
+    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY not set — blocking (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: API key not configured — blocking prompt (fail-closed)" >&2
+    exit 2
 fi
 
 if ! has_profile; then
-    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set" >> "$LOG_FILE"
-    exit 0  # Allow but log error
+    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set — blocking (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: profile not configured — blocking prompt (fail-closed)" >&2
+    exit 2
+fi
+
+# Set app name with optional custom suffix
+if [[ -n "$CLAUDE_CODE_APP_SUFFIX" ]]; then
+    APP_NAME="Claude Code-${CLAUDE_CODE_APP_SUFFIX}"
+else
+    APP_NAME="Claude Code"
 fi
 
 # Read JSON input from stdin
@@ -52,27 +61,35 @@ if [[ -z "$USER_MESSAGE" ]]; then
     exit 0  # Allow if no prompt found
 fi
 
+# Extract transcript_path for session ID (if available)
+TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
+
+# Generate session UUID
+if [[ -n "$TRANSCRIPT_PATH" ]]; then
+    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
+    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
+        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
+    fi
+else
+    SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
+fi
+
 AI_PROFILE=$(build_ai_profile)
 
 # Create payload to scan the entire user message
-PAYLOAD=$(cat << EOF
-{
-  "tr_id": "claude-user-input-$(date +%s)-$$",
-  "ai_profile": $AI_PROFILE,
-  "metadata": {
-    "app_user": "claude-code-user",
-    "app_name": "claude-code-hook",
-    "ai_model": "sonnet",
-    "source": "user-prompt-submit"
-  },
-  "contents": [
-    {
-      "prompt": $(echo "$USER_MESSAGE" | jq -R .)
-    }
-  ]
-}
-EOF
-)
+PAYLOAD=$(jq -n \
+  --arg tr_id "$SESSION_ID" \
+  --argjson ai_profile "$AI_PROFILE" \
+  --arg app_user "claude-code-user" \
+  --arg app_name "$APP_NAME" \
+  --arg source "user-prompt-submit" \
+  --arg prompt "$USER_MESSAGE" \
+  '{
+    tr_id: $tr_id,
+    ai_profile: $ai_profile,
+    metadata: {app_user: $app_user, app_name: $app_name, source: $source},
+    contents: [{prompt: $prompt}]
+  }')
 
 # Call Prisma AIRS API to scan the entire user input
 SCAN_RESULT=$(curl -s -L "$PRISMA_AIRS_API_URL" \

@@ -19,8 +19,8 @@ if [[ -z "$USER_MESSAGE" ]]; then
 fi
 
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY not set for user input scanning"
-    respond false
+    log "ERROR: PRISMA_AIRS_API_KEY not set — blocking (fail-closed)"
+    respond true "Prisma AIRS: API key not configured — blocking prompt (fail-closed)"
     exit 0
 fi
 

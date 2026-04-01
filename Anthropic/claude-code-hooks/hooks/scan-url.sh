@@ -31,18 +31,22 @@ touch "$LOG_FILE"
 
 # Check if required environment variables are configured
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY environment variable not set" >> "$LOG_FILE"
-    exit 0  # Allow but log error
+    echo "[$(date)] ERROR: PRISMA_AIRS_API_KEY not set — blocking (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: API key not configured — blocking tool use (fail-closed)" >&2
+    exit 2
 fi
 
 if ! has_profile; then
-    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set" >> "$LOG_FILE"
-    exit 0  # Allow but log error
+    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set — blocking (fail-closed)" >> "$LOG_FILE"
+    echo "Prisma AIRS: profile not configured — blocking tool use (fail-closed)" >&2
+    exit 2
 fi
 
-if [[ -z "$PRISMA_AIRS_PROFILE_NAME" ]]; then
-    echo "[$(date)] ERROR: PRISMA_AIRS_PROFILE_NAME environment variable not set" >> "$LOG_FILE"
-    exit 0  # Allow but log error
+# Set app name with optional custom suffix
+if [[ -n "$CLAUDE_CODE_APP_SUFFIX" ]]; then
+    APP_NAME="Claude Code-${CLAUDE_CODE_APP_SUFFIX}"
+else
+    APP_NAME="Claude Code"
 fi
 
 # Read JSON input from stdin
@@ -57,28 +61,38 @@ if [[ -z "$URL" ]]; then
     exit 0  # Allow if no URL found
 fi
 
+# Extract transcript_path for session ID (if available)
+TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
+
+# Generate session UUID
+if [[ -n "$TRANSCRIPT_PATH" ]]; then
+    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
+    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
+        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
+    fi
+else
+    SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
+fi
+
 echo "[$(date)] 🌐 $TOOL_NAME: $URL" >> "$LOG_FILE"
 
 AI_PROFILE=$(build_ai_profile)
 
 # Create JSON payload for URL scanning
-PAYLOAD=$(cat << EOF
-{
-  "tr_id": "url-scan-$(date +%s)",
-  "ai_profile": $AI_PROFILE,
-  "metadata": {
-    "app_user": "claude-code-user",
-    "tool_name": "$TOOL_NAME",
-    "source": "pre-tool-use"
-  },
-  "contents": [
-    {
-      "prompt": "$URL"
-    }
-  ]
-}
-EOF
-)
+PAYLOAD=$(jq -n \
+  --arg tr_id "$SESSION_ID" \
+  --argjson ai_profile "$AI_PROFILE" \
+  --arg app_user "claude-code-user" \
+  --arg app_name "$APP_NAME" \
+  --arg tool_name "$TOOL_NAME" \
+  --arg source "pre-tool-use" \
+  --arg url "$URL" \
+  '{
+    tr_id: $tr_id,
+    ai_profile: $ai_profile,
+    metadata: {app_user: $app_user, app_name: $app_name, tool_name: $tool_name, source: $source},
+    contents: [{prompt: $url}]
+  }')
 
 # Call Prisma AIRS API
 SCAN_RESULT=$(curl -s -L "$PRISMA_AIRS_API_URL" \

@@ -144,7 +144,7 @@ tail -f .cursor/hooks/prisma-airs.log
 
 ### Timeout
 
-All AIRS API calls are capped at **3 seconds** (`TIMEOUT_SECONDS` in `prisma-airs.sh`). On timeout or network error, hooks fail open.
+All AIRS API calls are capped at **3 seconds** (`TIMEOUT_SECONDS` in `prisma-airs.sh`). Hooks **fail closed** on missing credentials — if the API key or profile is not configured, actions are blocked rather than silently allowed.
 
 ---
 
@@ -265,7 +265,7 @@ Tool inputs and outputs are truncated to **20,000 characters** before sending to
 
 ### API Dependency
 
-Hooks require network access to the Prisma AIRS API. All hooks **fail open** on timeout or error.
+Hooks require network access to the Prisma AIRS API. Hooks **fail closed** when credentials are missing — actions are blocked until configuration is corrected.
 
 ---
 

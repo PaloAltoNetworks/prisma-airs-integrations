@@ -9,9 +9,9 @@ elif [ -f ../.env ]; then
 fi
 
 # Required variables
-ORG="${APIGEE_ORG:-panw-gcp-team-testing}"
+ORG="${APIGEE_ORG:-YOUR_APIGEE_ORG}"
 ENV="${APIGEE_ENV:-eval}"
-PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-panw-gcp-team-testing}"
+PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-YOUR_GCP_PROJECT_ID}"
 
 # Prisma AIRS configuration
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"

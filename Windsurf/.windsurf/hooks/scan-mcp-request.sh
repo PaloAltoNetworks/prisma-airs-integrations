@@ -19,10 +19,11 @@ TOOL_LABEL="${MCP_SERVER}__${MCP_TOOL}"
 
 log "PreToolUse MCP Hook: Scanning $TOOL_LABEL request"
 
-# Fail-open if API key not configured
+# Fail-closed: block if API key not configured
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
-    log "WARNING: PRISMA_AIRS_API_KEY not set for MCP request scanning"
-    exit 0
+    log "ERROR: PRISMA_AIRS_API_KEY not set — blocking MCP request (fail-closed)"
+    echo "Prisma AIRS: API key not configured — blocking MCP request (fail-closed)" >&2
+    exit 2
 fi
 
 SESSION_ID=$(get_session_id "$INPUT_JSON")

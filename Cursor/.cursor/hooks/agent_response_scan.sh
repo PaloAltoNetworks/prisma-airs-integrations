@@ -37,10 +37,11 @@ TRUNCATED=$(printf '%s' "$RESPONSE_TEXT" | head -c 20000)
 
 log "AGENT-RESPONSE: Scanning assistant response (${#TRUNCATED} chars)"
 
-# Fail-open: warn and allow if credentials missing
+# Fail-closed: block if credentials missing
 if [[ -z "$PRISMA_AIRS_API_KEY" ]] || ! has_profile; then
-    log "WARNING: PRISMA_AIRS_API_KEY or profile not set — allowing response without scan"
-    exit 0
+    log "ERROR: PRISMA_AIRS_API_KEY or profile not set — blocking response (fail-closed)"
+    echo "Prisma AIRS: API key or profile not configured — blocking response (fail-closed)" >&2
+    exit 2
 fi
 
 # Use Cursor's conversation_id to group all scans in one session
