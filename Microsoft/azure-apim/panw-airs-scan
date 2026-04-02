@@ -6,9 +6,10 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 ## Features:
 - Scans either the prompt or the response based on the `ScanType` variable.
 - Handles both prompt and response scanning in a single fragment.
-- For requests containing tools, scans only the last user message as the prompt, ignoring tool definitions.
-- Passes through without scanning when: the inbound request is a tool result submission (last message role=tool), or the outbound response is a tool call (finish_reason=tool_calls).
-- Will keep the session of the prompt and response together using a session. If a header of x-session-id exists, this will become the session_id, which will group the coversation together.
+- For both `messages` (chat/completions) and `input` (responses) formats, scans only the last user message as the prompt, ignoring tool definitions.
+- Scans tool result submissions (last message role=tool) as a tool_event with full metadata (ecosystem, method, server_name, tool_invoked), input arguments, and output — tool name and input resolved via lookback through message history.
+- Passes through without scanning when the outbound response is a tool call (finish_reason=tool_calls).
+- Automatically tracks multi-turn conversations (including tool calls) under the same session_id by hashing user IP + system message + first user message. Priority: x-session-id header > conversation hash > RequestId. This enables automatic session linking without requiring clients to manage session IDs.
 - Provides detailed error messages when a request is blocked.
 - Allows for fail-open or fail-closed behavior when the security scanner is unavailable.
 - Can be configured using context variables.
@@ -16,6 +17,8 @@ This APIM policy fragment is designed to be included in the inbound and outbound
 ## Context Variables:
 - `ScanType`: (string) "prompt" or "response". Defaults to "prompt".
 - `currentProfile`: (string) The name of the AIRS profile to use for scanning. Defaults to "example-profile".
+- `toolProfile`: (string) The name of the AIRS profile to use when scanning tool events. Defaults to `currentProfile` if not set.
+- `scanTools`: (boolean) `true` to scan tool result submissions, `false` to pass them through. Defaults to `true`.
 - `appName`: (string) The name of the application. Defaults to "Azure-APIM-Gateway".
 - `FailOpen`: (boolean) `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.
 - `airsDescriptions`: (JObject) A JObject containing custom error messages for detected threats. If not provided, the default messages in `scanDescriptions` will be used.
@@ -43,6 +46,8 @@ This APIM policy fragment is designed to be included in the inbound and outbound
     }" />
     <set-variable name="ScanType" value="prompt" />
     <set-variable name="currentProfile" value="prompt-profile" />
+    <set-variable name="toolProfile" value="tool-security-profile" />
+    <set-variable name="scanTools" value="true" />
     <set-variable name="FailOpen" value="true" />
     <include-fragment fragment-id="panw-airs-scan" />
 </inbound>
@@ -86,6 +91,76 @@ This APIM policy fragment is designed to be included in the inbound and outbound
         This section prepares the request data for the AIRS service.
         It extracts common information from the request, such as the model, app name, and profile name.
         -->
+			<!-- Set session ID once and reuse across inbound/outbound -->
+			<set-variable name="airsSessionId" value="@{
+            if (!context.Variables.ContainsKey("airsSessionId")) {
+                // Priority 1: Use x-session-id header if provided
+                if (context.Request.Headers.ContainsKey("x-session-id")) {
+                    string[] headerValues = context.Request.Headers["x-session-id"];
+                    if (headerValues != null && headerValues.Length > 0) {
+                        return headerValues[0];
+                    }
+                }
+
+                // Priority 2: Generate stable session ID from IP + conversation history
+                var body = context.Request.Body.As<JObject>(preserveContent: true);
+                string userIP = context.Request.IpAddress;
+
+                if (body != null) {
+                    var conversationSeed = new System.Text.StringBuilder();
+                    conversationSeed.Append(userIP).Append("|");
+
+                    // Try chat/completions format (messages array)
+                    if (body["messages"] is JArray messages && messages.Count > 0) {
+                        // Find system message content
+                        var systemMsg = messages.FirstOrDefault(m => m["role"]?.ToString() == "system");
+                        if (systemMsg != null && systemMsg["content"] != null) {
+                            conversationSeed.Append(systemMsg["content"].ToString()).Append("|");
+                        }
+
+                        // Find first user message content
+                        var firstUserMsg = messages.FirstOrDefault(m => m["role"]?.ToString() == "user");
+                        if (firstUserMsg != null && firstUserMsg["content"] != null) {
+                            conversationSeed.Append(firstUserMsg["content"].ToString());
+                        }
+
+                        // Generate hash if we have conversation content
+                        if (conversationSeed.Length > userIP.Length + 1) {
+                            using (var sha256 = System.Security.Cryptography.SHA256.Create()) {
+                                byte[] hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(conversationSeed.ToString()));
+                                return "conv-" + BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16).ToLower();
+                            }
+                        }
+                    }
+                    // Try responses API format (input array)
+                    else if (body["input"] is JArray inputArr && inputArr.Count > 0) {
+                        // Find system message content
+                        var systemInput = inputArr.FirstOrDefault(i => i["role"]?.ToString() == "system");
+                        if (systemInput != null && systemInput["content"] != null) {
+                            conversationSeed.Append(systemInput["content"].ToString()).Append("|");
+                        }
+
+                        // Find first user message content
+                        var firstUserInput = inputArr.FirstOrDefault(i => i["role"]?.ToString() == "user");
+                        if (firstUserInput != null && firstUserInput["content"] != null) {
+                            conversationSeed.Append(firstUserInput["content"].ToString());
+                        }
+
+                        // Generate hash if we have conversation content
+                        if (conversationSeed.Length > userIP.Length + 1) {
+                            using (var sha256 = System.Security.Cryptography.SHA256.Create()) {
+                                byte[] hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(conversationSeed.ToString()));
+                                return "conv-" + BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16).ToLower();
+                            }
+                        }
+                    }
+                }
+
+                // Priority 3: Fall back to RequestId for non-conversational requests
+                return context.RequestId.ToString();
+            }
+            return (string)context.Variables["airsSessionId"];
+        }" />
 			<set-variable name="requestData" value="@{
             var body = context.Request.Body.As<JObject>(preserveContent: true);
             // Get the model if it exists
@@ -94,8 +169,16 @@ This APIM policy fragment is designed to be included in the inbound and outbound
             string appName = "APIM-" + (string)context.Variables.GetValueOrDefault("appName", "Gateway");
             // By default exampl-profile is used, unless the variable is defined earlier in the policy
             string profileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
-            // If x-session-id exists use that to track coversations, else use the RequestId to link the prompt and response)
-            string sessionId = context.Request.Headers.GetValueOrDefault("x-session-id", context.RequestId.ToString() ?? "no-id");
+            // Use the session ID stored in variable (set above)
+            string sessionId = (string)context.Variables["airsSessionId"];
+            // Get user ID from header if available
+            string appUser = "anonymous";
+            if (context.Request.Headers.ContainsKey("x-user-id")) {
+                string[] userHeaders = context.Request.Headers["x-user-id"];
+                if (userHeaders != null && userHeaders.Length > 0) {
+                    appUser = userHeaders[0];
+                }
+            }
 
             return new JObject(
                 new JProperty("session_id", sessionId),
@@ -106,8 +189,8 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                     new JProperty("app_name", appName),
                     new JProperty("user_ip", context.Request.IpAddress),
                     new JProperty("ai_model", model),
-                    new JProperty("app_user", context.Request.Headers.GetValueOrDefault("x-user-id", "anonymous"))
-                ))    
+                    new JProperty("app_user", appUser)
+                ))
             );
         }" />
 			<!--
@@ -148,15 +231,111 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                 
                                 var contents = new JArray();
 
-                                if (body["input"] != null) {
-                                    // Responses API format
+                                if (body["input"] is JArray inputArr && inputArr.Count > 0) {
+                                    // Responses API — inspect the input array
+                                    var lastInput = inputArr.Last as JObject;
+                                    string lastType = lastInput?["type"]?.ToString() ?? "";
+
+                                    if (lastType == "function_call_output") {
+                                        bool scanTools = Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("scanTools", true));
+
+                                        if (scanTools) {
+                                            // Tool result submission — scan as tool_event
+                                            string toolCallId = lastInput["call_id"]?.ToString() ?? "unknown";
+                                            string toolOutput = lastInput["output"]?.ToString() ?? "";
+                                            string toolName = "unknown_tool";
+                                            string toolInput = "{}";
+
+                                            // Lookback to find the matching function_call by call_id
+                                            for (int i = inputArr.Count - 2; i >= 0; i--) {
+                                                var prevItem = inputArr[i] as JObject;
+                                                if (prevItem?["type"]?.ToString() == "function_call" && prevItem["call_id"]?.ToString() == toolCallId) {
+                                                    toolName = prevItem["name"]?.ToString() ?? "unknown_tool";
+                                                    toolInput = prevItem["arguments"]?.ToString() ?? "{}";
+                                                    break;
+                                                }
+                                            }
+
+                                            string toolProfileName = context.Variables.GetValueOrDefault<string>("toolProfile", null);
+                                            if (toolProfileName == null) {
+                                                toolProfileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+                                            }
+                                            data["ai_profile"]["profile_name"] = toolProfileName;
+
+                                            contents.Add(new JObject(new JProperty("tool_event", new JObject(
+                                                new JProperty("metadata", new JObject(
+                                                    new JProperty("ecosystem", "mcp"),
+                                                    new JProperty("method", "tools/call"),
+                                                    new JProperty("server_name", data["metadata"]?["app_name"]?.ToString() ?? "APIM-Gateway"),
+                                                    new JProperty("tool_invoked", toolName)
+                                                )),
+                                                new JProperty("input", toolInput),
+                                                new JProperty("output", toolOutput)
+                                            ))));
+                                        }
+                                        // If scanTools is false, contents remains empty and will be passed through
+                                    } else {
+                                        // Initial request — find the last user-role message
+                                        for (int i = inputArr.Count - 1; i >= 0; i--) {
+                                            var item = inputArr[i] as JObject;
+                                            if (item?["role"]?.ToString() == "user") {
+                                                contents.Add(new JObject(new JProperty("prompt", item["content"]?.ToString() ?? "")));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } else if (body["input"] != null) {
+                                    // Responses API — plain string input
                                     contents.Add(new JObject(new JProperty("prompt", body["input"].ToString())));
                                 } else if (body["messages"] is JArray messages && messages.Count > 0) {
                                     var lastMsg = messages.Last as JObject;
                                     string lastRole = lastMsg?["role"]?.ToString() ?? "";
 
                                     if (lastRole == "tool") {
-                                        // Tool result submission to LLM — pass through without scanning
+                                        bool scanTools = Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("scanTools", true));
+
+                                        if (scanTools) {
+                                            // Handle Tool Result Submission — scan the tool output
+                                            string toolCallId = lastMsg["tool_call_id"]?.ToString() ?? "unknown";
+                                            string toolOutput = lastMsg["content"]?.ToString() ?? "";
+                                            string toolName = "unknown_tool";
+                                            string toolInput = "{}";
+
+                                            // Lookback through history to find the matching tool_call by id
+                                            for (int i = messages.Count - 2; i >= 0; i--) {
+                                                var prevMsg = messages[i] as JObject;
+                                                var prevToolCalls = prevMsg?["tool_calls"] as JArray;
+                                                if (prevToolCalls != null) {
+                                                    var matchingCall = prevToolCalls.FirstOrDefault(tc => tc["id"]?.ToString() == toolCallId);
+                                                    if (matchingCall != null) {
+                                                        toolName = matchingCall["function"]?["name"]?.ToString() ?? "unknown_tool";
+                                                        toolInput = matchingCall["function"]?["arguments"]?.ToString() ?? "{}";
+                                                        break;
+                                                    }
+                                                }
+                                            }
+
+                                            // Use toolProfile if set, otherwise fall back to currentProfile
+                                            string toolProfileName = context.Variables.GetValueOrDefault<string>("toolProfile", null);
+                                            if (toolProfileName == null) {
+                                                toolProfileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+                                            }
+
+                                            // Update profile in data for tool scanning
+                                            data["ai_profile"]["profile_name"] = toolProfileName;
+
+                                            contents.Add(new JObject(new JProperty("tool_event", new JObject(
+                                                new JProperty("metadata", new JObject(
+                                                    new JProperty("ecosystem", "mcp"),
+                                                    new JProperty("method", "tools/call"),
+                                                    new JProperty("server_name", data["metadata"]?["app_name"]?.ToString() ?? "APIM-Gateway"),
+                                                    new JProperty("tool_invoked", toolName)
+                                                )),
+                                                new JProperty("input", toolInput),
+                                                new JProperty("output", toolOutput)
+                                            ))));
+                                        }
+                                        // If scanTools is false, contents remains empty and will be passed through
                                     } else {
                                         // Normal first call: scan last user message as prompt
                                         contents.Add(new JObject(new JProperty("prompt", lastMsg?["content"]?.ToString() ?? "")));
@@ -221,37 +400,37 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                 -->
 					<choose>
 						<when condition="@(((JObject)context.Variables["requestData"]).ContainsKey("contents"))">
-					<send-request id="panw-airs-scan" mode="new" response-variable-name="panwScanResponse" timeout="10" ignore-error="true">
-						<set-url>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</set-url>
-						<set-method>POST</set-method>
-						<set-header name="x-pan-token" exists-action="override">
-							<value>{{AIRS-API}}</value>
-						</set-header>
-						<set-header name="Content-Type" exists-action="override">
-							<value>application/json</value>
-						</set-header>
-						<set-body>@{
+							<send-request id="panw-airs-scan" mode="new" response-variable-name="panwScanResponse" timeout="10" ignore-error="true">
+								<set-url>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</set-url>
+								<set-method>POST</set-method>
+								<set-header name="x-pan-token" exists-action="override">
+									<value>{{AIRS-API}}</value>
+								</set-header>
+								<set-header name="Content-Type" exists-action="override">
+									<value>application/json</value>
+								</set-header>
+								<set-body>@{
                         var requestBody = (JObject)context.Variables["requestData"];
                         return requestBody.ToString();
                     }</set-body>
-					</send-request>
-					<!--
+							</send-request>
+							<!--
                 This section handles the response from the AIRS service.
                 -->
-					<choose>
-						<!--
-                    This `when` block handles the case where the AIRS service returns a successful response.
-                    -->
-						<when condition="@(context.Variables.ContainsKey("panwScanResponse") && ((IResponse)context.Variables["panwScanResponse"]).StatusCode == 200)">
 							<choose>
 								<!--
+                    This `when` block handles the case where the AIRS service returns a successful response.
+                    -->
+								<when condition="@(context.Variables.ContainsKey("panwScanResponse") && ((IResponse)context.Variables["panwScanResponse"]).StatusCode == 200)">
+									<choose>
+										<!--
                             This `when` block handles the case where the AIRS service blocks the request.
                             -->
-								<when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "block")">
-									<!--
+										<when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "block")">
+											<!--
                                 This section builds the detailed error message.
                                 -->
-									<set-variable name="errorBody" value="@{
+											<set-variable name="errorBody" value="@{
                                     var panwResponse = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
                                     var response = new JObject();
 
@@ -304,26 +483,26 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                     response.Add("details", details);
                                     return response.ToString();
                                 }" />
-									<!--
+											<!--
                                 This section returns the error response.
                                 -->
-									<return-response>
-										<set-status code="403" reason="Forbidden" />
-										<set-header name="Content-Type" exists-action="override">
-											<value>application/json</value>
-										</set-header>
-										<set-body>@(context.Variables.GetValueOrDefault<string>("errorBody"))</set-body>
-									</return-response>
-								</when>
-								<!--
+											<return-response>
+												<set-status code="403" reason="Forbidden" />
+												<set-header name="Content-Type" exists-action="override">
+													<value>application/json</value>
+												</set-header>
+												<set-body>@(context.Variables.GetValueOrDefault<string>("errorBody"))</set-body>
+											</return-response>
+										</when>
+										<!--
                                 This `when` block handles the case where the AIRS service action is allow but Data Masking is enabled on the prompt. 
                                 It will replace the request contents with the masked text. A Trace message with the origional text will be created.
                             -->
-								<when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "allow" && ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true).ContainsKey("prompt_masked_data"))">
-									<trace source="SecurityScanner" severity="error">
-										<message>@("🛡️ PRISMA AIRS SECURITY ALERT:  Masked Prompt: " + ((JObject)context.Variables["requestData"])["contents"]?.Last?["prompt"])</message>
-									</trace>
-									<set-body>@{
+										<when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "allow" && ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true).ContainsKey("prompt_masked_data"))">
+											<trace source="SecurityScanner" severity="error">
+												<message>@("🛡️ PRISMA AIRS SECURITY ALERT:  Masked Prompt: " + ((JObject)context.Variables["requestData"])["contents"]?.Last?["prompt"])</message>
+											</trace>
+											<set-body>@{
                                     var body = context.Request.Body.As<JObject>(preserveContent: true);
                                     var panwResponse = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
                                     var maskedData = panwResponse["prompt_masked_data"]["data"].ToString();
@@ -336,21 +515,21 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                     }
                                     return body.ToString();
                                 }</set-body>
-								</when>
-								<!--
+										</when>
+										<!--
                                 This `when` block handles the case where the AIRS service action is allow but Data Masking is enabled on the response. 
                                 It will replace the response contents with the masked text. A Trace message with the origional text will be created.
                             -->
-								<when condition="@{
+										<when condition="@{
                                         var panwBody = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
                                         return panwBody["action"]?.ToString() == "allow"
                                             && panwBody.ContainsKey("response_masked_data")
                                             && panwBody["response_masked_data"]?["data"] != null;
                                     }">
-									<trace source="SecurityScanner" severity="error">
-										<message>@("🛡️ PRISMA AIRS SECURITY ALERT:  Masked Response: " + ((JObject)context.Variables["requestData"])["contents"]?.Last?["response"])</message>
-									</trace>
-									<set-body>@{
+											<trace source="SecurityScanner" severity="error">
+												<message>@("🛡️ PRISMA AIRS SECURITY ALERT:  Masked Response: " + ((JObject)context.Variables["requestData"])["contents"]?.Last?["response"])</message>
+											</trace>
+											<set-body>@{
                                     var body = context.Response.Body.As<JObject>(preserveContent: true);
                                     var panwResponse = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
                                     var maskedData = panwResponse["response_masked_data"]?["data"]?.ToString();
@@ -364,33 +543,33 @@ This APIM policy fragment is designed to be included in the inbound and outbound
                                     }
                                     return body.ToString();
                                 }</set-body>
+										</when>
+									</choose>
 								</when>
-							</choose>
-						</when>
-						<!--
+								<!--
                     This `otherwise` block handles the case where the AIRS service is unavailable.
                     -->
-						<otherwise>
-							<choose>
-								<when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)) == false)">
-									<return-response>
-										<set-status code="503" reason="Service Unavailable" />
-										<set-header name="Content-Type" exists-action="override">
-											<value>application/json</value>
-										</set-header>
-										<set-body>{ "error": "🛡️ PRISMA AIRS SECURITY ALERT: Security scanner unavailable. Request blocked for safety." }</set-body>
-									</return-response>
-								</when>
 								<otherwise>
-									<trace source="SecurityScanner" severity="error">
-										<message>🛡️ PRISMA AIRS SECURITY ALERT:  Scanner failed or timed out. Failing open (allowing traffic).</message>
-									</trace>
+									<choose>
+										<when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)) == false)">
+											<return-response>
+												<set-status code="503" reason="Service Unavailable" />
+												<set-header name="Content-Type" exists-action="override">
+													<value>application/json</value>
+												</set-header>
+												<set-body>{ "error": "🛡️ PRISMA AIRS SECURITY ALERT: Security scanner unavailable. Request blocked for safety." }</set-body>
+											</return-response>
+										</when>
+										<otherwise>
+											<trace source="SecurityScanner" severity="error">
+												<message>🛡️ PRISMA AIRS SECURITY ALERT:  Scanner failed or timed out. Failing open (allowing traffic).</message>
+											</trace>
+										</otherwise>
+									</choose>
 								</otherwise>
 							</choose>
-						</otherwise>
-					</choose>
 						</when>
-						<!-- No contents to scan (e.g. all function-type tool calls) — pass through -->
+						<!-- No contents to scan (e.g. finish_reason=tool_calls or empty response) — pass through -->
 					</choose>
 				</when>
 				<!--
