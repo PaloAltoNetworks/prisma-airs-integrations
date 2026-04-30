@@ -17,6 +17,7 @@ This repository contains setup guides for embedding Prisma AIRS security into AI
 | [Anthropic (Hooks)](./Anthropic/claude-code-hooks/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
 | [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [OpenAI (Codex Hooks)](./OpenAI/codex-hooks/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ✅ |
 | [Cline](./Cline/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
 | [Cursor](./Cursor/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Windsurf](./Windsurf/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ⚠️ |
