@@ -1,0 +1,634 @@
+<!--
+PANW AIRS Security Scanning Fragment - Version 2
+
+This APIM policy fragment scans prompts, responses, and tool events using Palo Alto Networks AIRS service.
+Supports OpenAI (chat/completions, responses), Anthropic (v1/messages), and Azure AI Foundry Claude (anthropic/v1/messages).
+
+## Features:
+- Multi-model support: OpenAI, Anthropic, Azure AI Foundry Claude
+- Scans prompts, model responses (including streaming/SSE), and tool results
+- Tool event scanning: OpenAI role=tool, Responses API function_call_output, Anthropic tool_result
+- Streaming response scanning via SSE chunk reassembly (OpenAI delta.content, Anthropic text_delta)
+- Passes through without scanning when the model requests a tool call (finish_reason=tool_calls, stop_reason=tool_use)
+- Conversation-based session tracking (IP + system msg + first user msg hash)
+- Configurable fail-open/fail-closed behavior
+- Prompt and response masking support
+- Detailed per-threat error messages
+
+## Context Variables:
+- `ScanType`: (string) "prompt" or "response". Defaults to "prompt"
+- `currentProfile`: (string) AIRS profile name. Defaults to "example-profile"
+- `toolProfile`: (string) AIRS profile for tool events. Defaults to currentProfile
+- `scanTools`: (boolean) true to scan tool results, false to pass through. Defaults to true
+- `appName`: (string) Application name (prefixed with "APIM-"). Defaults to "Gateway"
+- `FailOpen`: (boolean) true = allow if AIRS unavailable, false = block. Defaults to false
+- `airsDescriptions`: (JObject) Custom threat descriptions (optional)
+
+## Supported Paths:
+- /chat/completions (OpenAI)
+- /responses (OpenAI Responses API)
+- /v1/messages (Anthropic direct + Azure AI Foundry Claude)
+
+## Usage:
+```xml
+<inbound>
+    <base />
+    <set-variable name="ScanType" value="prompt" />
+    <set-variable name="currentProfile" value="my-profile" />
+    <set-variable name="FailOpen" value="true" />
+    <include-fragment fragment-id="panw-airs-scan-v2" />
+</inbound>
+<outbound>
+    <base />
+    <set-variable name="ScanType" value="response" />
+    <include-fragment fragment-id="panw-airs-scan-v2" />
+</outbound>
+```
+-->
+<fragment>
+    <set-variable name="scanDescriptions" value="@{
+        return new JObject(
+            new JProperty("url_cats", "Unacceptable URLs detected in content"),
+            new JProperty("dlp", "Sensitive data (PII, credentials, secrets) detected"),
+            new JProperty("injection", "Prompt injection or jailbreak attempt detected"),
+            new JProperty("toxic_content", "Toxic or inappropriate content detected"),
+            new JProperty("malicious_code", "Malicious code or commands detected"),
+            new JProperty("agent", "Agent manipulation attempt detected"),
+            new JProperty("topic_violation", "Content violates acceptable topic policies"),
+            new JProperty("db_security", "Database command injection detected"),
+            new JProperty("ungrounded", "Response contains ungrounded or hallucinated content")
+        );
+    }" />
+    <choose>
+        <when condition="@(
+        context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase) &&
+        (context.Request.OriginalUrl.Path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase) ||
+         context.Request.OriginalUrl.Path.EndsWith("/responses", StringComparison.OrdinalIgnoreCase) ||
+         context.Request.OriginalUrl.Path.EndsWith("/v1/messages", StringComparison.OrdinalIgnoreCase))
+    )">
+            <!-- Session ID: header > conversation hash > RequestId -->
+            <set-variable name="airsSessionId" value="@{
+            if (!context.Variables.ContainsKey("airsSessionId")) {
+                if (context.Request.Headers.ContainsKey("x-session-id")) {
+                    string[] headerValues = context.Request.Headers["x-session-id"];
+                    if (headerValues != null && headerValues.Length > 0) {
+                        return headerValues[0];
+                    }
+                }
+                var body = context.Request.Body.As<JObject>(preserveContent: true);
+                string userIP = context.Request.IpAddress;
+                if (body != null) {
+                    var conversationSeed = new System.Text.StringBuilder();
+                    conversationSeed.Append(userIP).Append("|");
+                    if (body["messages"] is JArray messages && messages.Count > 0) {
+                        var systemMsg = messages.FirstOrDefault(m => m["role"]?.ToString() == "system");
+                        if (systemMsg != null && systemMsg["content"] != null) {
+                            conversationSeed.Append(systemMsg["content"].ToString()).Append("|");
+                        }
+                        var firstUserMsg = messages.FirstOrDefault(m => m["role"]?.ToString() == "user");
+                        if (firstUserMsg != null && firstUserMsg["content"] != null) {
+                            conversationSeed.Append(firstUserMsg["content"].ToString());
+                        }
+                        if (conversationSeed.Length > userIP.Length + 1) {
+                            using (var sha256 = System.Security.Cryptography.SHA256.Create()) {
+                                byte[] hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(conversationSeed.ToString()));
+                                return "conv-" + BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16).ToLower();
+                            }
+                        }
+                    }
+                    // Anthropic: top-level system field + messages
+                    else if (body["system"] != null || (body["messages"] == null && body["input"] == null)) {
+                        var systemContent = body["system"]?.ToString();
+                        if (!string.IsNullOrEmpty(systemContent)) {
+                            conversationSeed.Append(systemContent).Append("|");
+                        }
+                        if (conversationSeed.Length > userIP.Length + 1) {
+                            using (var sha256 = System.Security.Cryptography.SHA256.Create()) {
+                                byte[] hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(conversationSeed.ToString()));
+                                return "conv-" + BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16).ToLower();
+                            }
+                        }
+                    }
+                    else if (body["input"] is JArray inputArr && inputArr.Count > 0) {
+                        var systemInput = inputArr.FirstOrDefault(i => i["role"]?.ToString() == "system");
+                        if (systemInput != null && systemInput["content"] != null) {
+                            conversationSeed.Append(systemInput["content"].ToString()).Append("|");
+                        }
+                        var firstUserInput = inputArr.FirstOrDefault(i => i["role"]?.ToString() == "user");
+                        if (firstUserInput != null && firstUserInput["content"] != null) {
+                            conversationSeed.Append(firstUserInput["content"].ToString());
+                        }
+                        if (conversationSeed.Length > userIP.Length + 1) {
+                            using (var sha256 = System.Security.Cryptography.SHA256.Create()) {
+                                byte[] hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(conversationSeed.ToString()));
+                                return "conv-" + BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16).ToLower();
+                            }
+                        }
+                    }
+                }
+                return context.RequestId.ToString();
+            }
+            return (string)context.Variables["airsSessionId"];
+        }" />
+            <set-variable name="requestData" value="@{
+            var body = context.Request.Body.As<JObject>(preserveContent: true);
+            string model = (body != null && body.ContainsKey("model")) ? body["model"].ToString() : "unknown-model";
+            string appName = "APIM-" + (string)context.Variables.GetValueOrDefault("appName", "Gateway");
+            string profileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+            string sessionId = (string)context.Variables["airsSessionId"];
+            string appUser = "anonymous";
+            if (context.Request.Headers.ContainsKey("x-user-id")) {
+                string[] userHeaders = context.Request.Headers["x-user-id"];
+                if (userHeaders != null && userHeaders.Length > 0) {
+                    appUser = userHeaders[0];
+                }
+            }
+            return new JObject(
+                new JProperty("session_id", sessionId),
+                new JProperty("ai_profile", new JObject(
+                    new JProperty("profile_name", profileName)
+                )),
+                new JProperty("metadata", new JObject(
+                    new JProperty("app_name", appName),
+                    new JProperty("user_ip", context.Request.IpAddress),
+                    new JProperty("ai_model", model),
+                    new JProperty("app_user", appUser)
+                ))
+            );
+        }" />
+            <set-variable name="shouldScan" value="@{
+            string type = context.Variables.GetValueOrDefault<string>("ScanType", "prompt");
+            if (type == "prompt") {
+                return true;
+            }
+            else if (type == "response") {
+                return context.Response != null && context.Response.StatusCode >= 200 && context.Response.StatusCode < 300;
+            }
+            return false;
+        }" />
+            <choose>
+                <when condition="@((bool)context.Variables["shouldScan"])">
+                    <choose>
+                        <!-- PROMPT / TOOL EVENT EXTRACTION -->
+                        <when condition="@(context.Variables.GetValueOrDefault<string>("ScanType", "prompt") == "prompt")">
+                            <set-variable name="requestData" value="@{
+                            try {
+                                var data = (JObject)context.Variables["requestData"];
+                                var body = context.Request.Body.As<JObject>(preserveContent: true);
+                                var contents = new JArray();
+
+                                // --- OpenAI Responses API (input array) ---
+                                if (body["input"] is JArray inputArr && inputArr.Count > 0) {
+                                    var lastInput = inputArr.Last as JObject;
+                                    string lastType = lastInput?["type"]?.ToString() ?? "";
+
+                                    if (lastType == "function_call_output") {
+                                        bool scanTools = Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("scanTools", true));
+                                        if (scanTools) {
+                                            string toolCallId = lastInput["call_id"]?.ToString() ?? "unknown";
+                                            string toolOutput = lastInput["output"]?.ToString() ?? "";
+                                            string toolName = "unknown_tool";
+                                            string toolInput = "{}";
+                                            for (int i = inputArr.Count - 2; i >= 0; i--) {
+                                                var prevItem = inputArr[i] as JObject;
+                                                if (prevItem?["type"]?.ToString() == "function_call" && prevItem["call_id"]?.ToString() == toolCallId) {
+                                                    toolName = prevItem["name"]?.ToString() ?? "unknown_tool";
+                                                    toolInput = prevItem["arguments"]?.ToString() ?? "{}";
+                                                    break;
+                                                }
+                                            }
+                                            string toolProfileName = context.Variables.GetValueOrDefault<string>("toolProfile", null);
+                                            if (toolProfileName == null) {
+                                                toolProfileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+                                            }
+                                            data["ai_profile"]["profile_name"] = toolProfileName;
+                                            contents.Add(new JObject(new JProperty("tool_event", new JObject(
+                                                new JProperty("metadata", new JObject(
+                                                    new JProperty("ecosystem", "mcp"),
+                                                    new JProperty("method", "tools/call"),
+                                                    new JProperty("server_name", data["metadata"]?["app_name"]?.ToString() ?? "APIM-Gateway"),
+                                                    new JProperty("tool_invoked", toolName)
+                                                )),
+                                                new JProperty("input", toolInput),
+                                                new JProperty("output", toolOutput)
+                                            ))));
+                                        }
+                                    } else {
+                                        for (int i = inputArr.Count - 1; i >= 0; i--) {
+                                            var item = inputArr[i] as JObject;
+                                            if (item?["role"]?.ToString() == "user") {
+                                                contents.Add(new JObject(new JProperty("prompt", item["content"]?.ToString() ?? "")));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                // --- OpenAI Responses API (plain string input) ---
+                                else if (body["input"] != null && body["input"].Type == JTokenType.String) {
+                                    contents.Add(new JObject(new JProperty("prompt", body["input"].ToString())));
+                                }
+                                // --- OpenAI chat/completions OR Anthropic /v1/messages (both use messages array) ---
+                                else if (body["messages"] is JArray messages && messages.Count > 0) {
+                                    var lastMsg = messages.Last as JObject;
+                                    string lastRole = lastMsg?["role"]?.ToString() ?? "";
+
+                                    // --- OpenAI tool result (role=tool) ---
+                                    if (lastRole == "tool") {
+                                        bool scanTools = Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("scanTools", true));
+                                        if (scanTools) {
+                                            string toolCallId = lastMsg["tool_call_id"]?.ToString() ?? "unknown";
+                                            string toolOutput = lastMsg["content"]?.ToString() ?? "";
+                                            string toolName = "unknown_tool";
+                                            string toolInput = "{}";
+                                            for (int i = messages.Count - 2; i >= 0; i--) {
+                                                var prevMsg = messages[i] as JObject;
+                                                var prevToolCalls = prevMsg?["tool_calls"] as JArray;
+                                                if (prevToolCalls != null) {
+                                                    var matchingCall = prevToolCalls.FirstOrDefault(tc => tc["id"]?.ToString() == toolCallId);
+                                                    if (matchingCall != null) {
+                                                        toolName = matchingCall["function"]?["name"]?.ToString() ?? "unknown_tool";
+                                                        toolInput = matchingCall["function"]?["arguments"]?.ToString() ?? "{}";
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            string toolProfileName = context.Variables.GetValueOrDefault<string>("toolProfile", null);
+                                            if (toolProfileName == null) {
+                                                toolProfileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+                                            }
+                                            data["ai_profile"]["profile_name"] = toolProfileName;
+                                            contents.Add(new JObject(new JProperty("tool_event", new JObject(
+                                                new JProperty("metadata", new JObject(
+                                                    new JProperty("ecosystem", "mcp"),
+                                                    new JProperty("method", "tools/call"),
+                                                    new JProperty("server_name", data["metadata"]?["app_name"]?.ToString() ?? "APIM-Gateway"),
+                                                    new JProperty("tool_invoked", toolName)
+                                                )),
+                                                new JProperty("input", toolInput),
+                                                new JProperty("output", toolOutput)
+                                            ))));
+                                        }
+                                    }
+                                    // --- Anthropic tool_result ---
+                                    else if (lastRole == "user" && lastMsg["content"] is JArray contentBlocks && contentBlocks.Count > 0) {
+                                        var lastBlock = contentBlocks.Last as JObject;
+                                        if (lastBlock?["type"]?.ToString() == "tool_result") {
+                                            bool scanTools = Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("scanTools", true));
+                                            if (scanTools) {
+                                                string toolUseId = lastBlock["tool_use_id"]?.ToString() ?? "unknown";
+                                                // Anthropic tool_result content can be string or array
+                                                string toolOutput = "";
+                                                var trContent = lastBlock["content"];
+                                                if (trContent != null) {
+                                                    if (trContent.Type == JTokenType.String) {
+                                                        toolOutput = trContent.ToString();
+                                                    } else if (trContent.Type == JTokenType.Array) {
+                                                        var sb = new System.Text.StringBuilder();
+                                                        foreach (var block in (JArray)trContent) {
+                                                            if (block["type"]?.ToString() == "text") {
+                                                                sb.Append(block["text"]?.ToString() ?? "");
+                                                            }
+                                                        }
+                                                        toolOutput = sb.ToString();
+                                                    }
+                                                }
+                                                string toolName = "unknown_tool";
+                                                string toolInput = "{}";
+                                                // Lookback for matching tool_use block
+                                                for (int i = messages.Count - 2; i >= 0; i--) {
+                                                    var prevMsg = messages[i] as JObject;
+                                                    if (prevMsg?["role"]?.ToString() == "assistant" && prevMsg["content"] is JArray assistantBlocks) {
+                                                        foreach (var ab in assistantBlocks) {
+                                                            if (ab["type"]?.ToString() == "tool_use" && ab["id"]?.ToString() == toolUseId) {
+                                                                toolName = ab["name"]?.ToString() ?? "unknown_tool";
+                                                                toolInput = ab["input"]?.ToString() ?? "{}";
+                                                                break;
+                                                            }
+                                                        }
+                                                        if (toolName != "unknown_tool") {
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                string toolProfileName = context.Variables.GetValueOrDefault<string>("toolProfile", null);
+                                                if (toolProfileName == null) {
+                                                    toolProfileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+                                                }
+                                                data["ai_profile"]["profile_name"] = toolProfileName;
+                                                contents.Add(new JObject(new JProperty("tool_event", new JObject(
+                                                    new JProperty("metadata", new JObject(
+                                                        new JProperty("ecosystem", "mcp"),
+                                                        new JProperty("method", "tools/call"),
+                                                        new JProperty("server_name", data["metadata"]?["app_name"]?.ToString() ?? "APIM-Gateway"),
+                                                        new JProperty("tool_invoked", toolName)
+                                                    )),
+                                                    new JProperty("input", toolInput),
+                                                    new JProperty("output", toolOutput)
+                                                ))));
+                                            }
+                                        } else {
+                                            // Anthropic user message with content array — extract text blocks
+                                            var prompts = new System.Text.StringBuilder();
+                                            // Include top-level system field if present (Anthropic)
+                                            var topSystem = body["system"]?.ToString();
+                                            if (!string.IsNullOrEmpty(topSystem)) {
+                                                prompts.AppendLine(topSystem);
+                                            }
+                                            foreach (var block in contentBlocks) {
+                                                if (block["type"]?.ToString() == "text") {
+                                                    prompts.Append(block["text"]?.ToString() ?? "");
+                                                }
+                                            }
+                                            if (prompts.Length > 0) {
+                                                contents.Add(new JObject(new JProperty("prompt", prompts.ToString().Trim())));
+                                            }
+                                        }
+                                    }
+                                    // --- Normal prompt (string content) ---
+                                    else {
+                                        contents.Add(new JObject(new JProperty("prompt", lastMsg?["content"]?.ToString() ?? "")));
+                                    }
+                                }
+
+                                if (contents.Count > 0) {
+                                    data.Add("contents", contents);
+                                }
+                                return data;
+                            } catch {
+                                return (JObject)context.Variables["requestData"];
+                            }
+                        }" />
+                        </when>
+                        <!-- RESPONSE EXTRACTION: JSON + SSE streaming -->
+                        <otherwise>
+                            <set-variable name="requestData" value="@{
+                            try {
+                                var data = (JObject)context.Variables["requestData"];
+                                var raw = context.Response.Body.As<string>(preserveContent: true);
+                                var contents = new JArray();
+
+                                if (raw != null && raw.Contains("data:")) {
+                                    // SSE streaming response — reassemble chunks
+                                    var sb = new System.Text.StringBuilder();
+                                    bool isToolCall = false;
+                                    var lines = raw.Split(new[] { (char)10 }, StringSplitOptions.RemoveEmptyEntries);
+                                    foreach (var line in lines) {
+                                        var trimmed = line.Trim();
+                                        if (!trimmed.StartsWith("data:")) {
+                                            continue;
+                                        }
+                                        var jsonStr = trimmed.Substring(5).Trim();
+                                        if (jsonStr.Contains("[DONE]")) {
+                                            continue;
+                                        }
+                                        try {
+                                            var chunk = JObject.Parse(jsonStr);
+                                            // OpenAI streaming
+                                            var delta = chunk["choices"]?[0]?["delta"];
+                                            if (delta != null) {
+                                                var dc = delta["content"]?.ToString();
+                                                if (dc != null) {
+                                                    sb.Append(dc);
+                                                }
+                                                if (delta["tool_calls"] != null) {
+                                                    isToolCall = true;
+                                                }
+                                            }
+                                            var fr = chunk["choices"]?[0]?["finish_reason"]?.ToString();
+                                            if (fr == "tool_calls") {
+                                                isToolCall = true;
+                                            }
+                                            // Anthropic streaming
+                                            var et = chunk["type"]?.ToString();
+                                            if (et == "content_block_delta" && chunk["delta"]?["type"]?.ToString() == "text_delta") {
+                                                var txt = chunk["delta"]?["text"]?.ToString();
+                                                if (txt != null) {
+                                                    sb.Append(txt);
+                                                }
+                                            }
+                                            if (et == "content_block_start" && chunk["content_block"]?["type"]?.ToString() == "tool_use") {
+                                                isToolCall = true;
+                                            }
+                                            if (et == "message_delta" && chunk["delta"]?["stop_reason"]?.ToString() == "tool_use") {
+                                                isToolCall = true;
+                                            }
+                                        } catch { }
+                                    }
+                                    if (!isToolCall && sb.Length > 0) {
+                                        contents.Add(new JObject(new JProperty("response", sb.ToString())));
+                                    }
+                                } else if (raw != null) {
+                                    // Non-streaming JSON response
+                                    var body = JObject.Parse(raw);
+                                    // OpenAI Responses API
+                                    var outputToken = body["output"]?.Last?["content"]?.Last?["text"];
+                                    if (outputToken != null) {
+                                        contents.Add(new JObject(new JProperty("response", outputToken.ToString())));
+                                    }
+                                    // OpenAI chat/completions
+                                    else if (body["choices"] is JArray choices && choices.Count > 0) {
+                                        var message = choices.Last?["message"] as JObject;
+                                        var toolCalls = message?["tool_calls"] as JArray;
+                                        var textContent = message?["content"]?.ToString();
+                                        var finishReason = choices.Last?["finish_reason"]?.ToString();
+                                        if (finishReason == "tool_calls" || (toolCalls != null && toolCalls.Count > 0)) {
+                                            // Tool call — pass through
+                                        } else if (!string.IsNullOrEmpty(textContent)) {
+                                            contents.Add(new JObject(new JProperty("response", textContent)));
+                                        }
+                                    }
+                                    // Anthropic non-streaming
+                                    else if (body["content"] is JArray anthropicContent && anthropicContent.Count > 0) {
+                                        // Check for tool_use in response (pass through)
+                                        bool hasToolUse = false;
+                                        var respText = new System.Text.StringBuilder();
+                                        foreach (var block in anthropicContent) {
+                                            var blockType = block["type"]?.ToString();
+                                            if (blockType == "tool_use") {
+                                                hasToolUse = true;
+                                            }
+                                            if (blockType == "text") {
+                                                respText.Append(block["text"]?.ToString() ?? "");
+                                            }
+                                        }
+                                        var stopReason = body["stop_reason"]?.ToString();
+                                        if (!hasToolUse && stopReason != "tool_use" && respText.Length > 0) {
+                                            contents.Add(new JObject(new JProperty("response", respText.ToString())));
+                                        }
+                                    }
+                                }
+
+                                if (contents.Count > 0) {
+                                    data.Add("contents", contents);
+                                }
+                                return data;
+                            } catch {
+                                return (JObject)context.Variables["requestData"];
+                            }
+                        }" />
+                        </otherwise>
+                    </choose>
+                    <!-- Send to AIRS only if contents exist -->
+                    <choose>
+                        <when condition="@(((JObject)context.Variables["requestData"]).ContainsKey("contents"))">
+                            <send-request id="panw-airs-scan" mode="new" response-variable-name="panwScanResponse" timeout="10" ignore-error="true">
+                                <set-url>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</set-url>
+                                <set-method>POST</set-method>
+                                <set-header name="x-pan-token" exists-action="override">
+                                    <value>{{airs-api}}</value>
+                                </set-header>
+                                <set-header name="Content-Type" exists-action="override">
+                                    <value>application/json</value>
+                                </set-header>
+                                <set-body>@{
+                        var requestBody = (JObject)context.Variables["requestData"];
+                        return requestBody.ToString();
+                    }</set-body>
+                            </send-request>
+                            <choose>
+                                <when condition="@(context.Variables.ContainsKey("panwScanResponse") && ((IResponse)context.Variables["panwScanResponse"]).StatusCode == 200)">
+                                    <choose>
+                                        <!-- BLOCK -->
+                                        <when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "block")">
+                                            <set-variable name="errorBody" value="@{
+                                    var panwResponse = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
+                                    var response = new JObject();
+                                    var scanType = context.Variables.GetValueOrDefault<string>("ScanType", "prompt");
+                                    if (scanType == "prompt") {
+                                        response.Add("error", "🛡️ PRISMA AIRS SECURITY ALERT: REQUEST BLOCKED");
+                                    } else {
+                                        response.Add("error", "🛡️ PRISMA AIRS SECURITY ALERT: RESPONSE BLOCKED");
+                                    }
+                                    var descriptions = context.Variables.GetValueOrDefault<object>("airsDescriptions") as JObject;
+                                    if (descriptions == null) {
+                                        descriptions = context.Variables.GetValueOrDefault<object>("scanDescriptions") as JObject;
+                                    }
+                                    JObject detected = (scanType == "prompt") ? panwResponse["prompt_detected"] as JObject : panwResponse["response_detected"] as JObject;
+                                    var details = new JObject();
+                                    if (detected != null) {
+                                        foreach (JProperty prop in detected.Properties()) {
+                                            if (prop.Value.Type == JTokenType.Boolean && (bool)prop.Value == true) {
+                                                string key = prop.Name;
+                                                if (descriptions[key] != null) {
+                                                    details.Add(key, descriptions[key]);
+                                                } else {
+                                                    details.Add(key, true);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    response.Add("details", details);
+                                    return response.ToString();
+                                }" />
+                                            <return-response>
+                                                <set-status code="403" reason="Forbidden" />
+                                                <set-header name="Content-Type" exists-action="override">
+                                                    <value>application/json</value>
+                                                </set-header>
+                                                <set-body>@(context.Variables.GetValueOrDefault<string>("errorBody"))</set-body>
+                                            </return-response>
+                                        </when>
+                                        <!-- ALLOW + PROMPT MASKING -->
+                                        <when condition="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true)["action"].ToString() == "allow" && ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true).ContainsKey("prompt_masked_data"))">
+                                            <trace source="SecurityScanner" severity="error">
+                                                <message>@("🛡️ PRISMA AIRS SECURITY ALERT: Masked Prompt: " + ((JObject)context.Variables["requestData"])["contents"]?.Last?["prompt"])</message>
+                                            </trace>
+                                            <set-body>@{
+                                    var body = context.Request.Body.As<JObject>(preserveContent: true);
+                                    var panwResponse = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
+                                    var maskedData = panwResponse["prompt_masked_data"]["data"].ToString();
+                                    if (body["input"] != null && body["input"].Type == JTokenType.String) {
+                                        body["input"] = maskedData;
+                                    } else if (body["messages"] is JArray msgs && msgs.Count > 0) {
+                                        // Find last user message and mask it
+                                        for (int i = msgs.Count - 1; i >= 0; i--) {
+                                            if (msgs[i]["role"]?.ToString() == "user") {
+                                                var contentToken = msgs[i]["content"];
+                                                if (contentToken != null && contentToken.Type == JTokenType.String) {
+                                                    msgs[i]["content"] = maskedData;
+                                                } else if (contentToken != null && contentToken.Type == JTokenType.Array) {
+                                                    // Anthropic content array — mask text blocks
+                                                    foreach (var block in (JArray)contentToken) {
+                                                        if (block["type"]?.ToString() == "text") {
+                                                            block["text"] = maskedData;
+                                                        }
+                                                    }
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    return body.ToString();
+                                }</set-body>
+                                        </when>
+                                        <!-- ALLOW + RESPONSE MASKING -->
+                                        <when condition="@{
+                                        var panwBody = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
+                                        return panwBody["action"]?.ToString() == "allow"
+                                            && panwBody.ContainsKey("response_masked_data")
+                                            && panwBody["response_masked_data"]?["data"] != null;
+                                    }">
+                                            <trace source="SecurityScanner" severity="error">
+                                                <message>@("🛡️ PRISMA AIRS SECURITY ALERT: Masked Response: " + ((JObject)context.Variables["requestData"])["contents"]?.Last?["response"])</message>
+                                            </trace>
+                                            <set-body>@{
+                                    var body = context.Response.Body.As<JObject>(preserveContent: true);
+                                    var panwResponse = ((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true);
+                                    var maskedData = panwResponse["response_masked_data"]?["data"]?.ToString();
+                                    // OpenAI Responses API
+                                    if (body["output"] is JArray outputArr && outputArr.Count > 0 &&
+                                        outputArr.Last["content"] is JArray contentArr && contentArr.Count > 0 && contentArr.Last["text"] != null) {
+                                        contentArr.Last["text"] = maskedData;
+                                    }
+                                    // OpenAI chat/completions
+                                    else if (body["choices"] is JArray choicesArr && choicesArr.Count > 0 && choicesArr.Last["message"] != null) {
+                                        choicesArr.Last["message"]["content"] = maskedData;
+                                    }
+                                    // Anthropic
+                                    else if (body["content"] is JArray anthropicArr && anthropicArr.Count > 0) {
+                                        foreach (var block in anthropicArr) {
+                                            if (block["type"]?.ToString() == "text") {
+                                                block["text"] = maskedData;
+                                            }
+                                        }
+                                    }
+                                    return body.ToString();
+                                }</set-body>
+                                        </when>
+                                    </choose>
+                                </when>
+                                <!-- AIRS unavailable -->
+                                <otherwise>
+                                    <choose>
+                                        <when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)) == false)">
+                                            <return-response>
+                                                <set-status code="503" reason="Service Unavailable" />
+                                                <set-header name="Content-Type" exists-action="override">
+                                                    <value>application/json</value>
+                                                </set-header>
+                                                <set-body>{ "error": "🛡️ PRISMA AIRS SECURITY ALERT: Security scanner unavailable. Request blocked for safety." }</set-body>
+                                            </return-response>
+                                        </when>
+                                        <otherwise>
+                                            <trace source="SecurityScanner" severity="error">
+                                                <message>🛡️ PRISMA AIRS SECURITY ALERT: Scanner failed or timed out. Failing open (allowing traffic).</message>
+                                            </trace>
+                                        </otherwise>
+                                    </choose>
+                                </otherwise>
+                            </choose>
+                        </when>
+                    </choose>
+                </when>
+                <!-- Scan skipped -->
+                <otherwise>
+                    <trace source="PANW-Scanner" severity="information">
+                        <message>@("AIRS scan skipped: ScanType=" + context.Variables.GetValueOrDefault<string>("ScanType", "unknown") + ", response status=" + (context.Response != null ? context.Response.StatusCode.ToString() : "N/A (inbound)"))</message>
+                    </trace>
+                </otherwise>
+            </choose>
+        </when>
+        <otherwise>
+        </otherwise>
+    </choose>
+</fragment>

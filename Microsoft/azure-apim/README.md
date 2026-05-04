@@ -2,9 +2,29 @@
 
 A policy fragment that can be integrated into an Azure AI Gateway (part of APIM) as part of a larger AI Gateway policy.
 
+## Versions
+
+This integration provides two versions of the policy fragment. Choose the one that fits your environment:
+
+| Feature | v1 | v2 |
+|---------|:--:|:--:|
+| OpenAI chat/completions | ✅ | ✅ |
+| OpenAI Responses API | ✅ | ✅ |
+| Anthropic /v1/messages | ❌ | ✅ |
+| Azure AI Foundry Claude | ❌ | ✅ |
+| Streaming/SSE response scanning | ❌ | ✅ |
+| Anthropic tool_result scanning | ❌ | ✅ |
+| Prompt & response masking | ✅ | ✅ |
+| Tool event scanning | ✅ | ✅ |
+
+- **v1** — OpenAI-only. Simpler fragment for environments that only use OpenAI-compatible endpoints.
+- **v2** — Multi-model. Adds Anthropic and Azure AI Foundry Claude support, plus streaming/SSE response scanning.
+
 ## Coverage
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
+
+### v1
 
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
@@ -12,12 +32,25 @@ A policy fragment that can be integrated into an Azure AI Gateway (part of APIM)
 | Response | ✅ | Scans LLM responses in outbound policy with masking support |
 | Streaming | ❌ | Synchronous scanning with 10-second timeout |
 | Pre-tool call | ❌ | Not applicable - designed for direct LLM gateway requests |
-| Post-tool call | ✅ | Scans tool execution results as `tool_event` with full metadata |
+| Post-tool call | ✅ | Tool results scanned as `tool_event` with tool name, arguments, and output |
+
+### v2
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | Scans user prompts (OpenAI, Anthropic, Azure AI Foundry Claude) |
+| Response | ✅ | Scans LLM responses with masking support (all providers) |
+| Streaming | ✅ | SSE chunk reassembly for OpenAI and Anthropic streaming responses |
+| Pre-tool call | ❌ | Not applicable - designed for direct LLM gateway requests |
+| Post-tool call | ✅ | Tool results scanned as `tool_event` with tool name, arguments, and output |
 
 ## 🎯 What This Does
-The fragments handle scanning of prompts, responses, and tool events on the following OpenAI API Calls:
-* **POST /chat/completions** - Creates a model response for the given chat conversation
-* **POST /responses** - Creates a model response
+The fragments handle scanning of prompts, responses, and tool events on the following API calls:
+* **POST /chat/completions** - OpenAI chat completions (v1, v2)
+* **POST /responses** - OpenAI Responses API (v1, v2)
+* **POST /v1/messages** - Anthropic direct and Azure AI Foundry Claude (v2 only)
+
+> **Gemini:** Not directly supported, but Google's OpenAI-compatible endpoint (`/v1beta/openai/chat/completions`) works with both v1 and v2 since it uses the same chat/completions schema.
 
 **Scanning capabilities:**
 - **User prompts** before sending to the LLM
@@ -84,7 +117,7 @@ The policy fragment automatically tracks multi-turn conversations (including too
 ### Deploy in 5 Steps
 1. **Create a Named Value**: Create a named value called `airs-api` with your Prisma AIRS API Key
 
-2. **Create Policy Fragment**: Copy the contents of `panw-airs-scan` to a new policy fragment called `panw-airs-scan`
+2. **Create Policy Fragment**: Copy the contents of `prisma-airs-policy-fragment-v1/panw-airs-scan` (OpenAI only) or `prisma-airs-policy-fragment-v2/panw-airs-scan-v2` (multi-model) to a new policy fragment. Use the matching fragment ID (`panw-airs-scan` for v1, `panw-airs-scan-v2` for v2).
 
 3. **Configure the AI Gateway inbound policy** to call the fragment
 ```xml
@@ -92,6 +125,7 @@ The policy fragment automatically tracks multi-turn conversations (including too
         <!-- Optional: Configure tool scanning -->
         <set-variable name="toolProfile" value="tool-security-profile" />
         <set-variable name="scanTools" value="true" />
+        <!-- Use panw-airs-scan for v1, panw-airs-scan-v2 for v2 -->
         <include-fragment fragment-id="panw-airs-scan" />
 ```
 4. **Configure the AI Gateway outbound policy** to call the fragment
@@ -112,8 +146,9 @@ curl -X POST "https://<YOUR-HOSTNAME>/<YOUR API>/chat/completions" \
 ```
 
 ## 📁 What's Included
-* `policy-example` : An example policy for my LLM API. 
-* `panw-airs-scan` : The Primsa AIRS Policy fragment that can be used to scan prompts and responses. 
+* `prisma-airs-policy-fragment-v1/panw-airs-scan` : Prisma AIRS policy fragment for OpenAI endpoints (chat/completions, responses).
+* `prisma-airs-policy-fragment-v2/panw-airs-scan-v2` : Prisma AIRS policy fragment with multi-model support (OpenAI, Anthropic, Azure AI Foundry Claude) and streaming/SSE scanning.
+* `policy-example` : An example policy for an LLM API.
 
 ## 🔧 Configuration
 Policy fragment is configured in the policy using the following variables:
