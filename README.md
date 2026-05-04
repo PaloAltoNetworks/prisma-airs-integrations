@@ -1,6 +1,10 @@
 # Prisma AIRS Integrations
 
-Integration guides for Palo Alto Networks Prisma AIRS (AI Runtime Security) with third-party platforms.
+Example integrations and reference implementations demonstrating how Palo Alto Networks Prisma AIRS (AI Runtime Security) can be used with third-party platforms.
+
+> **_IMPORTANT_**
+
+> The contents of this repository are **community examples and reference implementations**, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
 
 ## Overview
 
@@ -8,9 +12,9 @@ Prisma AIRS provides inline security for AI applications, scanning prompts, resp
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
 
-This repository contains setup guides for embedding Prisma AIRS security into AI gateways, LLM proxies, coding assistants, and automation platforms.
+This repository collects example configurations, sample code, and reference patterns showing how Prisma AIRS can be embedded into AI gateways, LLM proxies, coding assistants, and automation platforms.
 
-## Integration Support Matrix
+## Example Coverage Matrix
 
 | Integration | Category | Prompt | Response | Streaming | Pre-tool | Post-tool | 
 |-------------|----------|:------:|:--------:|:---------:|:--------:|:---------:|
