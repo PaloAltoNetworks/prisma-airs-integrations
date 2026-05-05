@@ -62,10 +62,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed Mermaid diagrams showing:
 
 **1. Configure environment:**
 ```bash
-cp .env.sample .env
+cp example.env .env
 # Edit .env with your values:
 # - APIGEE_ORG, APIGEE_ENV
-# - PRISMA_AIRS_API_KEY, PRISMA_AIRS_PROFILE_NAME, PRISMA_AIRS_URL
+# - PRISMA_AIRS_API_KEY, PRISMA_AIRS_PROFILE_NAME
 # - GOOGLE_CLOUD_PROJECT
 ```
 
@@ -122,9 +122,6 @@ APIGEE_ENV="eval"  # or test, prod
 # Prisma AIRS Configuration
 PRISMA_AIRS_API_KEY="your-airs-api-key"
 PRISMA_AIRS_PROFILE_NAME="your-profile-name"
-# Regional endpoints (uncomment one):
-PRISMA_AIRS_URL="https://service.api.aisecurity.paloaltonetworks.com"        # US (default)
-# PRISMA_AIRS_URL="https://service.api.eu.aisecurity.paloaltonetworks.com"   # EU
 
 # GCP/Vertex AI Configuration
 GOOGLE_CLOUD_PROJECT="your-gcp-project"
@@ -137,11 +134,14 @@ GOOGLE_APPLICATION_CREDENTIALS="/path/to/sa.json"
 ### KVM Entries (Auto-Created by deploy.sh)
 
 The deployment script creates an encrypted KVM named `private` with:
-- `prisma.airs.token` - Your Prisma AIRS API key
-- `prisma.airs.profile` - AIRS profile name
-- `prisma.airs.url` - AIRS API endpoint
+- `airs.token` - Your Prisma AIRS API key
+- `airs.profile` - AIRS profile name
 - `vertex.project` - GCP project ID
 - `vertex.model` - Vertex AI model name
+
+The bundled `vertex-simple.zip` uses the default Prisma AIRS US endpoint. To use a regional endpoint, update the ServiceCallout URL in the proxy bundle before importing it.
+
+> **Manual KVM setup note:** The Apigee X console UI rejects dots in KVM key names (`Use letters, digits, underscores, and hyphens only`). Use `deploy.sh` or the Apigee Management API/CLI to create these dotted keys. If you must create the KVM in the UI, use underscore-based keys such as `airs_token` and update the matching `<Parameter>` values in `KVM-GetConfig.xml` before importing the proxy bundle.
 
 ---
 
