@@ -16,7 +16,6 @@ PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-YOUR_GCP_PROJECT_ID}"
 # Prisma AIRS configuration
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
 PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME}"
-PRISMA_AIRS_URL="${PRISMA_AIRS_URL:-https://service.api.aisecurity.paloaltonetworks.com}"
 
 # Validate required secrets/credentials
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
@@ -46,7 +45,6 @@ echo "Environment: $ENV"
 echo "Project: $PROJECT_ID"
 echo "Vertex Model: $VERTEX_MODEL"
 echo "AIRS Profile: $PRISMA_AIRS_PROFILE_NAME"
-echo "AIRS URL: $PRISMA_AIRS_URL"
 echo ""
 
 # Step 1: Create or update KVM
@@ -66,9 +64,8 @@ update_kvm_entry() {
 }
 
 echo "Setting KVM entries..."
-update_kvm_entry "prisma.airs.token" "$PRISMA_AIRS_API_KEY"
-update_kvm_entry "prisma.airs.profile" "$PRISMA_AIRS_PROFILE_NAME"
-update_kvm_entry "prisma.airs.url" "$PRISMA_AIRS_URL"
+update_kvm_entry "airs.token" "$PRISMA_AIRS_API_KEY"
+update_kvm_entry "airs.profile" "$PRISMA_AIRS_PROFILE_NAME"
 update_kvm_entry "vertex.project" "$VERTEX_PROJECT"
 update_kvm_entry "vertex.model" "$VERTEX_MODEL"
 
