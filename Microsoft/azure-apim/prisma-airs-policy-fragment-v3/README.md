@@ -6,10 +6,10 @@ This unified APIM policy fragment provides real-time security scanning for multi
 
 ## Supported API Types
 
-- **OpenAI** - Chat Completions API (`/chat/completions`)
+- **OpenAI** - Chat Completions API (`/chat/completions`) and Responses API (`/responses`)
+- **Azure AI Foundry GPT** - Responses API (`/openai/v1/responses` - detected via `/responses` suffix)
 - **Anthropic** - Messages API (`/v1/messages`)  
 - **Azure AI Foundry Claude** - Messages API (`/v1/messages`)
-- **Azure AI Foundry GPT** - Responses API (`/openai/v1/responses`)
 - **Model Context Protocol (MCP)** - Tool calling protocol
 
 The fragment **automatically detects** which API format is being used and extracts the appropriate content for scanning.
@@ -197,21 +197,6 @@ The fragment scans different content depending on the API type:
 - Tool results from `content[].tool_result.content`
 - AIRS field: `contents[].tool_event.input` and `.output`
 
-#### Azure AI Foundry GPT (Responses API)
-
-**Prompt Scanning:**
-- Extracts from `input[]` where `role="user"` or `role="tool"`
-- AIRS field: `contents[].prompt`
-
-**Response Scanning:**
-- Extracts from `output[].content`
-- AIRS field: `contents[].response`
-
-**Tool Events:**
-- Tool arguments from `tool_calls[].function.arguments`
-- Tool results from `input[]` where `role="tool"`
-- AIRS field: `contents[].tool_event.input` and `.output`
-
 #### MCP (Model Context Protocol)
 
 **Tool Input Scanning:**
@@ -244,10 +229,12 @@ The fragment automatically detects which API type is being used:
 
 | Detection Method | API Type Identified | What Gets Scanned |
 |------------------|---------------------|-------------------|
-| Request path contains `/chat/completions` | OpenAI | User messages, assistant responses, tool calls/results |
-| Request path contains `/v1/messages` | Anthropic / Foundry Claude | User messages, assistant content, tool use/results |
-| Request path contains `/openai/v1/responses` | Foundry GPT (Responses API) | Input array messages, output array content, tool events |
+| Request path **ends with** `/chat/completions` | OpenAI Chat Completions | User messages, assistant responses, tool calls/results |
+| Request path **ends with** `/responses` | OpenAI Responses API or Azure AI Foundry GPT | User messages, assistant responses, tool calls/results |
+| Request path **ends with** `/v1/messages` | Anthropic / Azure AI Foundry Claude | User messages, assistant content, tool use/results |
 | Request body contains `method="tools/call"` | MCP | Tool arguments and results only |
+
+**Note:** Path detection uses `EndsWith()`, so `/openai/v1/responses` matches because it ends with `/responses`.
 
 #### MCP Method Filtering
 
@@ -283,7 +270,7 @@ The fragment automatically detects `Content-Type: text/event-stream` and:
 3. Scans the extracted content
 4. Returns the original stream to the client
 
-**Note:** SSE support works for OpenAI, Anthropic, and MCP. Azure AI Foundry GPT (Responses API) does not support streaming.
+**Note:** SSE support works for OpenAI, Anthropic, and MCP.
 
 ## Security Actions
 
@@ -647,10 +634,13 @@ az rest --method GET \
 
 **4. Verify API Type Detection**
 
-The fragment detects API type from request path:
-- OpenAI: Path must contain `/chat/completions`
-- Anthropic: Path must contain `/v1/messages`
-- Foundry GPT: Path must contain `/openai/v1/responses`
+The fragment detects API type from request path using `EndsWith()`:
+- OpenAI Chat Completions: Path must end with `/chat/completions`
+- OpenAI Responses API / Azure AI Foundry GPT: Path must end with `/responses`
+- Anthropic/Azure AI Foundry Claude: Path must end with `/v1/messages`
+- MCP: Request body must have `"method": "tools/call"`
+
+**Note:** `/openai/v1/responses` is detected as a Responses API endpoint because the path ends with `/responses`.
 - MCP: Request body must have `"method": "tools/call"`
 
 **5. Test Manually**
@@ -968,14 +958,15 @@ See git history for detailed changes. Key milestones:
 
 | API Type | Endpoint | Prompt Scan | Response Scan | Streaming | Tool Events |
 |----------|----------|:-----------:|:-------------:|:---------:|:-----------:|
-| OpenAI | `/chat/completions` | ✅ | ✅ | ✅ (SSE) | ✅ |
-| Anthropic | `/v1/messages` | ✅ | ✅ | ✅ (SSE) | ✅ |
-| Foundry Claude | `/v1/messages` | ✅ | ✅ | ✅ (SSE) | ✅ |
-| Foundry GPT | `/openai/v1/responses` | ✅ | ✅ | ❌ | ✅ |
+| OpenAI Chat Completions | `/chat/completions` | ✅ | ✅ | ✅ (SSE) | ✅ |
+| OpenAI Responses API | `/responses` | ✅ | ✅ | ✅ (SSE) | ✅ |
+| Azure AI Foundry GPT | `/openai/v1/responses` | ✅ | ✅ | ⚠️ | ✅ |
+| Anthropic Messages API | `/v1/messages` | ✅ | ✅ | ✅ (SSE) | ✅ |
+| Azure AI Foundry Claude | `/v1/messages` | ✅ | ✅ | ✅ (SSE) | ✅ |
 | MCP | `/mcp` (or custom) | ✅ | ✅ | ✅ (SSE) | ✅ |
 
 ✅ Full support  
-❌ Not supported (Foundry GPT Responses API doesn't support streaming)
+⚠️ Detected as `/responses` endpoint (SSE support depends on Foundry GPT API capabilities)
 
 ## Support
 
