@@ -1,0 +1,1062 @@
+<!--
+PANW AIRS Security Scanning Fragment - Version 3.0 (Optimized - APIM Compatible)
+
+OPTIMIZATIONS APPLIED:
+- Consolidated duplicate content extraction logic (unified message/input array handling)
+- Cached frequently accessed variables (reduced 40+ duplicate casts)
+- Reduced nested conditionals depth
+- Improved code readability and maintainability
+
+APIM COMPATIBILITY:
+- No function delegates (Func/Action) - APIM does not support storing delegates in context variables
+- All code uses direct inline expressions only
+
+This APIM policy fragment provides unified security scanning for:
+- OpenAI (chat/completions, responses)
+- Anthropic (v1/messages)
+- Azure AI Foundry Claude (anthropic/v1/messages)
+- Model Context Protocol (MCP) tool servers
+
+## Major Changes in v3:
+- ✅ Unified fragment for both LLM APIs and MCP servers
+- ✅ Automatic detection: path-based (OpenAI/Anthropic) OR method-based (MCP)
+- ✅ Rich error messaging for all API types
+- ✅ MCP tool event scanning with SSE support
+- ✅ Consistent configuration across all APIs
+- ✅ Single fragment to maintain
+- ✅ Optimized for performance (v3-optimized)
+
+## Features:
+- Multi-API support: OpenAI, Anthropic, Azure AI Foundry, MCP
+- Scans prompts, model responses (including streaming/SSE), and tool events
+- Tool event scanning: OpenAI role=tool, Responses API function_call_output, Anthropic tool_result, MCP tools/call
+- Streaming response scanning via SSE chunk reassembly
+- Passes through when model requests tool call (finish_reason=tool_calls, stop_reason=tool_use)
+- Conversation-based session tracking (IP + system msg + first user msg hash)
+- Configurable fail-open/fail-closed behavior
+- Prompt and response masking support
+- Detailed per-threat error messages with threat descriptions
+- AIRS response caching (single parse instead of multiple)
+- API key validation before calling AIRS
+
+## Context Variables:
+- `ScanType`: (string) "prompt" or "response". Defaults to "prompt"
+- `currentProfile`: (string) AIRS profile name. Defaults to "example-profile"
+- `toolProfile`: (string) AIRS profile for tool events. Defaults to currentProfile
+- `scanTools`: (boolean) true to scan tool results, false to pass through. Defaults to true
+- `appName`: (string) Application name (prefixed with "APIM-"). Defaults to "Gateway"
+- `FailOpen`: (boolean) true = allow if AIRS unavailable, false = block. Defaults to false
+- `airsDescriptions`: (JObject) Custom threat descriptions (optional)
+
+## Supported APIs:
+- OpenAI: /chat/completions, /responses
+- Anthropic: /v1/messages
+- Azure AI Foundry: /anthropic/v1/messages
+- MCP: Any path with method="tools/call" in request body
+
+## Usage:
+```xml
+<inbound>
+    <base />
+    <set-variable name="ScanType" value="prompt" />
+    <set-variable name="currentProfile" value="my-profile" />
+    <set-variable name="FailOpen" value="false" />
+    <include-fragment fragment-id="panw-airs-scan-v3" />
+</inbound>
+<outbound>
+    <base />
+    <set-variable name="ScanType" value="response" />
+    <include-fragment fragment-id="panw-airs-scan-v3" />
+</outbound>
+```
+
+## MCP-Specific Notes:
+- Auto-detects MCP `tools/call` requests (skips initialize, tools/list)
+- Handles SSE (text/event-stream) responses from MCP servers
+- Extracts MCP server name from API name or backend URL
+- Returns JSON-RPC error format for MCP (maintains protocol compliance)
+- Requires Named Value: AIRS-API (your Prisma AIRS API key)
+
+-->
+<fragment>
+    <!-- Threat descriptions for error messages -->
+    <set-variable name="scanDescriptions" value="@{
+        return new JObject(
+            new JProperty("url_cats", "Unacceptable URLs detected in content"),
+            new JProperty("dlp", "Sensitive data (PII, credentials, secrets) detected"),
+            new JProperty("injection", "Prompt injection or jailbreak attempt detected"),
+            new JProperty("toxic_content", "Toxic or inappropriate content detected"),
+            new JProperty("malicious_code", "Malicious code or commands detected"),
+            new JProperty("agent", "Agent manipulation attempt detected"),
+            new JProperty("topic_violation", "Content violates acceptable topic policies"),
+            new JProperty("db_security", "Database command injection detected"),
+            new JProperty("ungrounded", "Response contains ungrounded or hallucinated content")
+        );
+    }" />
+
+    <!-- Detect API type: MCP or OpenAI/Anthropic -->
+    <set-variable name="apiType" value="@{
+        // Check if this is an MCP request (has method field in body)
+        if (context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)) {
+            try {
+                var body = context.Request.Body.As<JObject>(preserveContent: true);
+                if (body != null && body["method"] != null) {
+                    string method = body["method"].ToString();
+                    if (method == "tools/call") {
+                        return "mcp";
+                    }
+                }
+            } catch {
+                // Body parsing failed, continue with path-based detection
+            }
+
+            // Check if this is OpenAI/Anthropic by path
+            string path = context.Request.OriginalUrl.Path;
+            if (path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith("/responses", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith("/v1/messages", StringComparison.OrdinalIgnoreCase)) {
+                return "llm";
+            }
+        }
+
+        return "unknown";
+    }" />
+
+    <choose>
+        <!-- Only process recognized API types -->
+        <when condition="@((string)context.Variables["apiType"] != "unknown")">
+
+            <!-- Detect placement context: INBOUND or OUTBOUND -->
+            <set-variable name="isOutbound" value="@(context.Response != null)" />
+
+            <!-- Determine scan type and whether we should scan -->
+            <set-variable name="scanType" value="@(context.Variables.GetValueOrDefault<string>("ScanType", "prompt"))" />
+            <set-variable name="shouldScan" value="@{
+                string type = (string)context.Variables["scanType"];
+                string apiType = (string)context.Variables["apiType"];
+
+                if (type == "prompt") {
+                    return true;
+                }
+                else if (type == "response") {
+                    // For MCP, we scan in outbound even for prompt type (to get both input+output)
+                    if (apiType == "mcp" && (bool)context.Variables["isOutbound"]) {
+                        return context.Response != null && context.Response.StatusCode >= 200 && context.Response.StatusCode < 300;
+                    }
+                    return context.Response != null && context.Response.StatusCode >= 200 && context.Response.StatusCode < 300;
+                }
+                return false;
+            }" />
+
+            <!-- Early exit if scan not needed -->
+            <choose>
+                <when condition="@(!(bool)context.Variables["shouldScan"])">
+                    <trace source="PANW-Scanner" severity="information">
+                        <message>@("AIRS scan skipped: API=" + (string)context.Variables["apiType"] + ", ScanType=" + (string)context.Variables["scanType"] + ", response status=" + (context.Response != null ? context.Response.StatusCode.ToString() : "N/A (inbound)"))</message>
+                    </trace>
+                </when>
+
+                <!-- Proceed with scanning -->
+                <otherwise>
+                    <!-- Session ID computation (different for MCP vs LLM) -->
+                    <set-variable name="airsSessionId" value="@{
+                        if (context.Variables.ContainsKey("airsSessionId")) {
+                            return (string)context.Variables["airsSessionId"];
+                        }
+
+                        string apiType = (string)context.Variables["apiType"];
+
+                        // Try x-session-id header first
+                        if (context.Request.Headers.ContainsKey("x-session-id")) {
+                            string[] headerValues = context.Request.Headers["x-session-id"];
+                            if (headerValues != null && headerValues.Length > 0 && !string.IsNullOrEmpty(headerValues[0])) {
+                                return headerValues[0];
+                            }
+                        }
+
+                        // MCP: use Mcp-Session-Id header if present
+                        if (apiType == "mcp" && context.Request.Headers.ContainsKey("Mcp-Session-Id")) {
+                            string[] mcpSessions = context.Request.Headers["Mcp-Session-Id"];
+                            if (mcpSessions != null && mcpSessions.Length > 0 && !string.IsNullOrEmpty(mcpSessions[0])) {
+                                return mcpSessions[0];
+                            }
+                        }
+
+                        // LLM: Generate from conversation hash
+                        if (apiType == "llm") {
+                            var body = context.Request.Body.As<JObject>(preserveContent: true);
+                            string userIP = context.Request.IpAddress;
+
+                            if (body != null) {
+                                var conversationSeed = new System.Text.StringBuilder();
+                                conversationSeed.Append(userIP).Append("|");
+
+                                // OpenAI/Azure AI Foundry: messages array
+                                if (body["messages"] is JArray messages && messages.Count > 0) {
+                                    var systemMsg = messages.FirstOrDefault(m => m["role"]?.ToString() == "system");
+                                    if (systemMsg != null && systemMsg["content"] != null) {
+                                        conversationSeed.Append(systemMsg["content"].ToString()).Append("|");
+                                    }
+                                    var firstUserMsg = messages.FirstOrDefault(m => m["role"]?.ToString() == "user");
+                                    if (firstUserMsg != null && firstUserMsg["content"] != null) {
+                                        conversationSeed.Append(firstUserMsg["content"].ToString());
+                                    }
+                                }
+                                // Anthropic: top-level system field
+                                else if (body["system"] != null) {
+                                    conversationSeed.Append(body["system"].ToString()).Append("|");
+                                }
+                                // OpenAI Responses API: input array
+                                else if (body["input"] is JArray inputArr && inputArr.Count > 0) {
+                                    var systemInput = inputArr.FirstOrDefault(i => i["role"]?.ToString() == "system");
+                                    if (systemInput != null && systemInput["content"] != null) {
+                                        conversationSeed.Append(systemInput["content"].ToString()).Append("|");
+                                    }
+                                    var firstUserInput = inputArr.FirstOrDefault(i => i["role"]?.ToString() == "user");
+                                    if (firstUserInput != null && firstUserInput["content"] != null) {
+                                        conversationSeed.Append(firstUserInput["content"].ToString());
+                                    }
+                                }
+
+                                // Hash if we have enough data
+                                if (conversationSeed.Length > userIP.Length + 1) {
+                                    using (var sha256 = System.Security.Cryptography.SHA256.Create()) {
+                                        byte[] hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(conversationSeed.ToString()));
+                                        return "conv-" + BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16).ToLower();
+                                    }
+                                }
+                            }
+                        }
+
+                        // Fallback to request ID
+                        return context.RequestId.ToString();
+                    }" />
+
+                    <!-- Build base AIRS request data (session, profile, metadata) -->
+                    <set-variable name="requestData" value="@{
+                        var body = context.Request.Body.As<JObject>(preserveContent: true);
+                        string apiType = (string)context.Variables["apiType"];
+                        string model = "unknown-model";
+
+                        if (apiType == "llm" && body != null && body.ContainsKey("model")) {
+                            model = body["model"].ToString();
+                        } else if (apiType == "mcp") {
+                            model = "mcp-tool-server";
+                        }
+
+                        string appName = "APIM-" + (string)context.Variables.GetValueOrDefault("appName", "Gateway");
+                        string profileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
+                        string sessionId = (string)context.Variables["airsSessionId"];
+
+                        string appUser = "anonymous";
+                        if (context.Request.Headers.ContainsKey("x-user-id")) {
+                            string[] userHeaders = context.Request.Headers["x-user-id"];
+                            if (userHeaders != null && userHeaders.Length > 0) {
+                                appUser = userHeaders[0];
+                            }
+                        }
+
+                        return new JObject(
+                            new JProperty("session_id", sessionId),
+                            new JProperty("ai_profile", new JObject(
+                                new JProperty("profile_name", profileName)
+                            )),
+                            new JProperty("metadata", new JObject(
+                                new JProperty("app_name", appName),
+                                new JProperty("user_ip", context.Request.IpAddress),
+                                new JProperty("ai_model", model),
+                                new JProperty("app_user", appUser)
+                            ))
+                        );
+                    }" />
+
+                    <!-- Build contents array based on API type and scan type -->
+                    <choose>
+                        <!-- === MCP API === -->
+                        <when condition="@((string)context.Variables["apiType"] == "mcp")">
+                            <set-variable name="mcpBody" value="@(context.Request.Body.As<JObject>(preserveContent: true))" />
+
+                            <!-- Extract tool metadata -->
+                            <set-variable name="toolMetadata" value="@{
+                                var body = (JObject)context.Variables["mcpBody"];
+                                string toolName = body["params"]?["name"]?.ToString() ?? "unknown";
+                                string toolArgs = body["params"]?["arguments"]?.ToString() ?? "{}";
+
+                                // Extract MCP server name from API name or backend URL
+                                string serverName = "mcp-server";
+                                if (!string.IsNullOrEmpty(context.Api.Name)) {
+                                    serverName = context.Api.Name;
+                                } else if (context.Request.Url != null) {
+                                    string hostname = context.Request.Url.Host;
+                                    var parts = hostname.Split('.');
+                                    if (parts.Length >= 2) {
+                                        serverName = parts[parts.Length - 2];
+                                    }
+                                }
+
+                                return new JObject(
+                                    new JProperty("toolName", toolName),
+                                    new JProperty("toolArgs", toolArgs),
+                                    new JProperty("serverName", serverName)
+                                );
+                            }" />
+
+                            <!-- Build tool_event payload -->
+                            <set-variable name="requestData" value="@{
+                                var data = (JObject)context.Variables["requestData"];
+                                var metadata = (JObject)context.Variables["toolMetadata"];
+                                bool isOutbound = (bool)context.Variables["isOutbound"];
+
+                                string toolName = metadata["toolName"].ToString();
+                                string toolArgs = metadata["toolArgs"].ToString();
+                                string serverName = metadata["serverName"].ToString();
+
+                                var toolEvent = new JObject(
+                                    new JProperty("metadata", new JObject(
+                                        new JProperty("ecosystem", "mcp"),
+                                        new JProperty("method", "tools/call"),
+                                        new JProperty("server_name", serverName),
+                                        new JProperty("tool_invoked", toolName)
+                                    )),
+                                    new JProperty("input", toolArgs)
+                                );
+
+                                // Add output if we're in OUTBOUND and response is successful
+                                if (isOutbound && context.Response.StatusCode == 200) {
+                                    JObject responseBody = null;
+
+                                    // Check if response is SSE format
+                                    string contentType = context.Response.Headers.GetValueOrDefault("Content-Type", "");
+                                    if (contentType.Contains("text/event-stream")) {
+                                        // Parse SSE: extract JSON from "data: " line
+                                        string responseText = context.Response.Body.As<string>(preserveContent: true);
+                                        var lines = responseText.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                                        foreach (var line in lines) {
+                                            if (line.StartsWith("data: ")) {
+                                                try {
+                                                    string jsonData = line.Substring(6);
+                                                    responseBody = JObject.Parse(jsonData);
+                                                    break;
+                                                } catch {
+                                                    // Skip malformed SSE data lines
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Regular JSON response
+                                        responseBody = context.Response.Body.As<JObject>(preserveContent: true);
+                                    }
+
+                                    // Extract text content from MCP result
+                                    if (responseBody != null) {
+                                        var mcpContent = responseBody["result"]?["content"] as JArray;
+                                        if (mcpContent != null) {
+                                            string outputText = "";
+                                            foreach (var item in mcpContent) {
+                                                if (item["type"]?.ToString() == "text") {
+                                                    outputText += item["text"]?.ToString();
+                                                }
+                                            }
+                                            if (!string.IsNullOrEmpty(outputText)) {
+                                                toolEvent.Add("output", outputText);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                var contents = new JArray(new JObject(new JProperty("tool_event", toolEvent)));
+                                data.Add("contents", contents);
+                                return data;
+                            }" />
+                        </when>
+
+                        <!-- === LLM APIs (OpenAI/Anthropic) === -->
+                        <otherwise>
+                            <choose>
+                                <!-- PROMPT SCANNING (OPTIMIZED: unified array handling) -->
+                                <when condition="@((string)context.Variables["scanType"] == "prompt")">
+                                    <set-variable name="requestData" value="@{
+                                        try {
+                                            var data = (JObject)context.Variables["requestData"];
+                                            var body = context.Request.Body.As<JObject>(preserveContent: true);
+                                            var contents = new JArray();
+
+                                            // OPTIMIZATION: Determine which array to process (messages or input)
+                                            JArray messageArray = null;
+                                            if (body["messages"] is JArray messages) {
+                                                messageArray = messages;
+                                            } else if (body["input"] is JArray inputArr) {
+                                                messageArray = inputArr;
+                                            }
+
+                                            // Extract prompts and tool results from messages (single implementation)
+                                            if (messageArray != null && messageArray.Count > 0) {
+                                                for (int i = messageArray.Count - 1; i >= 0; i--) {
+                                                    var msg = messageArray[i] as JObject;
+                                                    var role = msg?["role"]?.ToString();
+
+                                                    if (role == "user") {
+                                                        var content = msg["content"];
+                                                        if (content?.Type == JTokenType.String) {
+                                                            contents.Add(new JObject(new JProperty("prompt", content.ToString())));
+                                                        } else if (content?.Type == JTokenType.Array) {
+                                                            // Anthropic content blocks - can be text or tool_result
+                                                            foreach (var block in (JArray)content) {
+                                                                var blockType = block["type"]?.ToString();
+                                                                if (blockType == "text") {
+                                                                    contents.Add(new JObject(new JProperty("prompt", block["text"]?.ToString() ?? "")));
+                                                                } else if (blockType == "tool_result") {
+                                                                    // Anthropic tool result format
+                                                                    var toolContent = block["content"];
+                                                                    if (toolContent?.Type == JTokenType.String) {
+                                                                        contents.Add(new JObject(new JProperty("prompt", toolContent.ToString())));
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    } else if (role == "tool") {
+                                                        // OpenAI tool result format
+                                                        var content = msg["content"];
+                                                        if (content?.Type == JTokenType.String) {
+                                                            contents.Add(new JObject(new JProperty("prompt", content.ToString())));
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            data.Add("contents", contents);
+                                            return data;
+                                        } catch (Exception ex) {
+                                            return (JObject)context.Variables["requestData"];
+                                        }
+                                    }" />
+                                </when>
+
+                                <!-- RESPONSE SCANNING -->
+                                <when condition="@((string)context.Variables["scanType"] == "response")">
+                                    <set-variable name="requestData" value="@{
+                                        try {
+                                            var data = (JObject)context.Variables["requestData"];
+                                            var raw = context.Response.Body.As<string>(preserveContent: true);
+                                            var contents = new JArray();
+
+                                            if (raw != null && raw.Contains("data:")) {
+                                                // SSE streaming response
+                                                var sb = new System.Text.StringBuilder();
+                                                bool isToolCall = false;
+                                                var lines = raw.Split(new[] { (char)10 }, StringSplitOptions.RemoveEmptyEntries);
+
+                                                foreach (var line in lines) {
+                                                    var trimmed = line.Trim();
+                                                    if (!trimmed.StartsWith("data:")) {
+                                                        continue;
+                                                    }
+
+                                                    var jsonStr = trimmed.Substring(5).Trim();
+                                                    if (jsonStr.Contains("[DONE]")) {
+                                                        continue;
+                                                    }
+
+                                                    try {
+                                                        var chunk = JObject.Parse(jsonStr);
+
+                                                        // OpenAI streaming
+                                                        var delta = chunk["choices"]?[0]?["delta"];
+                                                        if (delta != null) {
+                                                            var dc = delta["content"]?.ToString();
+                                                            if (dc != null) {
+                                                                sb.Append(dc);
+                                                            }
+                                                            if (delta["tool_calls"] != null) {
+                                                                isToolCall = true;
+                                                            }
+                                                        }
+
+                                                        var fr = chunk["choices"]?[0]?["finish_reason"]?.ToString();
+                                                        if (fr == "tool_calls") {
+                                                            isToolCall = true;
+                                                        }
+
+                                                        // Anthropic streaming
+                                                        var et = chunk["type"]?.ToString();
+                                                        if (et == "content_block_delta" && chunk["delta"]?["type"]?.ToString() == "text_delta") {
+                                                            var txt = chunk["delta"]?["text"]?.ToString();
+                                                            if (txt != null) {
+                                                                sb.Append(txt);
+                                                            }
+                                                        }
+                                                        if (et == "content_block_start" && chunk["content_block"]?["type"]?.ToString() == "tool_use") {
+                                                            isToolCall = true;
+                                                        }
+                                                        if (et == "message_delta" && chunk["delta"]?["stop_reason"]?.ToString() == "tool_use") {
+                                                            isToolCall = true;
+                                                        }
+                                                    } catch {
+                                                        // Skip malformed chunks
+                                                    }
+                                                }
+
+                                                if (!isToolCall && sb.Length > 0) {
+                                                    contents.Add(new JObject(new JProperty("response", sb.ToString())));
+                                                }
+                                            } else if (raw != null) {
+                                                // Non-streaming JSON response
+                                                var body = JObject.Parse(raw);
+
+                                                // OpenAI chat/completions
+                                                if (body["choices"] is JArray choices && choices.Count > 0) {
+                                                    var message = choices.Last?["message"] as JObject;
+                                                    var toolCalls = message?["tool_calls"] as JArray;
+                                                    var textContent = message?["content"]?.ToString();
+                                                    var finishReason = choices.Last?["finish_reason"]?.ToString();
+
+                                                    if (finishReason != "tool_calls" && string.IsNullOrEmpty(textContent) == false) {
+                                                        contents.Add(new JObject(new JProperty("response", textContent)));
+                                                    }
+                                                }
+                                                // OpenAI Responses API (output array)
+                                                else if (body["output"] is JArray outputArr && outputArr.Count > 0) {
+                                                    var respText = new System.Text.StringBuilder();
+
+                                                    foreach (var item in outputArr) {
+                                                        if (item["type"]?.ToString() == "message" && item["role"]?.ToString() == "assistant") {
+                                                            var contentBlocks = item["content"] as JArray;
+                                                            if (contentBlocks != null) {
+                                                                foreach (var block in contentBlocks) {
+                                                                    if (block["type"]?.ToString() == "output_text") {
+                                                                        respText.Append(block["text"]?.ToString() ?? "");
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    if (respText.Length > 0) {
+                                                        contents.Add(new JObject(new JProperty("response", respText.ToString())));
+                                                    }
+                                                }
+                                                // Anthropic non-streaming
+                                                else if (body["content"] is JArray anthropicContent && anthropicContent.Count > 0) {
+                                                    bool hasToolUse = false;
+                                                    var respText = new System.Text.StringBuilder();
+
+                                                    foreach (var block in anthropicContent) {
+                                                        var blockType = block["type"]?.ToString();
+                                                        if (blockType == "tool_use") {
+                                                            hasToolUse = true;
+                                                        }
+                                                        if (blockType == "text") {
+                                                            respText.Append(block["text"]?.ToString() ?? "");
+                                                        }
+                                                    }
+
+                                                    if (!hasToolUse && respText.Length > 0) {
+                                                        contents.Add(new JObject(new JProperty("response", respText.ToString())));
+                                                    }
+                                                }
+                                            }
+
+                                            data.Add("contents", contents);
+                                            return data;
+                                        } catch (Exception ex) {
+                                            return (JObject)context.Variables["requestData"];
+                                        }
+                                    }" />
+                                </when>
+                            </choose>
+                        </otherwise>
+                    </choose>
+
+                    <!-- Call AIRS API (shared for all types) -->
+                    <choose>
+                        <!-- Skip scan if contents is empty (e.g., tool-only responses with no text) -->
+                        <when condition="@{
+                            try {
+                                var data = (JObject)context.Variables["requestData"];
+                                var contents = data["contents"] as JArray;
+                                return (contents == null || contents.Count == 0);
+                            } catch {
+                                return false;
+                            }
+                        }">
+                            <!-- No content to scan, skip silently (allows tool calls to pass through) -->
+                        </when>
+
+                        <!-- Validate AIRS API key is configured -->
+                        <when condition="@{
+                            try {
+                                string apiKey = "{{airs-api}}";
+                                return !string.IsNullOrEmpty(apiKey) && !apiKey.Contains("{{");
+                            } catch {
+                                return false;
+                            }
+                        }">
+                            <!-- Make AIRS API call -->
+                            <send-request mode="new" response-variable-name="panwScanResponse" timeout="10" ignore-error="false">
+                                <set-url>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</set-url>
+                                <set-method>POST</set-method>
+                                <set-header name="x-pan-token" exists-action="override">
+                                    <value>{{airs-api}}</value>
+                                </set-header>
+                                <set-header name="Content-Type" exists-action="override">
+                                    <value>application/json</value>
+                                </set-header>
+                                <set-body>@(((JObject)context.Variables["requestData"]).ToString())</set-body>
+                            </send-request>
+
+                            <!-- Process AIRS response -->
+                            <choose>
+                                <when condition="@(context.Variables.ContainsKey("panwScanResponse") && ((IResponse)context.Variables["panwScanResponse"]).StatusCode == 200)">
+                                    <!-- Parse AIRS result (cached) -->
+                                    <set-variable name="airsResult" value="@(((IResponse)context.Variables["panwScanResponse"]).Body.As<JObject>(preserveContent: true))" />
+
+                                    <!-- Extract action and masking flags once -->
+                                    <set-variable name="airsAction" value="@(((JObject)context.Variables["airsResult"])["action"]?.ToString())" />
+                                    <set-variable name="hasPromptMask" value="@(((JObject)context.Variables["airsResult"]).ContainsKey("prompt_masked_data"))" />
+                                    <set-variable name="hasResponseMask" value="@(((JObject)context.Variables["airsResult"]).ContainsKey("response_masked_data"))" />
+
+                                    <!-- Tool masking flags (for MCP and tool events) -->
+                                    <set-variable name="hasToolInputMask" value="@{
+                                        var result = (JObject)context.Variables["airsResult"];
+                                        var toolDetected = result["tool_detected"];
+                                        if (toolDetected == null) { return false; }
+
+                                        var inputDetected = toolDetected["input_detected"];
+                                        if (inputDetected == null) { return false; }
+
+                                        var entries = inputDetected["detection_entries"] as JArray;
+                                        if (entries == null || entries.Count == 0) { return false; }
+
+                                        return entries[0]["masked_data"] != null;
+                                    }" />
+
+                                    <set-variable name="hasToolOutputMask" value="@{
+                                        var result = (JObject)context.Variables["airsResult"];
+                                        var toolDetected = result["tool_detected"];
+                                        if (toolDetected == null) { return false; }
+
+                                        var outputDetected = toolDetected["output_detected"];
+                                        if (outputDetected == null) { return false; }
+
+                                        var entries = outputDetected["detection_entries"] as JArray;
+                                        if (entries == null || entries.Count == 0) { return false; }
+
+                                        return entries[0]["masked_data"] != null;
+                                    }" />
+
+                                    <!-- Handle AIRS actions -->
+                                    <choose>
+                                        <!-- BLOCK -->
+                                        <when condition="@((string)context.Variables["airsAction"] == "block")">
+                                            <set-variable name="errorBody" value="@{
+                                                var result = (JObject)context.Variables["airsResult"];
+                                                var scanType = (string)context.Variables["scanType"];
+                                                var apiType = (string)context.Variables["apiType"];
+
+                                                // Build error response based on API type
+                                                if (apiType == "mcp") {
+                                                    // MCP JSON-RPC error format
+                                                    var category = result["category"]?.ToString() ?? "security_violation";
+                                                    var threats = result["tool_detected"]?["summary"]?["threats"] as JArray;
+
+                                                    var descriptions = context.Variables.GetValueOrDefault<object>("airsDescriptions") as JObject
+                                                        ?? context.Variables.GetValueOrDefault<object>("scanDescriptions") as JObject;
+
+                                                    string threatInfo = "";
+                                                    JObject toolDetected = result["tool_detected"] as JObject;
+                                                    if (toolDetected != null) {
+                                                        var summary = toolDetected["summary"] as JObject;
+                                                        var detections = summary?["detections"] as JObject;
+                                                        if (detections != null) {
+                                                            var detectedThreats = new System.Collections.Generic.List<string>();
+                                                            foreach (JProperty prop in detections.Properties()) {
+                                                                if (prop.Value.Type == JTokenType.Boolean && (bool)prop.Value == true) {
+                                                                    string key = prop.Name;
+                                                                    if (descriptions != null && descriptions[key] != null) {
+                                                                        detectedThreats.Add(descriptions[key].ToString());
+                                                                    } else {
+                                                                        detectedThreats.Add(key);
+                                                                    }
+                                                                }
+                                                            }
+                                                            if (detectedThreats.Count > 0) {
+                                                                threatInfo = ": " + string.Join(", ", detectedThreats);
+                                                            }
+                                                        }
+                                                    }
+
+                                                    return new JObject(
+                                                        new JProperty("jsonrpc", "2.0"),
+                                                        new JProperty("error", new JObject(
+                                                            new JProperty("code", -32000),
+                                                            new JProperty("message", "🛡️ PRISMA AIRS SECURITY ALERT: MCP tool call blocked" + threatInfo)
+                                                        ))
+                                                    ).ToString(Newtonsoft.Json.Formatting.None);
+                                                } else {
+                                                    // OpenAI/Anthropic JSON error format
+                                                    var response = new JObject();
+
+                                                    if (scanType == "prompt") {
+                                                        response.Add("error", "🛡️ PRISMA AIRS SECURITY ALERT: REQUEST BLOCKED");
+                                                    } else {
+                                                        response.Add("error", "🛡️ PRISMA AIRS SECURITY ALERT: RESPONSE BLOCKED");
+                                                    }
+
+                                                    var descriptions = context.Variables.GetValueOrDefault<object>("airsDescriptions") as JObject
+                                                        ?? context.Variables.GetValueOrDefault<object>("scanDescriptions") as JObject;
+
+                                                    JObject detected = (scanType == "prompt")
+                                                        ? result["prompt_detected"] as JObject
+                                                        : result["response_detected"] as JObject;
+
+                                                    var details = new JObject();
+                                                    if (detected != null) {
+                                                        foreach (JProperty prop in detected.Properties()) {
+                                                            if (prop.Value.Type == JTokenType.Boolean && (bool)prop.Value == true) {
+                                                                string key = prop.Name;
+                                                                if (descriptions != null && descriptions[key] != null) {
+                                                                    details.Add(key, descriptions[key]);
+                                                                } else {
+                                                                    details.Add(key, true);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    response.Add("details", details);
+                                                    return response.ToString(Newtonsoft.Json.Formatting.None);
+                                                }
+                                            }" />
+                                            <return-response>
+                                                <set-status code="403" reason="Forbidden" />
+                                                <set-header name="Content-Type" exists-action="override">
+                                                    <value>application/json</value>
+                                                </set-header>
+                                                <set-body>@((string)context.Variables["errorBody"])</set-body>
+                                            </return-response>
+                                        </when>
+
+                                        <!-- ALLOW with masking -->
+                                        <otherwise>
+                                            <choose>
+                                                <!-- Prompt masking (LLM APIs) -->
+                                                <when condition="@((string)context.Variables["apiType"] == "llm" && (bool)context.Variables["hasPromptMask"])">
+                                                    <set-body>@{
+                                                        var body = context.Request.Body.As<JObject>(preserveContent: true);
+                                                        var result = (JObject)context.Variables["airsResult"];
+                                                        var maskedData = result["prompt_masked_data"]["data"].ToString();
+
+                                                        // Standard messages array (Anthropic, OpenAI chat/completions)
+                                                        if (body["messages"] is JArray msgs && msgs.Count > 0) {
+                                                            for (int i = msgs.Count - 1; i >= 0; i--) {
+                                                                if (msgs[i]["role"]?.ToString() == "user") {
+                                                                    var contentToken = msgs[i]["content"];
+                                                                    if (contentToken != null && contentToken.Type == JTokenType.String) {
+                                                                        msgs[i]["content"] = maskedData;
+                                                                    } else if (contentToken != null && contentToken.Type == JTokenType.Array) {
+                                                                        foreach (var block in (JArray)contentToken) {
+                                                                            if (block["type"]?.ToString() == "text") {
+                                                                                block["text"] = maskedData;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+                                                        // OpenAI Responses API: input array
+                                                        else if (body["input"] is JArray inputArr && inputArr.Count > 0) {
+                                                            for (int i = inputArr.Count - 1; i >= 0; i--) {
+                                                                if (inputArr[i]["role"]?.ToString() == "user") {
+                                                                    var contentToken = inputArr[i]["content"];
+                                                                    if (contentToken != null && contentToken.Type == JTokenType.String) {
+                                                                        inputArr[i]["content"] = maskedData;
+                                                                    }
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+
+                                                        return body.ToString(Newtonsoft.Json.Formatting.None);
+                                                    }</set-body>
+                                                </when>
+
+                                                <!-- Tool input masking (MCP) -->
+                                                <when condition="@((string)context.Variables["apiType"] == "mcp" && (bool)context.Variables["hasToolInputMask"])">
+                                                    <set-body>@{
+                                                        try {
+                                                            var body = (JObject)context.Variables["mcpBody"];
+                                                            var result = (JObject)context.Variables["airsResult"];
+
+                                                            var toolDetected = result["tool_detected"];
+                                                            if (toolDetected == null) { return body.ToString(Newtonsoft.Json.Formatting.None); }
+
+                                                            var inputDetected = toolDetected["input_detected"];
+                                                            if (inputDetected == null) { return body.ToString(Newtonsoft.Json.Formatting.None); }
+
+                                                            var entries = inputDetected["detection_entries"] as JArray;
+                                                            if (entries == null || entries.Count == 0) { return body.ToString(Newtonsoft.Json.Formatting.None); }
+
+                                                            var maskedDataObj = entries[0]["masked_data"];
+                                                            if (maskedDataObj == null) { return body.ToString(Newtonsoft.Json.Formatting.None); }
+
+                                                            var maskedData = maskedDataObj["data"]?.ToString();
+                                                            if (string.IsNullOrEmpty(maskedData)) { return body.ToString(Newtonsoft.Json.Formatting.None); }
+
+                                                            try {
+                                                                body["params"]["arguments"] = JObject.Parse(maskedData);
+                                                            } catch {
+                                                                body["params"]["arguments"] = maskedData;
+                                                            }
+
+                                                            return body.ToString(Newtonsoft.Json.Formatting.None);
+                                                        } catch {
+                                                            return ((JObject)context.Variables["mcpBody"]).ToString(Newtonsoft.Json.Formatting.None);
+                                                        }
+                                                    }</set-body>
+                                                </when>
+
+                                                <!-- Response masking (LLM APIs) -->
+                                                <when condition="@((string)context.Variables["apiType"] == "llm" && (bool)context.Variables["hasResponseMask"] && (bool)context.Variables["isOutbound"])">
+                                                    <set-body>@{
+                                                        var body = context.Response.Body.As<JObject>(preserveContent: true);
+                                                        var result = (JObject)context.Variables["airsResult"];
+                                                        var maskedData = result["response_masked_data"]["data"].ToString();
+
+                                                        // Anthropic format: content array with text blocks
+                                                        if (body["content"] is JArray anthropicContent && anthropicContent.Count > 0) {
+                                                            foreach (var item in anthropicContent) {
+                                                                if (item["type"]?.ToString() == "text") {
+                                                                    item["text"] = maskedData;
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+                                                        // OpenAI chat/completions format: choices[].message.content
+                                                        else if (body["choices"] is JArray choices && choices.Count > 0) {
+                                                            var message = choices[0]["message"];
+                                                            if (message != null) {
+                                                                message["content"] = maskedData;
+                                                            }
+                                                        }
+                                                        // OpenAI Responses API format: output[].content[].text
+                                                        else if (body["output"] is JArray outputArr && outputArr.Count > 0) {
+                                                            foreach (var item in outputArr) {
+                                                                if (item["type"]?.ToString() == "message" && item["role"]?.ToString() == "assistant") {
+                                                                    var contentBlocks = item["content"] as JArray;
+                                                                    if (contentBlocks != null && contentBlocks.Count > 0) {
+                                                                        foreach (var block in contentBlocks) {
+                                                                            if (block["type"]?.ToString() == "output_text") {
+                                                                                block["text"] = maskedData;
+                                                                                break;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+                                                        // MCP format: result.content
+                                                        else if (body?["result"]?["content"] is JArray arr && arr.Count > 0) {
+                                                            foreach (var item in arr) {
+                                                                if (item["type"]?.ToString() == "text") {
+                                                                    item["text"] = maskedData;
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+
+                                                        return body.ToString(Newtonsoft.Json.Formatting.None);
+                                                    }</set-body>
+                                                </when>
+
+                                                <!-- Tool output masking (MCP) -->
+                                                <when condition="@((string)context.Variables["apiType"] == "mcp" && (bool)context.Variables["hasToolOutputMask"] && (bool)context.Variables["isOutbound"])">
+                                                    <set-body>@{
+                                                        try {
+                                                            string contentType = context.Response.Headers.GetValueOrDefault("Content-Type", "");
+                                                            bool isSSE = contentType.Contains("text/event-stream");
+                                                            JObject body = null;
+
+                                                            if (isSSE) {
+                                                                string responseText = context.Response.Body.As<string>(preserveContent: true);
+                                                                var lines = responseText.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                                                                foreach (var line in lines) {
+                                                                    if (line.StartsWith("data: ")) {
+                                                                        try {
+                                                                            string jsonData = line.Substring(6);
+                                                                            body = JObject.Parse(jsonData);
+                                                                            break;
+                                                                        } catch {
+                                                                            // Skip malformed SSE
+                                                                        }
+                                                                    }
+                                                                }
+                                                                if (body == null) { return responseText; }
+                                                            } else {
+                                                                body = context.Response.Body.As<JObject>(preserveContent: true);
+                                                            }
+
+                                                            var result = (JObject)context.Variables["airsResult"];
+                                                            var toolDetected = result["tool_detected"];
+                                                            if (toolDetected == null) {
+                                                                return isSSE ? ("event: message\ndata: " + body.ToString(Newtonsoft.Json.Formatting.None) + "\n\n") : body.ToString(Newtonsoft.Json.Formatting.None);
+                                                            }
+
+                                                            var outputDetected = toolDetected["output_detected"];
+                                                            if (outputDetected == null) {
+                                                                return isSSE ? ("event: message\ndata: " + body.ToString(Newtonsoft.Json.Formatting.None) + "\n\n") : body.ToString(Newtonsoft.Json.Formatting.None);
+                                                            }
+
+                                                            var entries = outputDetected["detection_entries"] as JArray;
+                                                            if (entries == null || entries.Count == 0) {
+                                                                return isSSE ? ("event: message\ndata: " + body.ToString(Newtonsoft.Json.Formatting.None) + "\n\n") : body.ToString(Newtonsoft.Json.Formatting.None);
+                                                            }
+
+                                                            var maskedDataObj = entries[0]["masked_data"];
+                                                            if (maskedDataObj == null) {
+                                                                return isSSE ? ("event: message\ndata: " + body.ToString(Newtonsoft.Json.Formatting.None) + "\n\n") : body.ToString(Newtonsoft.Json.Formatting.None);
+                                                            }
+
+                                                            var maskedData = maskedDataObj["data"]?.ToString();
+                                                            if (string.IsNullOrEmpty(maskedData)) {
+                                                                return isSSE ? ("event: message\ndata: " + body.ToString(Newtonsoft.Json.Formatting.None) + "\n\n") : body.ToString(Newtonsoft.Json.Formatting.None);
+                                                            }
+
+                                                            if (body?["result"]?["content"] is JArray arr && arr.Count > 0) {
+                                                                foreach (var item in arr) {
+                                                                    if (item["type"]?.ToString() == "text") {
+                                                                        item["text"] = maskedData;
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+
+                                                            return isSSE ? ("event: message\ndata: " + body.ToString(Newtonsoft.Json.Formatting.None) + "\n\n") : body.ToString(Newtonsoft.Json.Formatting.None);
+                                                        } catch {
+                                                            string contentType = context.Response.Headers.GetValueOrDefault("Content-Type", "");
+                                                            if (contentType.Contains("text/event-stream")) {
+                                                                return context.Response.Body.As<string>(preserveContent: true);
+                                                            } else {
+                                                                return context.Response.Body.As<JObject>(preserveContent: true).ToString(Newtonsoft.Json.Formatting.None);
+                                                            }
+                                                        }
+                                                    }</set-body>
+                                                </when>
+                                            </choose>
+                                        </otherwise>
+                                    </choose>
+                                </when>
+
+                                <!-- AIRS call failed or non-200 -->
+                                <otherwise>
+                                    <choose>
+                                        <!-- Fail-closed: Block on AIRS failure -->
+                                        <when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)) == false)">
+                                            <set-variable name="errorMsg" value="@{
+                                                if (!context.Variables.ContainsKey("panwScanResponse")) {
+                                                    return "AIRS API unreachable";
+                                                }
+
+                                                var response = (IResponse)context.Variables["panwScanResponse"];
+                                                int statusCode = (int)response.StatusCode;
+
+                                                try {
+                                                    var errorBody = response.Body.As<JObject>(preserveContent: true);
+                                                    string errorDetail = errorBody["error"]?["message"]?.ToString() ?? "";
+                                                    return $"HTTP {statusCode}: {errorDetail}";
+                                                } catch {
+                                                    return $"HTTP {statusCode}";
+                                                }
+                                            }" />
+                                            <return-response>
+                                                <set-status code="500" reason="Internal Server Error" />
+                                                <set-header name="Content-Type" exists-action="override">
+                                                    <value>application/json</value>
+                                                </set-header>
+                                                <set-body>@{
+                                                    string apiType = (string)context.Variables["apiType"];
+                                                    string errorMsg = (string)context.Variables["errorMsg"];
+
+                                                    if (apiType == "mcp") {
+                                                        return new JObject(
+                                                            new JProperty("jsonrpc", "2.0"),
+                                                            new JProperty("error", new JObject(
+                                                                new JProperty("code", -32603),
+                                                                new JProperty("message", $"🛡️ PRISMA AIRS SECURITY ALERT: Security scanner failed ({errorMsg}). Request blocked for safety.")
+                                                            ))
+                                                        ).ToString(Newtonsoft.Json.Formatting.None);
+                                                    } else {
+                                                        return new JObject(
+                                                            new JProperty("error", $"🛡️ PRISMA AIRS SECURITY ALERT: Security scanner failed ({errorMsg}). Request blocked for safety.")
+                                                        ).ToString(Newtonsoft.Json.Formatting.None);
+                                                    }
+                                                }</set-body>
+                                            </return-response>
+                                        </when>
+
+                                        <!-- Fail-open: Log and allow -->
+                                        <otherwise>
+                                            <trace source="PANW-Scanner" severity="error">
+                                                <message>@{
+                                                    int statusCode = 0;
+                                                    string errorDetail = "";
+
+                                                    if (context.Variables.ContainsKey("panwScanResponse")) {
+                                                        var response = (IResponse)context.Variables["panwScanResponse"];
+                                                        statusCode = (int)response.StatusCode;
+
+                                                        try {
+                                                            var errorBody = response.Body.As<JObject>(preserveContent: true);
+                                                            errorDetail = errorBody["error"]?["message"]?.ToString() ?? "";
+                                                        } catch { }
+                                                    }
+
+                                                    return $"🛡️ PRISMA AIRS SECURITY ALERT: Scanner failed (status: {statusCode}, error: {errorDetail}). Failing open (allowing traffic).";
+                                                }</message>
+                                            </trace>
+                                        </otherwise>
+                                    </choose>
+                                </otherwise>
+                            </choose>
+                        </when>
+
+                        <!-- AIRS API key not configured -->
+                        <otherwise>
+                            <choose>
+                                <when condition="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)) == false)">
+                                    <return-response>
+                                        <set-status code="500" reason="Internal Server Error" />
+                                        <set-header name="Content-Type" exists-action="override">
+                                            <value>application/json</value>
+                                        </set-header>
+                                        <set-body>@{
+                                            string apiType = (string)context.Variables["apiType"];
+
+                                            if (apiType == "mcp") {
+                                                return new JObject(
+                                                    new JProperty("jsonrpc", "2.0"),
+                                                    new JProperty("error", new JObject(
+                                                        new JProperty("code", -32603),
+                                                        new JProperty("message", "🛡️ PRISMA AIRS SECURITY ALERT: Configuration error - airs-api Named Value not configured in APIM.")
+                                                    ))
+                                                ).ToString(Newtonsoft.Json.Formatting.None);
+                                            } else {
+                                                return "{ \"error\": \"🛡️ PRISMA AIRS SECURITY ALERT: Configuration error - airs-api Named Value not configured in APIM.\" }";
+                                            }
+                                        }</set-body>
+                                    </return-response>
+                                </when>
+                                <otherwise>
+                                    <trace source="PANW-Scanner" severity="error">
+                                        <message>🛡️ PRISMA AIRS SECURITY ALERT: airs-api Named Value not configured. FailOpen=true, allowing request to proceed without scanning.</message>
+                                    </trace>
+                                </otherwise>
+                            </choose>
+                        </otherwise>
+                    </choose>
+                </otherwise>
+            </choose>
+        </when>
+    </choose>
+</fragment>
