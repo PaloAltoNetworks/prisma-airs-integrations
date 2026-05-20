@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RaiseFault continueOnError="false" enabled="true" name="RF-DLP-Detected">
+  <DisplayName>RF-DLP-Detected</DisplayName>
+  <Properties/>
+  <FaultResponse>
+    <Set>
+      <Payload contentType="application/json">{"candidates":[{"content":{"role":"model","parts":[{"text":"Your prompt or the model's response contains sensitive data (PII) that is not allowed for privacy and compliance reasons. The content has been blocked by Palo Alto AIRS."}]},"finishReason":"STOP"}],"modelVersion":"{model}","airs":{"action":"block","category":"dlp","scan_id":"{airs.scan_id}"}}</Payload>
+      <StatusCode>200</StatusCode>
+      <ReasonPhrase>OK</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>

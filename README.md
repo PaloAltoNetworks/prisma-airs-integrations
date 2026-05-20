@@ -27,6 +27,7 @@ This repository collects example configurations, sample code, and reference patt
 | [Windsurf](./Windsurf/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ⚠️ |
 | [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Google (Apigee SharedFlow)](./Google/apigee/sharedflow/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Kong (Custom Plugin v1)](./Kong/custom-plugin/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Kong (Custom Plugin v2 — MCP)](./Kong/custom-plugin-v2/) | API Gateway | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Kong (Request Callout)](./Kong/request-callout/) | API Gateway | ✅ | ❌ | ❌ | ❌ | ❌ |

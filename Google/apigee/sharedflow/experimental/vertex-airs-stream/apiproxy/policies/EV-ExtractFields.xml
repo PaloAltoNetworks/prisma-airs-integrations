@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Parses the Vertex streamGenerateContent URL into flow variables
+  (projectId, region, modelProvider, model). Used by AM-SetTarget to
+  construct the regional Vertex URL.
+-->
+<ExtractVariables continueOnError="false" enabled="true" name="EV-ExtractFields">
+    <DisplayName>EV-ExtractFields</DisplayName>
+    <Properties/>
+    <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+    <URIPath>
+        <Pattern ignoreCase="false">/v1/projects/{projectId}/locations/{region}/publishers/{modelProvider}/models/{model}:streamGenerateContent</Pattern>
+    </URIPath>
+    <Source clearPayload="false">request</Source>
+</ExtractVariables>

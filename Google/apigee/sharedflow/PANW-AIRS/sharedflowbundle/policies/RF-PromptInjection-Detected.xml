@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RaiseFault continueOnError="false" enabled="true" name="RF-PromptInjection-Detected">
+  <DisplayName>RF-PromptInjection-Detected</DisplayName>
+  <Properties/>
+  <FaultResponse>
+    <Set>
+      <Payload contentType="application/json">{"candidates":[{"content":{"role":"model","parts":[{"text":"Your prompt has been flagged as a potential prompt injection or jailbreak attempt by Palo Alto AIRS. An administrative review has been logged for your account."}]},"finishReason":"STOP"}],"modelVersion":"{model}","airs":{"action":"block","category":"prompt-injection","scan_id":"{airs.scan_id}"}}</Payload>
+      <StatusCode>200</StatusCode>
+      <ReasonPhrase>OK</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>
