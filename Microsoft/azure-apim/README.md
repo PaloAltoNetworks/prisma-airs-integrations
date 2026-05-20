@@ -73,6 +73,7 @@ It will return bespoke responses dependent on the category detected.
 * Configure tool scanning behavior with `scanTools` variable (enable/disable)
 * Use dedicated security profiles for tool events via `toolProfile` variable
 * Group multi-turn communication through a defined header in the request
+* Add agent attribution to AIRS metadata via the optional `agent` variable
 * Return masked PII responses if the action is Allow and Masking is enabled
 * Define if the sidecar should FailOpen or FailClosed if Prisma AIRS is not responding or has an error
 
@@ -125,6 +126,10 @@ The policy fragment automatically tracks multi-turn conversations (including too
         <!-- Optional: Configure tool scanning -->
         <set-variable name="toolProfile" value="tool-security-profile" />
         <set-variable name="scanTools" value="true" />
+        <!-- Optional: Attribute scans to an authenticated user -->
+        <set-variable name="user" value="alice" />
+        <!-- Optional: Attribute scans to an APIM-fronted agent/workflow -->
+        <set-variable name="agent" value="support-bot" />
         <!-- Use panw-airs-scan for v1, panw-airs-scan-v2 for v2 -->
         <include-fragment fragment-id="panw-airs-scan" />
 ```
@@ -157,6 +162,8 @@ Policy fragment is configured in the policy using the following variables:
 - `toolProfile`: (string) The name of the AIRS profile to use when scanning tool events. Defaults to `currentProfile` if not set.
 - `scanTools`: (boolean) `true` to scan tool result submissions, `false` to pass them through. Defaults to `true`.
 - `appName`: (string) The name of the application. Defaults to "APIM-Gateway".
+- `user`: (string, optional) Authenticated user identifier included in AIRS as `metadata.app_user`. If not set, the fragment falls back to the `x-user-id` request header, then `"anonymous"`.
+- `agent`: (string, optional) Agent or workflow identifier included in AIRS as `metadata.agent_meta.agent_id`. Set this from trusted APIM policy or backend routing context, not directly from untrusted client input.
 - `FailOpen`: (boolean) `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.
 - `airsDescriptions`: (JObject) A JObject containing custom error messages for detected threats. If not provided, the default messages in `scanDescriptions` will be used.
 
