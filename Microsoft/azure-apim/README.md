@@ -13,6 +13,7 @@ This integration provides three versions of the policy fragment. Choose the one 
 | Azure AI Foundry GPT (`/openai/v1/responses`) | ✅ | ✅ | ✅ |
 | Anthropic /v1/messages | ❌ | ✅ | ✅ |
 | Azure AI Foundry Claude (`/v1/messages`) | ❌ | ✅ | ✅ |
+| Gemini native API (generateContent) | ❌ | ❌ | ✅ |
 | Model Context Protocol (MCP) | ❌ | ❌ | ✅ |
 | Automatic API type detection | ❌ | ❌ | ✅ |
 | Streaming/SSE response scanning | ❌ | ✅ | ✅ |
@@ -24,7 +25,7 @@ This integration provides three versions of the policy fragment. Choose the one 
 
 - **v1** — OpenAI-only. Simpler fragment for environments that only use OpenAI-compatible endpoints.
 - **v2** — Multi-model. Adds Anthropic and Azure AI Foundry Claude support, plus streaming/SSE response scanning.
-- **v3** — **Unified (Recommended)**. Supports all LLM APIs (OpenAI, Anthropic, Azure AI Foundry) and MCP with automatic API type detection. Single fragment for all use cases.
+- **v3** — **Unified (Recommended)**. Supports all LLM APIs (OpenAI, Anthropic, Azure AI Foundry, Gemini) and MCP with automatic API type detection. Single fragment for all use cases.
 
 ### Which Version Should I Use?
 
@@ -66,9 +67,9 @@ This integration provides three versions of the policy fragment. Choose the one 
 
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
-| Prompt | ✅ | Scans user prompts (OpenAI, Anthropic, Azure AI Foundry, MCP) |
+| Prompt | ✅ | Scans user prompts (OpenAI, Anthropic, Azure AI Foundry, Gemini, MCP) |
 | Response | ✅ | Scans LLM responses with masking support (all providers) |
-| Streaming | ✅ | SSE chunk reassembly for OpenAI, Anthropic, and MCP streaming responses |
+| Streaming | ✅ | SSE chunk reassembly for OpenAI, Anthropic, Gemini, and MCP streaming responses |
 | Pre-tool call | ✅ | Scans MCP tool arguments before execution |
 | Post-tool call | ✅ | Scans tool results (OpenAI, Anthropic, MCP) as `tool_event` with metadata |
 
@@ -78,9 +79,11 @@ The fragments handle scanning of prompts, responses, and tool events on the foll
 * **POST /responses** - OpenAI Responses API (v1, v2, v3)
 * **POST /openai/v1/responses** - Azure AI Foundry GPT Responses API (v1, v2, v3 - detected via `/responses` suffix)
 * **POST /v1/messages** - Anthropic direct and Azure AI Foundry Claude (v2, v3)
+* **POST /v*/models/*/generateContent** - Gemini native API (v3 only)
+* **POST /v*/models/*/streamGenerateContent** - Gemini streaming API (v3 only)
 * **POST /mcp** (or custom path) - Model Context Protocol tool calling (v3 only)
 
-> **Gemini:** Not directly supported, but Google's OpenAI-compatible endpoint (`/v1beta/openai/chat/completions`) works with v1, v2, and v3 since it uses the same chat/completions schema.
+> **Gemini:** v3 supports native Gemini API (`generateContent`, `streamGenerateContent`). v1 and v2 can use Google's OpenAI-compatible endpoint (`/v1beta/openai/chat/completions`).
 
 **Scanning capabilities:**
 - **User prompts** before sending to the LLM

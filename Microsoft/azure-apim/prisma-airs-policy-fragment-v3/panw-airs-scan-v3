@@ -15,11 +15,13 @@ This APIM policy fragment provides unified security scanning for:
 - OpenAI (chat/completions, responses)
 - Anthropic (v1/messages)
 - Azure AI Foundry Claude (anthropic/v1/messages)
+- Gemini (generateContent, streamGenerateContent)
 - Model Context Protocol (MCP) tool servers
 
 ## Major Changes in v3:
 - ✅ Unified fragment for both LLM APIs and MCP servers
-- ✅ Automatic detection: path-based (OpenAI/Anthropic) OR method-based (MCP)
+- ✅ Automatic detection: path-based (OpenAI/Anthropic/Gemini) OR method-based (MCP)
+- ✅ Native Gemini API support (generateContent, streamGenerateContent)
 - ✅ Rich error messaging for all API types
 - ✅ MCP tool event scanning with SSE support
 - ✅ Consistent configuration across all APIs
@@ -47,11 +49,16 @@ This APIM policy fragment provides unified security scanning for:
 - `appName`: (string) Application name (prefixed with "APIM-"). Defaults to "Gateway"
 - `FailOpen`: (boolean) true = allow if AIRS unavailable, false = block. Defaults to false
 - `airsDescriptions`: (JObject) Custom threat descriptions (optional)
+- `AgentID`: (string) Optional agent identifier for agent_meta
+- `AgentVersion`: (string) Optional agent version for agent_meta
+- `AgentARN`: (string) Optional agent ARN for agent_meta
+Note: agent_meta is only included if at least one agent field is defined
 
 ## Supported APIs:
 - OpenAI: /chat/completions, /responses
 - Anthropic: /v1/messages
 - Azure AI Foundry: /anthropic/v1/messages
+- Gemini: /v*/models/*/generateContent, /v*/models/*:generateContent, /v*/models/*/streamGenerateContent, /v*/models/*:streamGenerateContent
 - MCP: Any path with method="tools/call" in request body
 
 ## Usage:
@@ -61,6 +68,9 @@ This APIM policy fragment provides unified security scanning for:
     <set-variable name="ScanType" value="prompt" />
     <set-variable name="currentProfile" value="my-profile" />
     <set-variable name="FailOpen" value="false" />
+    <set-variable name="AgentID" value="bedrock-agent-123" />
+    <set-variable name="AgentVersion" value="1.0.0" />
+    <set-variable name="AgentARN" value="arn:aws:bedrock:us-east-1:123456789012:agent/AGENT123" />
     <include-fragment fragment-id="panw-airs-scan-v3" />
 </inbound>
 <outbound>
@@ -110,8 +120,16 @@ This APIM policy fragment provides unified security scanning for:
                 // Body parsing failed, continue with path-based detection
             }
 
-            // Check if this is OpenAI/Anthropic by path
+            // Check if this is Gemini by path
             string path = context.Request.OriginalUrl.Path;
+            if (path.IndexOf("/generateContent", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                path.IndexOf(":generateContent", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                path.IndexOf("/streamGenerateContent", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                path.IndexOf(":streamGenerateContent", StringComparison.OrdinalIgnoreCase) >= 0) {
+                return "gemini";
+            }
+
+            // Check if this is OpenAI/Anthropic by path
             if (path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase) ||
                 path.EndsWith("/responses", StringComparison.OrdinalIgnoreCase) ||
                 path.EndsWith("/v1/messages", StringComparison.OrdinalIgnoreCase)) {
@@ -182,8 +200,8 @@ This APIM policy fragment provides unified security scanning for:
                             }
                         }
 
-                        // LLM: Generate from conversation hash
-                        if (apiType == "llm") {
+                        // LLM/Gemini: Generate from conversation hash
+                        if (apiType == "llm" || apiType == "gemini") {
                             var body = context.Request.Body.As<JObject>(preserveContent: true);
                             string userIP = context.Request.IpAddress;
 
@@ -217,6 +235,19 @@ This APIM policy fragment provides unified security scanning for:
                                         conversationSeed.Append(firstUserInput["content"].ToString());
                                     }
                                 }
+                                // Gemini: contents array
+                                else if (body["contents"] is JArray geminiContents && geminiContents.Count > 0) {
+                                    // Hash first user content from Gemini format
+                                    var firstUserContent = geminiContents.FirstOrDefault(c => c["role"]?.ToString() == "user");
+                                    if (firstUserContent != null && firstUserContent["parts"] is JArray parts) {
+                                        foreach (var part in parts) {
+                                            if (part["text"] != null) {
+                                                conversationSeed.Append(part["text"].ToString());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // Hash if we have enough data
                                 if (conversationSeed.Length > userIP.Length + 1) {
@@ -242,6 +273,19 @@ This APIM policy fragment provides unified security scanning for:
                             model = body["model"].ToString();
                         } else if (apiType == "mcp") {
                             model = "mcp-tool-server";
+                        } else if (apiType == "gemini") {
+                            // Extract model from path: /v1beta/models/gemini-2.5-flash/generateContent
+                            string path = context.Request.OriginalUrl.Path;
+                            var segments = path.Split('/');
+                            for (int i = 0; i < segments.Length; i++) {
+                                if (segments[i] == "models" && i + 1 < segments.Length) {
+                                    model = segments[i + 1].Split(':')[0]; // Handle both /model/ and /model:method
+                                    break;
+                                }
+                            }
+                            if (model == "unknown-model") {
+                                model = "gemini-model";
+                            }
                         }
 
                         string appName = "APIM-" + (string)context.Variables.GetValueOrDefault("appName", "Gateway");
@@ -256,17 +300,39 @@ This APIM policy fragment provides unified security scanning for:
                             }
                         }
 
+                        // Build metadata object
+                        var metadata = new JObject(
+                            new JProperty("app_name", appName),
+                            new JProperty("user_ip", context.Request.IpAddress),
+                            new JProperty("ai_model", model),
+                            new JProperty("app_user", appUser)
+                        );
+
+                        // Add optional agent_meta if any agent fields are defined
+                        string agentId = context.Variables.GetValueOrDefault<string>("AgentID", null);
+                        string agentVersion = context.Variables.GetValueOrDefault<string>("AgentVersion", null);
+                        string agentArn = context.Variables.GetValueOrDefault<string>("AgentARN", null);
+
+                        if (!string.IsNullOrEmpty(agentId) || !string.IsNullOrEmpty(agentVersion) || !string.IsNullOrEmpty(agentArn)) {
+                            var agentMeta = new JObject();
+                            if (!string.IsNullOrEmpty(agentId)) {
+                                agentMeta.Add("agent_id", agentId);
+                            }
+                            if (!string.IsNullOrEmpty(agentVersion)) {
+                                agentMeta.Add("agent_version", agentVersion);
+                            }
+                            if (!string.IsNullOrEmpty(agentArn)) {
+                                agentMeta.Add("agent_arn", agentArn);
+                            }
+                            metadata.Add("agent_meta", agentMeta);
+                        }
+
                         return new JObject(
                             new JProperty("session_id", sessionId),
                             new JProperty("ai_profile", new JObject(
                                 new JProperty("profile_name", profileName)
                             )),
-                            new JProperty("metadata", new JObject(
-                                new JProperty("app_name", appName),
-                                new JProperty("user_ip", context.Request.IpAddress),
-                                new JProperty("ai_model", model),
-                                new JProperty("app_user", appUser)
-                            ))
+                            new JProperty("metadata", metadata)
                         );
                     }" />
 
@@ -365,9 +431,158 @@ This APIM policy fragment provides unified security scanning for:
                                 }
 
                                 var contents = new JArray(new JObject(new JProperty("tool_event", toolEvent)));
-                                data.Add("contents", contents);
+                                data["contents"] = contents;
                                 return data;
                             }" />
+                        </when>
+
+                        <!-- === Gemini API === -->
+                        <when condition="@((string)context.Variables["apiType"] == "gemini")">
+                            <choose>
+                                <!-- Gemini PROMPT scanning -->
+                                <when condition="@((string)context.Variables["scanType"] == "prompt")">
+                                    <set-variable name="requestData" value="@{
+                                        try {
+                                            var data = (JObject)context.Variables["requestData"];
+                                            var body = context.Request.Body.As<JObject>(preserveContent: true);
+                                            var contents = new JArray();
+
+                                            // Extract text from Gemini contents[].parts[].text
+                                            if (body["contents"] is JArray geminiContents) {
+                                                foreach (var content in geminiContents) {
+                                                    if (content["parts"] is JArray parts) {
+                                                        var textBuilder = new System.Text.StringBuilder();
+                                                        foreach (var part in parts) {
+                                                            if (part["text"] != null) {
+                                                                textBuilder.Append(part["text"].ToString());
+                                                            }
+                                                        }
+                                                        if (textBuilder.Length > 0) {
+                                                            contents.Add(new JObject(new JProperty("prompt", textBuilder.ToString())));
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            data.Add("contents", contents);
+                                            return data;
+                                        } catch (Exception ex) {
+                                            return (JObject)context.Variables["requestData"];
+                                        }
+                                    }" />
+                                </when>
+
+                                <!-- Gemini RESPONSE scanning -->
+                                <when condition="@((string)context.Variables["scanType"] == "response")">
+                                    <set-variable name="requestData" value="@{
+                                        try {
+                                            var data = (JObject)context.Variables["requestData"];
+                                            var raw = context.Response.Body.As<string>(preserveContent: true);
+                                            var contents = new JArray();
+
+                                            if (raw != null) {
+                                                var sb = new System.Text.StringBuilder();
+                                                var trimmedRaw = raw.Trim();
+
+                                                // Check if response is a JSON array (Gemini streaming format)
+                                                if (trimmedRaw.StartsWith("[")) {
+                                                    try {
+                                                        var chunks = JArray.Parse(trimmedRaw);
+                                                        foreach (var chunk in chunks) {
+                                                            if (chunk["candidates"] is JArray candidates) {
+                                                                foreach (var candidate in candidates) {
+                                                                    if (candidate["content"]?["parts"] is JArray parts) {
+                                                                        foreach (var part in parts) {
+                                                                            var txt = part["text"]?.ToString();
+                                                                            if (!string.IsNullOrEmpty(txt)) {
+                                                                                sb.Append(txt);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    } catch {
+                                                        // Array parse failed
+                                                    }
+                                                }
+                                                // Try line-by-line parsing for SSE/newline-delimited format
+                                                else {
+                                                    var lines = raw.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+                                                    foreach (var line in lines) {
+                                                        var trimmed = line.Trim();
+                                                        if (string.IsNullOrEmpty(trimmed) || trimmed.Contains("[DONE]")) {
+                                                            continue;
+                                                        }
+
+                                                        // Remove SSE prefix if present
+                                                        if (trimmed.StartsWith("data:")) {
+                                                            trimmed = trimmed.Substring(5).Trim();
+                                                        }
+
+                                                        try {
+                                                            var chunk = JObject.Parse(trimmed);
+
+                                                            // Extract text from candidates[].content.parts[].text
+                                                            if (chunk["candidates"] is JArray candidates) {
+                                                                foreach (var candidate in candidates) {
+                                                                    if (candidate["content"]?["parts"] is JArray parts) {
+                                                                        foreach (var part in parts) {
+                                                                            var txt = part["text"]?.ToString();
+                                                                            if (!string.IsNullOrEmpty(txt)) {
+                                                                                sb.Append(txt);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        } catch {
+                                                            // Not valid JSON, continue
+                                                        }
+                                                    }
+                                                }
+
+                                                // If we found text, use it
+                                                if (sb.Length > 0) {
+                                                    contents.Add(new JObject(new JProperty("response", sb.ToString())));
+                                                }
+                                                // Otherwise, try parsing as a single non-streaming response
+                                                else {
+                                                    try {
+                                                        var body = JObject.Parse(raw);
+                                                        var respText = new System.Text.StringBuilder();
+
+                                                        if (body["candidates"] is JArray candidates) {
+                                                            foreach (var candidate in candidates) {
+                                                                if (candidate["content"]?["parts"] is JArray parts) {
+                                                                    foreach (var part in parts) {
+                                                                        var txt = part["text"]?.ToString();
+                                                                        if (!string.IsNullOrEmpty(txt)) {
+                                                                            respText.Append(txt);
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        if (respText.Length > 0) {
+                                                            contents.Add(new JObject(new JProperty("response", respText.ToString())));
+                                                        }
+                                                    } catch {
+                                                        // Parse failed
+                                                    }
+                                                }
+                                            }
+
+                                            data["contents"] = contents;
+                                            return data;
+                                        } catch (Exception ex) {
+                                            return (JObject)context.Variables["requestData"];
+                                        }
+                                    }" />
+                                </when>
+                            </choose>
                         </when>
 
                         <!-- === LLM APIs (OpenAI/Anthropic) === -->
@@ -432,7 +647,7 @@ This APIM policy fragment provides unified security scanning for:
                                     }" />
                                 </when>
 
-                                <!-- RESPONSE SCANNING -->
+                                <!-- RESPONSE SCANNING - LLM (OpenAI/Anthropic) -->
                                 <when condition="@((string)context.Variables["scanType"] == "response")">
                                     <set-variable name="requestData" value="@{
                                         try {
@@ -556,7 +771,7 @@ This APIM policy fragment provides unified security scanning for:
                                                 }
                                             }
 
-                                            data.Add("contents", contents);
+                                            data["contents"] = contents;
                                             return data;
                                         } catch (Exception ex) {
                                             return (JObject)context.Variables["requestData"];
@@ -816,6 +1031,35 @@ This APIM policy fragment provides unified security scanning for:
                                                     }</set-body>
                                                 </when>
 
+                                                <!-- Gemini prompt masking -->
+                                                <when condition="@((string)context.Variables["apiType"] == "gemini" && (bool)context.Variables["hasPromptMask"])">
+                                                    <set-body>@{
+                                                        var body = context.Request.Body.As<JObject>(preserveContent: true);
+                                                        var result = (JObject)context.Variables["airsResult"];
+                                                        var maskedData = result["prompt_masked_data"]["data"].ToString();
+
+                                                        // Mask the last user content's first text part
+                                                        if (body["contents"] is JArray contents && contents.Count > 0) {
+                                                            for (int i = contents.Count - 1; i >= 0; i--) {
+                                                                if (contents[i]["role"]?.ToString() == "user") {
+                                                                    if (contents[i]["parts"] is JArray parts && parts.Count > 0) {
+                                                                        // Mask first text part
+                                                                        foreach (var part in parts) {
+                                                                            if (part["text"] != null) {
+                                                                                part["text"] = maskedData;
+                                                                                break;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+
+                                                        return body.ToString(Newtonsoft.Json.Formatting.None);
+                                                    }</set-body>
+                                                </when>
+
                                                 <!-- Response masking (LLM APIs) -->
                                                 <when condition="@((string)context.Variables["apiType"] == "llm" && (bool)context.Variables["hasResponseMask"] && (bool)context.Variables["isOutbound"])">
                                                     <set-body>@{
@@ -867,6 +1111,125 @@ This APIM policy fragment provides unified security scanning for:
                                                         }
 
                                                         return body.ToString(Newtonsoft.Json.Formatting.None);
+                                                    }</set-body>
+                                                </when>
+
+                                                <!-- Gemini response masking -->
+                                                <when condition="@((string)context.Variables["apiType"] == "gemini" && (bool)context.Variables["hasResponseMask"] && (bool)context.Variables["isOutbound"])">
+                                                    <set-body>@{
+                                                        var raw = context.Response.Body.As<string>(preserveContent: true);
+                                                        var result = (JObject)context.Variables["airsResult"];
+                                                        var maskedData = result["response_masked_data"]["data"].ToString();
+
+                                                        if (raw != null) {
+                                                            var trimmedRaw = raw.Trim();
+
+                                                            // Check if response is a JSON array (Gemini streaming format)
+                                                            if (trimmedRaw.StartsWith("[")) {
+                                                                try {
+                                                                    var chunks = JArray.Parse(trimmedRaw);
+
+                                                                    // Mask text in each chunk
+                                                                    foreach (var chunk in chunks) {
+                                                                        if (chunk["candidates"] is JArray candidates) {
+                                                                            foreach (var candidate in candidates) {
+                                                                                if (candidate["content"]?["parts"] is JArray parts) {
+                                                                                    foreach (var part in parts) {
+                                                                                        if (part["text"] != null) {
+                                                                                            part["text"] = maskedData;
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    return chunks.ToString(Newtonsoft.Json.Formatting.None);
+                                                                } catch {
+                                                                    return raw;
+                                                                }
+                                                            }
+                                                            // Try line-by-line parsing for SSE/newline-delimited format
+                                                            else {
+                                                                var sb = new System.Text.StringBuilder();
+                                                                var lines = raw.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                                                                bool anyLinesParsed = false;
+
+                                                                foreach (var line in lines) {
+                                                                    var trimmed = line.Trim();
+                                                                    if (string.IsNullOrEmpty(trimmed) || trimmed.Contains("[DONE]")) {
+                                                                        sb.AppendLine(line);
+                                                                        continue;
+                                                                    }
+
+                                                                    // Handle SSE format if present
+                                                                    bool hadDataPrefix = trimmed.StartsWith("data:");
+                                                                    if (hadDataPrefix) {
+                                                                        trimmed = trimmed.Substring(5).Trim();
+                                                                    }
+
+                                                                    try {
+                                                                        var chunk = JObject.Parse(trimmed);
+                                                                        anyLinesParsed = true;
+
+                                                                        // Mask text in candidates[].content.parts[].text
+                                                                        if (chunk["candidates"] is JArray candidates) {
+                                                                            foreach (var candidate in candidates) {
+                                                                                if (candidate["content"]?["parts"] is JArray parts) {
+                                                                                    foreach (var part in parts) {
+                                                                                        if (part["text"] != null) {
+                                                                                            part["text"] = maskedData;
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+
+                                                                        // Rebuild line with or without data: prefix
+                                                                        if (hadDataPrefix) {
+                                                                            sb.AppendLine("data: " + chunk.ToString(Newtonsoft.Json.Formatting.None));
+                                                                        } else {
+                                                                            sb.AppendLine(chunk.ToString(Newtonsoft.Json.Formatting.None));
+                                                                        }
+                                                                    } catch {
+                                                                        // Not valid JSON, keep original line
+                                                                        sb.AppendLine(line);
+                                                                    }
+                                                                }
+
+                                                                // If we parsed streaming lines, return the rebuilt response
+                                                                if (anyLinesParsed) {
+                                                                    return sb.ToString();
+                                                                }
+                                                                // Otherwise, try parsing as single JSON object
+                                                                else {
+                                                                    try {
+                                                                        var body = JObject.Parse(raw);
+
+                                                                        // Mask candidates[].content.parts[].text
+                                                                        if (body["candidates"] is JArray candidates && candidates.Count > 0) {
+                                                                            foreach (var candidate in candidates) {
+                                                                                if (candidate["content"]?["parts"] is JArray parts && parts.Count > 0) {
+                                                                                    foreach (var part in parts) {
+                                                                                        if (part["text"] != null) {
+                                                                                            part["text"] = maskedData;
+                                                                                            break;
+                                                                                        }
+                                                                                    }
+                                                                                    break;
+                                                                                }
+                                                                            }
+                                                                        }
+
+                                                                        return body.ToString(Newtonsoft.Json.Formatting.None);
+                                                                    } catch {
+                                                                        return raw;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        return raw ?? "";
                                                     }</set-body>
                                                 </when>
 
