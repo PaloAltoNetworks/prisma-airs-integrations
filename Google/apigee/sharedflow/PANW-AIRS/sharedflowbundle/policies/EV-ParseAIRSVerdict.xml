@@ -5,8 +5,8 @@
   Top-level fields:
     airs.action    -> "allow" | "block"
     airs.category  -> "malicious" | "benign"   (umbrella verdict)
-    airs.scan_id   -> AIRS scan identifier for audit cross-reference
-    airs.tr_id     -> echo of tr_id sent in request
+    airs.scan_id        -> AIRS scan identifier for audit cross-reference
+    airs.transaction_id -> echo of transaction_id sent in request
 
   Per-detector booleans (note: AIRS only populates the side relevant to the
   scan that was just performed — prompt_detected on input scans,
@@ -40,8 +40,8 @@
     <Variable name="airs.scan_id">
       <JSONPath>$.scan_id</JSONPath>
     </Variable>
-    <Variable name="airs.tr_id">
-      <JSONPath>$.tr_id</JSONPath>
+    <Variable name="airs.transaction_id">
+      <JSONPath>$.transaction_id</JSONPath>
     </Variable>
 
     <Variable name="airs.prompt.injection">

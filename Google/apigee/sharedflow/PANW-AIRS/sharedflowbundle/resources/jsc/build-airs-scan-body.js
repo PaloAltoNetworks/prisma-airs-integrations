@@ -6,7 +6,8 @@
 
 var type = context.getVariable('type');
 var profile = context.getVariable('airs.profile');
-var trId = context.getVariable('messageid');
+// Apigee's messageid is unique per request — a transaction identifier.
+var transactionId = context.getVariable('messageid');
 var model = context.getVariable('model');
 
 var content = {};
@@ -17,7 +18,7 @@ if (type === 'response-prompt') {
 }
 
 var body = {
-    tr_id: trId || '',
+    transaction_id: transactionId || '',
     ai_profile: { profile_name: profile || '' },
     metadata: {
         ai_model: model || 'unknown',

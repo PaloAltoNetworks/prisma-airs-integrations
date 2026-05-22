@@ -68,10 +68,10 @@ if (blocked) {
         var token = context.getVariable('airs.token') || '';
         var profile = context.getVariable('airs.profile') || '';
         var model = context.getVariable('model') || 'unknown';
-        var trId = context.getVariable('messageid') || ('stream-' + count);
+        var transactionId = context.getVariable('messageid') || ('stream-' + count);
 
         var payload = {
-            tr_id: trId,
+            transaction_id: transactionId,
             ai_profile: { profile_name: profile },
             metadata: {
                 ai_model: model,
