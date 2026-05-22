@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Parses the AIRS scan response.
+
+  Top-level fields:
+    airs.action    -> "allow" | "block"
+    airs.category  -> "malicious" | "benign"   (umbrella verdict)
+    airs.scan_id        -> AIRS scan identifier for audit cross-reference
+    airs.transaction_id -> echo of transaction_id sent in request
+
+  Per-detector booleans (note: AIRS only populates the side relevant to the
+  scan that was just performed — prompt_detected on input scans,
+  response_detected on output scans). The SharedFlow uses these to route to
+  category-specific RaiseFault policies. JSONPath extracts booleans as the
+  strings "true" / "false", so conditions compare against "true".
+
+    prompt_detected.injection      -> airs.prompt.injection
+    prompt_detected.dlp            -> airs.prompt.dlp
+    prompt_detected.url_cats       -> airs.prompt.url_cats
+    prompt_detected.toxic_content  -> airs.prompt.toxic_content
+
+    response_detected.dlp             -> airs.response.dlp
+    response_detected.url_cats        -> airs.response.url_cats
+    response_detected.malicious_code  -> airs.response.malicious_code
+    response_detected.toxic_content   -> airs.response.toxic_content
+    response_detected.db_security     -> airs.response.db_security
+    response_detected.ungrounded      -> airs.response.ungrounded
+-->
+<ExtractVariables continueOnError="false" enabled="true" name="EV-ParseAIRSVerdict">
+  <DisplayName>EV-ParseAIRSVerdict</DisplayName>
+  <Properties/>
+  <Source>airsScanResponse</Source>
+  <JSONPayload>
+    <Variable name="airs.action">
+      <JSONPath>$.action</JSONPath>
+    </Variable>
+    <Variable name="airs.category">
+      <JSONPath>$.category</JSONPath>
+    </Variable>
+    <Variable name="airs.scan_id">
+      <JSONPath>$.scan_id</JSONPath>
+    </Variable>
+    <Variable name="airs.transaction_id">
+      <JSONPath>$.transaction_id</JSONPath>
+    </Variable>
+
+    <Variable name="airs.prompt.injection">
+      <JSONPath>$.prompt_detected.injection</JSONPath>
+    </Variable>
+    <Variable name="airs.prompt.dlp">
+      <JSONPath>$.prompt_detected.dlp</JSONPath>
+    </Variable>
+    <Variable name="airs.prompt.url_cats">
+      <JSONPath>$.prompt_detected.url_cats</JSONPath>
+    </Variable>
+    <Variable name="airs.prompt.toxic_content">
+      <JSONPath>$.prompt_detected.toxic_content</JSONPath>
+    </Variable>
+
+    <Variable name="airs.response.dlp">
+      <JSONPath>$.response_detected.dlp</JSONPath>
+    </Variable>
+    <Variable name="airs.response.url_cats">
+      <JSONPath>$.response_detected.url_cats</JSONPath>
+    </Variable>
+    <Variable name="airs.response.malicious_code">
+      <JSONPath>$.response_detected.malicious_code</JSONPath>
+    </Variable>
+    <Variable name="airs.response.toxic_content">
+      <JSONPath>$.response_detected.toxic_content</JSONPath>
+    </Variable>
+    <Variable name="airs.response.db_security">
+      <JSONPath>$.response_detected.db_security</JSONPath>
+    </Variable>
+    <Variable name="airs.response.ungrounded">
+      <JSONPath>$.response_detected.ungrounded</JSONPath>
+    </Variable>
+  </JSONPayload>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</ExtractVariables>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  FlowCallout into PANW-AIRS with type=user-prompt.
+  Used in the request path to scan the user prompt before invoking Vertex.
+-->
+<FlowCallout continueOnError="false" enabled="true" name="FC-CallAIRSInput">
+  <DisplayName>FC-CallAIRSInput</DisplayName>
+  <FaultRules/>
+  <Parameters>
+    <Parameter name="type">user-prompt</Parameter>
+  </Parameters>
+  <SharedFlowBundle>PANW-AIRS</SharedFlowBundle>
+</FlowCallout>

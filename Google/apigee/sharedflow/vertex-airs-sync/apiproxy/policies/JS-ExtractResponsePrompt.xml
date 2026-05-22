@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Parses the Vertex generateContent response body and joins
+  candidates[0].content.parts[*].text into a single string assigned to
+  response_prompt_value. This is the fix for the v1 400-from-AIRS bug:
+  the v1 AssignMessage template stuffed multi-paragraph model text with
+  quotes/newlines directly inside a JSON string literal, breaking the body.
+-->
+<Javascript continueOnError="false" enabled="true" timeLimit="200" name="JS-ExtractResponsePrompt">
+  <DisplayName>JS-ExtractResponsePrompt</DisplayName>
+  <Properties/>
+  <ResourceURL>jsc://extract-response-prompt.js</ResourceURL>
+</Javascript>
