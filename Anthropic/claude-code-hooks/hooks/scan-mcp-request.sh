@@ -41,21 +41,12 @@ TOOL_INPUT=$(echo "$INPUT_JSON" | jq -c '.tool_input // {}' 2>/dev/null)
 MCP_SERVER=$(echo "$TOOL_NAME" | awk -F'__' '{print $2}')
 TOOL_INVOKED=$(echo "$TOOL_NAME" | awk -F'__' '{print $3}')
 
-# Extract transcript_path for session ID (if available)
-TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
-
-# Generate session UUID
-if [[ -n "$TRANSCRIPT_PATH" ]]; then
-    # Extract session ID from transcript path (e.g., /path/to/.claude/sessions/abc-123/transcript.jsonl)
-    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
-    # If extraction failed, use path hash as fallback
-    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
-        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
-    fi
-else
-    # Fallback: use working directory hash for session correlation
+# Use Claude Code session_id as the AIRS transaction_id for session-level tracing.
+SESSION_ID=$(echo "$INPUT_JSON" | jq -r '.session_id // empty' 2>/dev/null)
+if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
 fi
+TRANSACTION_ID="$SESSION_ID"
 
 echo "[$(date)] PreToolUse MCP Hook: Scanning $TOOL_NAME request" >> "$LOG_FILE"
 
@@ -94,10 +85,14 @@ fi
 echo "[$(date)] MCP Request: Scanning '$MCP_REQUEST' for $TOOL_NAME (${#MCP_REQUEST} chars)" >> "$LOG_FILE"
 
 AI_PROFILE_JSON=$(build_ai_profile)
+if [[ -z "$AI_PROFILE_JSON" ]]; then
+    AI_PROFILE_JSON="{}"
+fi
 
 # Create AIRS payload using tool_event for MCP tool scans
 MCP_PAYLOAD=$(jq -n \
-  --arg tr_id "$SESSION_ID" \
+  --arg session_id "$SESSION_ID" \
+  --arg transaction_id "$TRANSACTION_ID" \
   --argjson ai_profile "$AI_PROFILE_JSON" \
   --arg app_user "claude-code-user" \
   --arg app_name "$APP_NAME" \
@@ -105,11 +100,11 @@ MCP_PAYLOAD=$(jq -n \
   --arg tool_invoked "$TOOL_INVOKED" \
   --arg input "$TOOL_INPUT" \
   '{
-    tr_id: $tr_id,
+    session_id: $session_id,
+    transaction_id: $transaction_id,
     ai_profile: $ai_profile,
     metadata: {app_user: $app_user, app_name: $app_name},
     contents: [{
-      prompt: $input,
       tool_event: {
         metadata: {
           ecosystem: "mcp",
@@ -134,10 +129,17 @@ if [[ -n "$SCAN_RESULT" ]]; then
     ACTION=$(echo "$SCAN_RESULT" | jq -r '.action // empty' 2>/dev/null)
     CATEGORY=$(echo "$SCAN_RESULT" | jq -r '.category // empty' 2>/dev/null)
     SCAN_ID=$(echo "$SCAN_RESULT" | jq -r '.scan_id // "unknown"' 2>/dev/null)
+    TOOL_VERDICT=$(echo "$SCAN_RESULT" | jq -r '.tool_detected.verdict // empty' 2>/dev/null)
     
     # Extract ALL detection categories dynamically
     DETECTIONS=""
-    DETECTED_CATEGORIES=$(echo "$SCAN_RESULT" | jq -r '.prompt_detected | to_entries | map(select(.value == true)) | map(.key) | .[]' 2>/dev/null)
+    DETECTED_CATEGORIES=$(echo "$SCAN_RESULT" | jq -r '
+      [
+        (.tool_detected.summary.detections // {} | to_entries[]? | select(.value == true) | .key),
+        (.tool_detected.input_detected.detection_entries // [] | .[] | (.detections // {}) | to_entries[]? | select(.value == true) | .key),
+        (.prompt_detected // {} | to_entries[]? | select(.value == true) | .key)
+      ] | unique | .[]
+    ' 2>/dev/null)
 
     while IFS= read -r category; do
         [[ -z "$category" ]] && continue
@@ -146,7 +148,7 @@ if [[ -n "$SCAN_RESULT" ]]; then
 
     DETECTIONS=$(echo "$DETECTIONS" | sed 's/,$//')
 
-    echo "[$(date)] MCP Request Result: action=$ACTION, category=$CATEGORY" >> "$LOG_FILE"
+    echo "[$(date)] MCP Request Result: action=$ACTION, category=$CATEGORY, tool_verdict=${TOOL_VERDICT:-unknown}" >> "$LOG_FILE"
     
     # Decision logic
     if [[ "$ACTION" == "block" ]]; then
@@ -178,4 +180,3 @@ else
     echo "Prisma AIRS: empty API response — blocking MCP request (fail-closed)" >&2
     exit 2
 fi
-
