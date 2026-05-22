@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Prisma AIRS User Input Security Scanner Hook for Claude Code
-# Scans URLs in user messages BEFORE they reach Claude
+# Scans URLs in user messages BEFORE Claude Code processes them
 # This provides first-line defense against malicious URLs
 
 # Configuration with environment variable support
@@ -61,31 +61,27 @@ if [[ -z "$USER_MESSAGE" ]]; then
     exit 0  # Allow if no prompt found
 fi
 
-# Extract transcript_path for session ID (if available)
-TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
-
-# Generate session UUID
-if [[ -n "$TRANSCRIPT_PATH" ]]; then
-    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
-    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
-        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
-    fi
-else
+# Use Claude Code session_id as the AIRS transaction_id for session-level tracing.
+SESSION_ID=$(echo "$INPUT_JSON" | jq -r '.session_id // empty' 2>/dev/null)
+if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
 fi
+TRANSACTION_ID="$SESSION_ID"
 
 AI_PROFILE=$(build_ai_profile)
 
 # Create payload to scan the entire user message
 PAYLOAD=$(jq -n \
-  --arg tr_id "$SESSION_ID" \
+  --arg session_id "$SESSION_ID" \
+  --arg transaction_id "$TRANSACTION_ID" \
   --argjson ai_profile "$AI_PROFILE" \
   --arg app_user "claude-code-user" \
   --arg app_name "$APP_NAME" \
   --arg source "user-prompt-submit" \
   --arg prompt "$USER_MESSAGE" \
   '{
-    tr_id: $tr_id,
+    session_id: $session_id,
+    transaction_id: $transaction_id,
     ai_profile: $ai_profile,
     metadata: {app_user: $app_user, app_name: $app_name, source: $source},
     contents: [{prompt: $prompt}]

@@ -61,18 +61,12 @@ if [[ -z "$URL" ]]; then
     exit 0  # Allow if no URL found
 fi
 
-# Extract transcript_path for session ID (if available)
-TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
-
-# Generate session UUID
-if [[ -n "$TRANSCRIPT_PATH" ]]; then
-    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
-    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
-        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
-    fi
-else
+# Use Claude Code session_id as the AIRS transaction_id for session-level tracing.
+SESSION_ID=$(echo "$INPUT_JSON" | jq -r '.session_id // empty' 2>/dev/null)
+if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
 fi
+TRANSACTION_ID="$SESSION_ID"
 
 echo "[$(date)] 🌐 $TOOL_NAME: $URL" >> "$LOG_FILE"
 
@@ -80,7 +74,8 @@ AI_PROFILE=$(build_ai_profile)
 
 # Create JSON payload for URL scanning
 PAYLOAD=$(jq -n \
-  --arg tr_id "$SESSION_ID" \
+  --arg session_id "$SESSION_ID" \
+  --arg transaction_id "$TRANSACTION_ID" \
   --argjson ai_profile "$AI_PROFILE" \
   --arg app_user "claude-code-user" \
   --arg app_name "$APP_NAME" \
@@ -88,7 +83,8 @@ PAYLOAD=$(jq -n \
   --arg source "pre-tool-use" \
   --arg url "$URL" \
   '{
-    tr_id: $tr_id,
+    session_id: $session_id,
+    transaction_id: $transaction_id,
     ai_profile: $ai_profile,
     metadata: {app_user: $app_user, app_name: $app_name, tool_name: $tool_name, source: $source},
     contents: [{prompt: $url}]

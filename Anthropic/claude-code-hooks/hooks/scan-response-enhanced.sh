@@ -41,30 +41,19 @@ INPUT_JSON=$(cat)
 TOOL_NAME=$(echo "$INPUT_JSON" | jq -r '.tool_name // "unknown"')
 TOOL_RESPONSE=$(echo "$INPUT_JSON" | jq -r '.tool_response // ""')
 
-# Detect MCP tools and extract server/tool from pattern: mcp__<server>__<tool>
-IS_MCP=false
+# MCP tool responses are handled by scan-mcp-response.sh so they can use
+# AIRS tool_event semantics without generic response duplication.
 if [[ "$TOOL_NAME" == mcp__* ]]; then
-    IS_MCP=true
-    MCP_SERVER=$(echo "$TOOL_NAME" | awk -F'__' '{print $2}')
-    TOOL_INVOKED=$(echo "$TOOL_NAME" | awk -F'__' '{print $3}')
-    TOOL_INPUT_STR=$(echo "$INPUT_JSON" | jq -c '.tool_input // {}' 2>/dev/null)
+    echo "[$(date)] $TOOL_NAME: Skipping MCP response in generic response hook" >> "$LOG_FILE"
+    exit 0
 fi
 
-# Extract transcript_path for session ID (if available)
-TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
-
-# Generate session UUID
-if [[ -n "$TRANSCRIPT_PATH" ]]; then
-    # Extract session ID from transcript path (e.g., /path/to/.claude/sessions/abc-123/transcript.jsonl)
-    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
-    # If extraction failed, use path hash as fallback
-    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
-        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
-    fi
-else
-    # Fallback: use working directory hash for session correlation
+# Use Claude Code session_id as the AIRS transaction_id for session-level tracing.
+SESSION_ID=$(echo "$INPUT_JSON" | jq -r '.session_id // empty' 2>/dev/null)
+if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
 fi
+TRANSACTION_ID="$SESSION_ID"
 
 # Log that we're processing this tool
 echo "[$(date)] 🔍 $TOOL_NAME: PostToolUse hook triggered" >> "$LOG_FILE"
@@ -121,53 +110,26 @@ fi
 # Scan response content if reasonable size (truncate and optimize)
 TRUNCATED_CONTENT="$(echo "$RESPONSE_CONTENT" | head -c 20000 | tr '\n' ' ')"
 if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
-    if [[ "$IS_MCP" == true ]]; then
-        # Use tool_event for MCP tools (includes input + output)
-        AI_PROFILE_JSON=$(build_ai_profile)
-        CONTENT_PAYLOAD=$(jq -n \
-          --arg tr_id "$SESSION_ID" \
-          --argjson ai_profile "$AI_PROFILE_JSON" \
-          --arg app_user "claude-code-user" \
-          --arg app_name "$APP_NAME" \
-          --arg server_name "$MCP_SERVER" \
-          --arg tool_invoked "$TOOL_INVOKED" \
-          --arg input "$TOOL_INPUT_STR" \
-          --arg output "$TRUNCATED_CONTENT" \
-          '{
-            tr_id: $tr_id,
-            ai_profile: $ai_profile,
-            metadata: {app_user: $app_user, app_name: $app_name},
-            contents: [{
-              response: $output,
-              tool_event: {
-                metadata: {
-                  ecosystem: "mcp",
-                  method: "tools/call",
-                  server_name: $server_name,
-                  tool_invoked: $tool_invoked
-                },
-                input: $input,
-                output: $output
-              }
-            }]
-          }')
-    else
-        # Use jq for safe JSON construction (no raw variable interpolation)
-        AI_PROFILE_JSON=$(build_ai_profile)
-        CONTENT_PAYLOAD=$(jq -n \
-          --arg tr_id "$SESSION_ID" \
-          --argjson ai_profile "$AI_PROFILE_JSON" \
-          --arg app_user "claude-code-user" \
-          --arg app_name "$APP_NAME" \
-          --arg tool_name "$TOOL_NAME" \
-          --arg response "$TRUNCATED_CONTENT" \
-          '{
-            tr_id: $tr_id,
-            ai_profile: $ai_profile,
-            metadata: {app_user: $app_user, app_name: $app_name, tool_name: $tool_name, source: "response-content"},
-            contents: [{response: $response}]
-          }')
+    # Use jq for safe JSON construction (no raw variable interpolation)
+    AI_PROFILE_JSON=$(build_ai_profile)
+    if [[ -z "$AI_PROFILE_JSON" ]]; then
+        AI_PROFILE_JSON="{}"
     fi
+    CONTENT_PAYLOAD=$(jq -n \
+      --arg session_id "$SESSION_ID" \
+      --arg transaction_id "$TRANSACTION_ID" \
+      --argjson ai_profile "$AI_PROFILE_JSON" \
+      --arg app_user "claude-code-user" \
+      --arg app_name "$APP_NAME" \
+      --arg tool_name "$TOOL_NAME" \
+      --arg response "$TRUNCATED_CONTENT" \
+      '{
+        session_id: $session_id,
+        transaction_id: $transaction_id,
+        ai_profile: $ai_profile,
+        metadata: {app_user: $app_user, app_name: $app_name, tool_name: $tool_name, source: "response-content"},
+        contents: [{response: $response}]
+      }')
 
     # Curl with timeouts and retries
     CURL_OPTS=(--silent --show-error --location --max-time 10 --retry 1)

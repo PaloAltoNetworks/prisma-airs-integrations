@@ -8,7 +8,7 @@ Security hooks for [Claude Code](https://docs.claude.com/en/docs/claude-code) th
 
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
-| Prompt | ✅ | Scans user prompts via `UserPromptSubmit` before Claude processes them |
+| Prompt | ✅ | Scans user prompts via `UserPromptSubmit` before Claude Code processes them |
 | Response | ❌ | No model response hook configured |
 | Streaming | ❌ | Not supported |
 | Pre-tool call | ✅ | Scans URLs (WebFetch/WebSearch) and MCP tool inputs via `PreToolUse` |
@@ -28,11 +28,12 @@ User Prompt ──► scan-user-input.sh ──► Claude Code ──► Tool Ca
                                         Tool Execution ───┘
                                              │
                                              ▼
-                                   scan-response-enhanced.sh
-                                   (block: JSON continue:false)
+                         scan-response-enhanced.sh   scan-mcp-response.sh
+                         (web response)             (MCP response)
+                         (block: JSON continue:false)
                                              │
                                              ▼
-                                      Claude Processing
+                                      Claude Code Processing
 ```
 
 ### Security Hooks
@@ -40,11 +41,14 @@ User Prompt ──► scan-user-input.sh ──► Claude Code ──► Tool Ca
 | Script | Hook | Matcher | AIRS Content Type | Blocks via |
 |--------|------|---------|-------------------|------------|
 | `scan-user-input.sh` | `UserPromptSubmit` | — | `prompt` | exit 2 |
-| `scan-url.sh` | `PreToolUse` | `WebFetch\|WebSearch\|web_search` | `prompt` | exit 2 |
+| `scan-url.sh` | `PreToolUse` | `WebFetch\|WebSearch` | `prompt` | exit 2 |
 | `scan-mcp-request.sh` | `PreToolUse` | `mcp__*` | `tool_event` (input only) | exit 2 |
-| `scan-response-enhanced.sh` | `PostToolUse` | `WebFetch\|WebSearch\|web_search`, `mcp__*` | `tool_event` (MCP) or `response` (web) | JSON `continue: false` |
+| `scan-response-enhanced.sh` | `PostToolUse` | `WebFetch\|WebSearch` | `response` | JSON `continue: false` |
+| `scan-mcp-response.sh` | `PostToolUse` | `mcp__*` | `tool_event` (input + output) | JSON `continue: false` |
 
-`scan-response-enhanced.sh` truncates content to 20,000 characters and scans the body. MCP tools use `tool_event` content type; web tools use `response`.
+Hooks send Claude Code `session_id` as the AIRS `transaction_id` for session-level tracing. 
+
+`scan-response-enhanced.sh` truncates web tool response content to 20,000 characters and scans it as `response`. MCP tools use `scan-mcp-response.sh`, which sends compact JSON strings in `tool_event.input` and `tool_event.output` without duplicating the payload as generic `prompt` or `response`.
 
 ---
 
@@ -142,10 +146,10 @@ tail -f .claude/hooks/prisma-airs.log
 
 ## Limitations
 
-- **No model response scanning.** There is no `Stop` or response-phase hook configured. If Claude generates sensitive content (e.g. DLP) without a tool call, it is not scanned.
-- **Content truncation.** `scan-response-enhanced.sh` truncates tool response content to 20,000 characters before scanning.
+- **No model response scanning.** There is no `Stop` or response-phase hook configured. If Claude Code generates sensitive content (e.g. DLP) without a tool call, it is not scanned.
+- **Content truncation.** `scan-response-enhanced.sh` truncates web tool response content to 20,000 characters before scanning. MCP response scans send compact JSON in `tool_event.input` and `tool_event.output`.
 - **Fail-closed on missing config.** All hooks block (exit 2) when `PRISMA_AIRS_API_KEY` or profile is not set. Network/API errors during scanning still fail open.
-- **No timeout on prompt scan.** `scan-user-input.sh` does not set a curl timeout. `scan-response-enhanced.sh` uses 10 seconds.
+- **No timeout on prompt scan.** `scan-user-input.sh` does not set a curl timeout. Response hooks use 10 seconds.
 
 ---
 

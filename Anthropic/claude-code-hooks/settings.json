@@ -23,7 +23,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*__read.*|mcp__.*__resource.*|mcp__.*",
+        "matcher": "mcp__.*",
         "hooks": [
           {
             "type": "command",
@@ -43,11 +43,11 @@
         ]
       },
       {
-        "matcher": "mcp__.*__read.*|mcp__.*__resource.*|mcp__.*",
+        "matcher": "mcp__.*",
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/scan-response-enhanced.sh"
+            "command": "~/.claude/hooks/scan-mcp-response.sh"
           }
         ]
       }
