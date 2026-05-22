@@ -2,6 +2,10 @@
 
 This document provides instructions for configuring Prisma AIRS as a security guardrail within the LiteLLM Proxy (LLM Gateway). This integration enables real-time scanning of prompts and responses to protect against threats like prompt injection, malicious content, and data loss.
 
+## IMPORTANT
+
+The contents of this repository are community examples and reference implementations, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 ## Coverage
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).

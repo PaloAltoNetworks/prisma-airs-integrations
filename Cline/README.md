@@ -2,6 +2,10 @@
 
 Runtime security scanning for [Cline](https://github.com/cline/cline) using [Prisma AIRS](https://docs.paloaltonetworks.com/ai-runtime-security). User prompts, tool calls, and tool responses are scanned for malicious content with the ability to **block** before they reach the model or execute.
 
+## IMPORTANT
+
+The contents of this repository are community examples and reference implementations, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 ```
 User Prompt ──► UserPromptSubmit ──► Model ──► PreToolUse ──► Tool Execution
                    (scan/block)                (scan/block)        │
