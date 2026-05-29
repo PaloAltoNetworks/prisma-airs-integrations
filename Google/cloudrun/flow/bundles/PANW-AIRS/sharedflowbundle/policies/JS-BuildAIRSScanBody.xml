@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Builds the AIRS sync/request JSON body using JSON.stringify so prompts /
+  model responses containing quotes, newlines or backslashes get escaped
+  safely. Branches on the FlowCallout "type" parameter:
+    type = "user-prompt"      -> uses request_prompt_value, field "prompt"
+    type = "response-prompt"  -> uses response_prompt_value, field "response"
+  Writes the final JSON string to airsScanRequestBody.
+-->
+<Javascript continueOnError="false" enabled="true" timeLimit="200" name="JS-BuildAIRSScanBody">
+  <DisplayName>JS-BuildAIRSScanBody</DisplayName>
+  <Properties/>
+  <ResourceURL>jsc://build-airs-scan-body.js</ResourceURL>
+</Javascript>

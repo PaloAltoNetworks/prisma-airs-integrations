@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RaiseFault continueOnError="false" enabled="true" name="RF-Toxic-Detected">
+  <DisplayName>RF-Toxic-Detected</DisplayName>
+  <Properties/>
+  <FaultResponse>
+    <Set>
+      <Payload contentType="application/json">{"candidates":[{"content":{"role":"model","parts":[{"text":"The content contains toxic, abusive, or otherwise inappropriate language and has been blocked by Palo Alto AIRS."}]},"finishReason":"STOP"}],"modelVersion":"{model}","airs":{"action":"block","category":"toxic-content","scan_id":"{airs.scan_id}"}}</Payload>
+      <StatusCode>200</StatusCode>
+      <ReasonPhrase>OK</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>
