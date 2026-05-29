@@ -38,6 +38,7 @@ This deployment uses Apigee's **modern, recommended pattern** where:
 │  │ 1. [KVM-GetConfig]                                       │  │
 │  │    ├─ private.prisma.airs.token                                 │  │
 │  │    ├─ private.prisma.airs.profile                               │  │
+│  │    ├─ private.prisma.airs.host                                  │  │
 │  │    ├─ private.vertex.project                             │  │
 │  │    └─ private.vertex.model                               │  │
 │  │                                                          │  │
@@ -174,7 +175,8 @@ LEGEND:
 │  │                  │                           │              │ │
 │  │ • prisma.airs.token     │                           │ Auto-gen     │ │
 │  │ • prisma.airs.profile   │                           │ token for    │ │
-│  │ • vertex.project │                           │ Vertex AI    │ │
+│  │ • prisma.airs.host      │                           │ Vertex AI    │ │
+│  │ • vertex.project │                           │              │ │
 │  │ • vertex.model   │                           │              │ │
 │  └──────────────────┘                           └──────────────┘ │
 │                                                                   │
@@ -292,9 +294,10 @@ KEY POINTS:
 │  ┌──────────────────┐                      ┌──────────────────┐        │
 │  │  Encrypted KVM   │                      │  Service Account │        │
 │  │                  │                      │                  │        │
-│  │  ├─ airs.token ──┼──┐                   │  SA with IAM     │        │
-│  │  ├─ airs.profile │  │                   │  aiplatform.user │        │
-│  │  ├─ vertex.project  │                   │                  │        │
+│  │  ├─ prisma.airs.token ──┼──┐            │  SA with IAM     │        │
+│  │  ├─ prisma.airs.profile │  │            │  aiplatform.user │        │
+│  │  ├─ prisma.airs.host    │  │            │                  │        │
+│  │  ├─ vertex.project  │  │                │                  │        │
 │  │  └─ vertex.model │  │                   └────────┬─────────┘        │
 │  └──────────────────┘  │                            │                  │
 │                        │                            │                  │
