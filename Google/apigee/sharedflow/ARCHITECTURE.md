@@ -6,7 +6,7 @@ This document explains *how* and *why* the bundles in this folder are shaped the
 
 Three Apigee bundles cooperate at runtime:
 
-- **`PANW-AIRS`** — a Shared Flow. Self-contained AIRS-call library. Takes a `type` parameter (`user-prompt` or `response-prompt`), reads the AIRS token + profile from KVM, builds a scan request, calls the AIRS sync API, parses the verdict, and raises a detector-specific `403` when AIRS says block.
+- **`PANW-AIRS`** — a Shared Flow. Self-contained AIRS-call library. Takes a `type` parameter (`user-prompt` or `response-prompt`), reads the AIRS token + profile from KVM, builds a scan request, calls the AIRS sync API, parses the verdict, and returns a detector-specific **graceful `200` block** (a Vertex-shaped envelope) when AIRS says block.
 - **`vertex-airs-sync`** — the API Proxy. Thin. Extracts the prompt out of the Vertex request, invokes the Shared Flow, routes the (allowed) request to Vertex, then invokes the Shared Flow again on the response.
 - **`experimental/vertex-airs-stream`** — work-in-progress streaming SSE proxy. Same pattern but with response-side scanning happening inside an EventFlow. Not deployed by `deploy.sh`.
 
@@ -26,7 +26,7 @@ flowchart LR
     P -->|200 + response| C
 ```
 
-When AIRS returns `action: block`, the SharedFlow inspects which per-detector boolean fired and raises a matching `403` — the request never reaches Vertex (or, on the response side, the model output never reaches the client).
+When AIRS returns `action: block`, the SharedFlow inspects which per-detector boolean fired and returns a matching **graceful `200` block** (a Vertex-shaped envelope carrying the block message + an `airs` verdict object) — the request never reaches Vertex (or, on the response side, the model output never reaches the client).
 
 ## 2. Why a Shared Flow at all
 
@@ -108,8 +108,8 @@ sequenceDiagram
     SF->>AIRS: POST /v1/scan/sync/request
     AIRS-->>SF: action=block,<br/>prompt_detected.injection=true
     SF->>SF: EV-ParseAIRSVerdict<br/>RF-PromptInjection-Detected
-    SF-->>Proxy: RaiseFault 403<br/>{"error":"prompt_injection_detected"}
-    Proxy-->>Client: 403
+    SF-->>Proxy: 200 Vertex envelope<br/>airs.action=block, category=prompt-injection
+    Proxy-->>Client: 200 (graceful block)
     Note over Vertex: Never called.
 ```
 
@@ -142,7 +142,7 @@ So a correct implementation has to:
 
 1. Read `action` — if `allow`, continue.
 2. Otherwise inspect each per-detector boolean to know **which** detector tripped.
-3. Raise a detector-specific `403` so the client knows what to fix.
+3. Return a detector-specific graceful `200` block (with `airs.category` set) so the client knows what tripped.
 
 The `EV-ParseAIRSVerdict` policy in the Shared Flow extracts all ten booleans into flow variables (`airs.prompt.injection`, `airs.prompt.dlp`, `airs.prompt.url_cats`, `airs.prompt.toxic_content`, `airs.response.dlp`, `airs.response.url_cats`, `airs.response.malicious_code`, `airs.response.toxic_content`, `airs.response.db_security`, `airs.response.ungrounded`). The `sharedflows/default.xml` then has a series of conditional `<Step>` entries — one per detector — that fire the matching RaiseFault.
 
@@ -152,20 +152,20 @@ flowchart TD
     B --> C{airs.action = block?}
     C -->|No| Z[continue]
     C -->|Yes| D{airs.prompt.injection?}
-    D -->|true| D1[RF-PromptInjection-Detected<br/>403]
+    D -->|true| D1[RF-PromptInjection-Detected<br/>200 block]
     D -->|false| E{airs.prompt.dlp?}
-    E -->|true| E1[RF-DLP-Detected 403]
+    E -->|true| E1[RF-DLP-Detected 200 block]
     E -->|false| F{airs.prompt.url_cats?}
-    F -->|true| F1[RF-MaliciousURL-Detected 403]
+    F -->|true| F1[RF-MaliciousURL-Detected 200 block]
     F -->|false| G{airs.prompt.toxic_content?}
-    G -->|true| G1[RF-Toxic-Detected 403]
+    G -->|true| G1[RF-Toxic-Detected 200 block]
     G -->|false| H{airs.response.malicious_code?}
-    H -->|true| H1[RF-MaliciousCode-Detected 403]
+    H -->|true| H1[RF-MaliciousCode-Detected 200 block]
     H -->|false| I[... more detectors ...]
     I --> Y[RF-Generic-Block<br/>action=block but no<br/>known detector matched]
 ```
 
-The `RF-Generic-Block` at the end is a defensive net — if AIRS introduces a new detector we haven't mapped yet, the client still gets a `403` instead of silently allowed traffic.
+The `RF-Generic-Block` at the end is a defensive net — if AIRS introduces a new detector we haven't mapped yet, the client still gets a block (200 envelope, `category: unknown`) instead of silently allowed traffic.
 
 ## 5. JSON-safe scan body
 
@@ -175,7 +175,7 @@ A subtle bug in early iterations: the AIRS scan body was built with Apigee `Assi
 <Payload>{"contents":[{"response":"{response_prompt_value}"}]}</Payload>
 ```
 
-Any `"` or `\n` in the model output broke the JSON — AIRS returned `400`, the SharedFlow raised `503`, the client got a confusing error on perfectly normal model outputs.
+Any `"` or `\n` in the model output broke the JSON — AIRS returned `400` and the scan failed on perfectly normal model outputs.
 
 The fix is in [`PANW-AIRS/sharedflowbundle/resources/jsc/build-airs-scan-body.js`](PANW-AIRS/sharedflowbundle/resources/jsc/build-airs-scan-body.js): build the body in JavaScript with `JSON.stringify`, assign the whole thing to a flow variable, then `<Payload>{airsScanRequestBody}</Payload>` at the message level. `JSON.stringify` handles all the escaping rules natively.
 
@@ -203,7 +203,7 @@ flowchart LR
 
 ## 7. Why fail-closed
 
-`SC-AIRSScan.xml` has `IgnoreError="false"` and `ContinueOnError="false"`. If AIRS is unreachable, slow (>5 s), or returns 5xx, the Shared Flow raises a `503` and the request is rejected.
+`SC-AIRSScan.xml` runs with `continueOnError="false"` and a 5 s `<Timeout>`. If AIRS is unreachable, slow (>5 s), or returns 5xx, the scan policy faults *before* the prompt reaches Vertex and the request is rejected. The bundle ships no custom `FaultRule` for this case, so the client receives Apigee's default ServiceCallout error (HTTP `5xx`, `steps.servicecallout.ExecutionFailed`); add a `FaultRule` if you want a friendlier shape during AIRS outages.
 
 This is deliberate. The whole point of putting AIRS in line is to guarantee scanning — if scanning isn't happening, the request should not reach Vertex. A fail-open posture would mean an AIRS outage silently downgrades you to no AI security at all, which is the opposite of what an AI security gateway should do.
 
