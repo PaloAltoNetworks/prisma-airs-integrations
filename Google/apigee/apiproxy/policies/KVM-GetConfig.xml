@@ -11,9 +11,9 @@
       <Parameter>prisma.airs.profile</Parameter>
     </Key>
   </Get>
-  <Get assignTo="private.prisma.airs.url">
+  <Get assignTo="private.prisma.airs.host">
     <Key>
-      <Parameter>prisma.airs.url</Parameter>
+      <Parameter>prisma.airs.host</Parameter>
     </Key>
   </Get>
   <Get assignTo="private.vertex.project">
