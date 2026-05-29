@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<TargetEndpoint name="vertex-target">
+  <HTTPTargetConnection>
+    <URL>https://us-central1-aiplatform.googleapis.com/v1/projects/{private.vertex.project}/locations/us-central1/publishers/google/models/{private.vertex.model}:generateContent</URL>
+    <Authentication>
+      <GoogleAccessToken>
+        <Scopes>
+          <Scope>https://www.googleapis.com/auth/cloud-platform</Scope>
+        </Scopes>
+      </GoogleAccessToken>
+    </Authentication>
+  </HTTPTargetConnection>
+</TargetEndpoint>

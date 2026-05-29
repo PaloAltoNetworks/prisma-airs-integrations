@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Calls the AIRS sync scan API.
+  Uses the request message built by AM-BuildAIRSRequest-Input or -Output.
+  AIRS authenticates via the x-pan-token header (not GoogleAccessToken).
+-->
+<ServiceCallout continueOnError="false" enabled="true" name="SC-AIRSScan">
+  <DisplayName>SC-AIRSScan</DisplayName>
+  <Request variable="airsScanRequest">
+    <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
+  </Request>
+  <Response>airsScanResponse</Response>
+  <Timeout>5000</Timeout>
+  <HTTPTargetConnection>
+    <URL>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</URL>
+    <Properties/>
+  </HTTPTargetConnection>
+</ServiceCallout>

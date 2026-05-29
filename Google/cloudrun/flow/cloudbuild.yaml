@@ -1,0 +1,80 @@
+# Cloud Build pipeline — AIRS-on-Apigee provisioning.
+#
+# Fires on every push to the connected branch (trigger created by
+# setup/bootstrap.sh). Four steps:
+#   1. Build the provisioner Docker image
+#   2. Push it to Artifact Registry
+#   3. Create/update the Cloud Run Job with the new image
+#   4. Execute the Job and wait — the build fails if provisioning fails
+#
+# All deployment-specific values are substitution variables (see
+# pipeline.env.example). Secrets are NOT here — the AIRS token is injected
+# into the Job from Secret Manager at step 3.
+
+substitutions:
+  _REGION: us-central1
+  _AR_REPO: airs-apigee
+  _JOB_NAME: airs-apigee-provisioner
+  _RUNTIME_SA: ""              # SA the Cloud Run Job runs as (from bootstrap.sh)
+  _APIGEE_ORG: ""              # Apigee org; empty → provision.sh defaults to PROJECT_ID
+  _APIGEE_ENV: eval
+  _VERTEX_SA: ""               # Vertex caller SA email (created if missing)
+  _AIRS_PROFILE: ""            # AIRS security profile name
+  _ENVGROUP_HOSTNAME: ""       # optional — enables smoke-test URL in the summary
+  _CREATE_AIRS_PROFILE: "0"    # "1" opts into AIRS profile creation via mgmt API
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # 1 — build the provisioner image (context = Google/cloudrun/flow/; the trigger
+  # checks out the repo root, so point the Docker build at this subfolder)
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    dir: Google/cloudrun/flow
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/provisioner:$BUILD_ID
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/provisioner:latest
+      - .
+
+  # 2 — push both tags to Artifact Registry
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/provisioner
+
+  # 3 — create or update the Cloud Run Job with the fresh image
+  - id: deploy-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - deploy
+      - ${_JOB_NAME}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/provisioner:latest
+      - --region=${_REGION}
+      - --service-account=${_RUNTIME_SA}
+      - --set-env-vars=PROJECT=$PROJECT_ID,REGION=${_REGION},APIGEE_ORG=${_APIGEE_ORG},APIGEE_ENV=${_APIGEE_ENV},VERTEX_SA=${_VERTEX_SA},AIRS_PROFILE=${_AIRS_PROFILE},ENVGROUP_HOSTNAME=${_ENVGROUP_HOSTNAME},CREATE_AIRS_PROFILE=${_CREATE_AIRS_PROFILE}
+      - --set-secrets=AIRS_TOKEN=airs-api-token:latest
+      - --max-retries=0
+      - --task-timeout=900s
+
+  # 4 — run the Job; --wait makes this step (and the build) fail if it fails
+  - id: execute-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - execute
+      - ${_JOB_NAME}
+      - --region=${_REGION}
+      - --wait
+
+timeout: 1800s
