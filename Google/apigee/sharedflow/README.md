@@ -66,6 +66,27 @@ Client
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for full flow diagrams, the AIRS two-tier verdict model, and the rationale for the SharedFlow split.
 
+## ✅ Prerequisites
+
+A Vertex service account with **two** IAM bindings — both are required, and the second is easy to miss:
+
+```bash
+# 1. Lets the proxy call Vertex as this SA
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="serviceAccount:apigee-vertex-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+# 2. Lets the Apigee data plane IMPERSONATE the SA at runtime to mint the
+#    Google access token. Without this the proxy returns HTTP 500
+#    GoogleTokenGenerationFailure even though deployment succeeds.
+gcloud iam service-accounts add-iam-policy-binding \
+  apigee-vertex-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \
+  --member="serviceAccount:service-YOUR_PROJECT_NUMBER@gcp-sa-apigee.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountTokenCreator"
+```
+
+Binding #1 is a deploy-time grant; binding #2 is a *runtime* grant on a different principal (the Apigee service agent). Attaching the SA to the deployment is not enough on its own — see [Using Google authentication](https://cloud.google.com/apigee/docs/api-platform/security/google-auth/overview).
+
 ## 🚀 Quick Start
 
 ```bash
@@ -209,10 +230,10 @@ curl -X DELETE \
 # deploy a prior revision (replace N with the older rev)
 curl -X POST \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  "https://apigee.googleapis.com/v1/organizations/<org>/environments/<env>/apis/vertex-airs-sync/revisions/<N-1>/deployments?override=true&serviceAccountEmail=<SA>"
+  "https://apigee.googleapis.com/v1/organizations/<org>/environments/<env>/apis/vertex-airs-sync/revisions/<N-1>/deployments?override=true&serviceAccount=<SA>"
 ```
 
-Same shape for the Shared Flow (`/sharedflows/PANW-AIRS/...`), minus the `serviceAccountEmail`.
+Same shape for the Shared Flow (`/sharedflows/PANW-AIRS/...`), minus the `serviceAccount`.
 
 ## 📚 Resources
 

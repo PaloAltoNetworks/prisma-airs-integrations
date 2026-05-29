@@ -258,7 +258,9 @@ deploy_revision() {
   local kind="$1" name="$2" rev="$3" sa="${4:-}"
 
   local path="/organizations/$ORG/environments/$ENV/$kind/$name/revisions/$rev/deployments?override=true"
-  [[ -n "$sa" ]] && path="$path&serviceAccountEmail=$sa"
+  # Apigee deployments API query param is `serviceAccount` (NOT
+  # `serviceAccountEmail`, which returns HTTP 400 "Cannot bind query parameter").
+  [[ -n "$sa" ]] && path="$path&serviceAccount=$sa"
 
   local resp code
   resp="$(api POST "$path")"
