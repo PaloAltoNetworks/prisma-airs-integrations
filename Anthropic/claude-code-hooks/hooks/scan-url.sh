@@ -52,13 +52,42 @@ fi
 # Read JSON input from stdin
 INPUT_JSON=$(cat)
 
-# Parse the hook input
+# Parse the hook input.
+#
+# Claude Code's PreToolUse hook event carries tool arguments under `.tool_input.*`,
+# not at the top level. Reading `.url` (no `.tool_input` prefix) silently returns
+# empty, causing the script to exit 0 (allow) without ever calling the AIRS scan
+# endpoint - which leaves the tool call effectively unvetted. Field names per tool:
+#
+#   WebFetch       -> .tool_input.url     (a URL to fetch)
+#   WebSearch      -> .tool_input.query   (a search query string, not a URL)
+#   Bash           -> .tool_input.command (a shell command; URLs are embedded as
+#                                          arguments to curl/wget/etc.)
+#   mcp__<server>  -> arbitrary, handled by scan-mcp-request.sh
 TOOL_NAME=$(echo "$INPUT_JSON" | jq -r '.tool_name // "unknown"')
-URL=$(echo "$INPUT_JSON" | jq -r '.url // empty')
 
-# If no URL found, exit (nothing to scan)
+case "$TOOL_NAME" in
+    Bash)
+        # Bash commands can contain a URL as an argument to curl, wget, http, etc.
+        # Extract the first URL found in the command line. If none, exit allow
+        # (other Bash-specific checks belong in a separate hook).
+        COMMAND=$(echo "$INPUT_JSON" | jq -r '.tool_input.command // empty')
+        URL=$(printf '%s' "$COMMAND" | grep -oE 'https?://[^[:space:]"'"'"';|`<>]+' | head -1)
+        ;;
+    WebSearch)
+        # WebSearch passes a query string, not a URL. Scan the whole query for
+        # prompt-injection / malicious-URL signals using AIRS's prompt detectors.
+        URL=$(echo "$INPUT_JSON" | jq -r '.tool_input.query // empty')
+        ;;
+    *)
+        # WebFetch and any other URL-carrying tool: read `.tool_input.url`.
+        URL=$(echo "$INPUT_JSON" | jq -r '.tool_input.url // .tool_input.URL // empty')
+        ;;
+esac
+
+# If no URL or scannable content found, exit (nothing to scan)
 if [[ -z "$URL" ]]; then
-    exit 0  # Allow if no URL found
+    exit 0  # Allow if nothing to scan
 fi
 
 # Use Claude Code session_id as the AIRS transaction_id for session-level tracing.
