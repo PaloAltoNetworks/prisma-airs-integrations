@@ -1,10 +1,10 @@
-# Kong Custom Plugin for Prisma AIRS (v2 — MCP-aware)
+# Kong Custom Plugin for Prisma AIRS (v2 — MCP-aware + buffered SSE)
 
 A Kong Gateway plugin that scans AI/LLM traffic **and** Model Context Protocol (MCP) tool calls using Prisma AIRS.
 
-v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` requests are scanned in the access phase using the AIRS `tool_event` content type, and corresponding MCP responses are scanned in the response phase. Bedrock Converse request/response shape is also handled alongside OpenAI chat-completion format.
+v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` requests are scanned in the access phase using the AIRS `tool_event` content type, and corresponding MCP responses are scanned in the response phase. Bedrock Converse request/response shape is also handled alongside OpenAI chat-completion format. v2 also performs **buffered SSE (`text/event-stream`) response scanning** — it detects streamed LLM responses, reconstructs the assistant text + tool-call arguments from the fully buffered body, and scans the completed response before returning it.
 
-> Use v1 for OpenAI-only / AI-Gateway-fronted LLM traffic. Use v2 when the same Kong service also brokers MCP tool calls (typically MCP-over-HTTP or SSE-framed remote MCP servers) and you want pre-tool and post-tool inspection.
+> Use v1 for OpenAI-only / AI-Gateway-fronted LLM traffic. Use v2 when the same Kong service also brokers MCP tool calls (typically MCP-over-HTTP or SSE-framed remote MCP servers), and/or **serves streamed (`text/event-stream`) LLM responses** that you want scanned.
 
 ## Coverage
 
@@ -14,7 +14,7 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 |----------------|:---------:|-------------|
 | Prompt | ✅ | Access phase scans user prompts (OpenAI `messages[]` and Bedrock Converse `content[].text`) |
 | Response | ✅ | Response phase scans LLM completions (OpenAI `choices[].message.content` and Bedrock `output.message.content`) |
-| Streaming | ❌ | Requires response buffering; 5-second AIRS timeout |
+| Streaming | ✅ | `text/event-stream` responses are detected, the streamed text + tool-call args reconstructed from the **fully buffered** body, and scanned before return. The client receives the full response **after completion, not token-by-token**. Covers OpenAI chat, OpenAI Responses, and Anthropic Messages SSE. |
 | Pre-tool call | ✅ | MCP `tools/call` requests scanned as `tool_event` (`input` = arguments JSON) |
 | Post-tool call | ✅ | MCP `tools/call` responses scanned as `tool_event` (`output` = result JSON; SSE framing stripped) |
 
@@ -25,11 +25,12 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 | Request shapes | OpenAI chat completions | OpenAI chat completions **+ Bedrock Converse** |
 | MCP awareness | None | Detects JSON-RPC 2.0; routes `tools/call` to AIRS `tool_event` |
 | MCP control messages | N/A | `initialize`, `initialized`, `ping`, `notifications/initialized`, `tools/list`, `resources/list`, `prompts/list` bypass AIRS |
-| Response body source | `ngx.ctx.buffered_body` | `kong.service.response.get_raw_body()` (works on MCP proxy routes where the Nginx buffer is empty) |
+| Response body source | `ngx.ctx.buffered_body` | Shared helper: `kong.response.get_raw_body()` (documented `response`-phase call) first, falling back to `kong.service.response.get_raw_body()` — both pcall-guarded |
 | SSE framing | N/A | Strips `event: message\ndata: {...}` envelopes from remote MCP servers before decoding |
+| Buffered SSE response scanning | N/A | Detects `text/event-stream`, reconstructs OpenAI chat / OpenAI Responses / Anthropic Messages text + tool-call args, scans the completed response (LLM path only; MCP behavior unchanged) |
 | Plugin `PRIORITY` | `760` (runs after `ai-proxy` priority `770`) | `1000` (runs **before** `ai-proxy`) |
-| `VERSION` string | `0.3.0` | `0.2.1-capgroup` |
-| `timeout_ms` / `debug` config | Honored | Schema accepts them, handler currently hardcodes 5000 ms and always logs at `info` |
+| `VERSION` string | `0.3.0` | `0.2.2` |
+| `timeout_ms` / `debug` config | Honored | **Honored** (`timeout_ms` applied to the AIRS call; debug logs gated on `debug`) |
 
 > ⚠️ **Priority change.** v2 runs at priority `1000`, **above** Kong's `ai-proxy` (`770`). If you front a non-OpenAI provider with AI Proxy and rely on Proxy's request normalization, v2 will see the **un-normalized** request body (e.g., Bedrock Converse). v2 handles Bedrock Converse natively, but other shapes (Anthropic Messages, Gemini `contents`, etc.) are not parsed. Use v1 if you want the AIRS scan to see AI-Proxy-normalized OpenAI JSON.
 
@@ -41,9 +42,14 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 | `profile_name` | Yes | - | AIRS security profile name |
 | `app_name` | No | - | Application identifier (sent as `kong-{app_name}`; also used as MCP `server_name`) |
 | `api_endpoint` | No | `https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request` | AIRS API endpoint |
-| `ssl_verify` | No | `true` | Verify SSL certificates |
-| `timeout_ms` | No | `5000` | Accepted by schema; **not currently honored** by v2 (hardcoded 5000 ms) |
-| `debug` | No | `false` | Accepted by schema; v2 always logs at `info` |
+| `ssl_verify` | No | `true` | Verify SSL certificates. **Keep `true` on Kong 3.14+** — global `tls_certificate_verify` enforcement rejects a per-plugin `ssl_verify=false`. |
+| `timeout_ms` | No | `5000` | AIRS API call timeout (ms). **Honored.** |
+| `debug` | No | `false` | When `true`, emit debug logs at `info`. **Honored.** |
+| `scan_sse_responses` | No | `true` | Enable buffered SSE response scanning. |
+| `sse_provider` | No | `auto` | SSE wire format: `auto`, `openai_chat`, `openai_responses`, `anthropic_messages`, or `raw`. `auto` detects from the stream. |
+| `sse_max_scan_chars` | No | `20000` | Max reconstructed chars sent to AIRS before the over-limit policy applies. The `20000` default mirrors the conservative response/tool-output scan cap used by other AIRS reference integrations; the `sse_max_scan_chars` field itself is specific to this Kong v2 plugin (see Notes). Over-limit behavior is governed by `sse_truncation_fail_closed`. |
+| `sse_set_observability_headers` | No | `false` | When `true`, add `x-prisma-airs-sse-detected`, `-scan-mode: buffered`, `-provider`, and `-truncated` response headers. |
+| `sse_truncation_fail_closed` | No | `true` | **Secure default.** When `true`, a reconstructed response exceeding `sse_max_scan_chars` cannot be fully scanned, so it is **blocked (403)** rather than returned. Set to `false` to opt into fail-open (scan only the first `sse_max_scan_chars` and return the full response anyway), accepting that content past the cap is returned unscanned. |
 
 ## Installation
 
@@ -68,7 +74,7 @@ curl -X POST \
 ```yaml
 services:
   kong-dp:
-    image: kong/kong-gateway:3.11
+    image: kong/kong-gateway:3.14.0.2
     environment:
       KONG_PLUGINS: "bundled,prisma-airs-intercept"
     volumes:
@@ -257,9 +263,10 @@ MCP control messages and MCP response phase scans that find no body **fail open*
 
 ## Limitations
 
-- Streaming responses not scanned (requires buffering)
-- `timeout_ms` / `debug` config fields parsed but not applied (hardcoded 5000 ms timeout; always logs at `info`)
-- LLM request body must be OpenAI chat completions or Bedrock Converse — other shapes fall through to "no prompt found"
+- **Buffered SSE.** Streamed `text/event-stream` responses **are** scanned, but only after the full response is buffered and reconstructed — the client receives the completed response, **not token-by-token**. True per-frame streaming pass-through is not implemented. Requires an **HTTP/1.1 upstream and HTTP/1.1 `proxy_listen`** (Kong response buffering does not apply to HTTP/2 / gRPC upstreams, and AI-Gateway streaming is unsupported on HTTP/2). MCP `text/event-stream` handling is unchanged (the narrow `event: message\ndata: {...}` strip); buffered reconstruction applies to the LLM response path only.
+- Buffered SSE reconstruction is capped at `sse_max_scan_chars` (default 20000). By default (`sse_truncation_fail_closed=true`) a response exceeding the cap **cannot be fully scanned and is blocked (403)** — we do not return a response we could not scan in full. Operators who prefer availability can set `sse_truncation_fail_closed=false` to scan only the first `sse_max_scan_chars` and return the full (partly unscanned) response anyway. Over-limit always emits a `kong.log.warn` and, when `sse_set_observability_headers=true`, an `x-prisma-airs-sse-truncated: true` header.
+- **Provenance of the `20000` default.** It mirrors the conservative response / tool-output scan cap used by other Prisma AIRS reference integrations (e.g. the `codex-hooks`, `claude-code-hooks`, `Cline`, and `Windsurf` integration READMEs all cap scanned output at 20,000 chars). The `sse_max_scan_chars` and `scan_sse_responses` config **fields are specific to this Kong v2 plugin** — no other public AIRS integration exposes an SSE-specific scan-size knob (the Apigee Vertex SSE proxy uses a smaller per-event threshold for cumulative scanning, a different model). Adjust the cap to your AIRS profile's limits and latency budget.
+- LLM request prompt is read from `messages[].content` for the first `role=user` message: string content is scanned directly; array/table content uses the first item's `.text` when present, otherwise the table is JSON-serialized and scanned as-is. This covers OpenAI chat completions, common Anthropic Messages text blocks, and Bedrock Converse. OpenAI Responses is read from top-level `input` (string or array). Only a body with neither a usable `messages` user turn nor `input` falls through to "no prompt found".
 - MCP detection keys off JSON-RPC `method`/`jsonrpc` fields; non-JSON-RPC tool protocols are not recognized
 - Single plugin instance per route — if you need different profiles for LLM vs MCP traffic, split them across separate Kong services/routes
 

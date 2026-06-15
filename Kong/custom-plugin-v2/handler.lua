@@ -1,12 +1,13 @@
 -- kong/plugins/prisma-airs-intercept/handler.lua
 -- Patched version: Bedrock Converse format + MCP tool_event support
+--                  + buffered SSE (text/event-stream) response scanning
 
 local http = require("resty.http")
 local cjson = require("cjson")
 
 local SecurePrismaAIRSHandler = {
     PRIORITY = 1000,
-    VERSION = "0.2.1-capgroup",
+    VERSION = "0.2.2",
 }
 
 local function log_error(reason, verdict)
@@ -17,35 +18,302 @@ local function log_error(reason, verdict)
 end
 
 local function log_debug(config, msg)
+    if not (config and config.debug) then return end
     pcall(function()
         kong.log.info("SecurePrismaAIRSHandler: " .. tostring(msg))
     end)
 end
 
-local function extract_prompt(request_body)
-    if not request_body or not request_body.messages or type(request_body.messages) ~= "table" then
-        return nil
+-- ============================================================================
+-- Buffered SSE (text/event-stream) response scanning
+--   Detect a streamed response, reconstruct the assistant text + tool-call args
+--   from the fully buffered body, and scan that with AIRS. Buffered only --
+--   no token-by-token streaming. Pure helpers are exposed on `._sse` for tests.
+-- ============================================================================
+
+-- Pure: case-insensitive check for "text/event-stream" in a content-type string.
+local function is_sse_content_type(ct)
+    if type(ct) ~= "string" then return false end
+    return string.find(string.lower(ct), "text/event-stream", 1, true) ~= nil
+end
+
+-- Kong-coupled: read the response content-type. kong.response.* is the documented
+-- response-phase call; fall back to kong.service.response.* (pcall-guarded).
+local function get_response_content_type()
+    local ok, ct = pcall(kong.response.get_header, "content-type")
+    if ok and ct then return ct end
+    local ok2, ct2 = pcall(kong.service.response.get_header, "content-type")
+    if ok2 then return ct2 end
+    return nil
+end
+
+local function is_sse_response()
+    return is_sse_content_type(get_response_content_type())
+end
+
+-- Kong-coupled: read the full buffered response body. Shared by MCP + LLM + SSE
+-- paths; doc-preferred call first, upstream's call as fallback (pcall-guarded).
+local function get_buffered_body()
+    local ok, b = pcall(kong.response.get_raw_body)
+    if ok and b and b ~= "" then return b end
+    local ok2, b2 = pcall(kong.service.response.get_raw_body)
+    if ok2 and b2 and b2 ~= "" then return b2 end
+    return nil
+end
+
+-- Pure: parse a buffered SSE body into an ordered list of `data:` payload strings.
+-- Handles LF and CRLF; preserves empty `data:` lines inside a multi-line event;
+-- skips an event only when its joined payload is empty; ignores `[DONE]`.
+local function parse_sse(raw)
+    local payloads = {}
+    if type(raw) ~= "string" or raw == "" then return payloads end
+
+    raw = raw:gsub("\r\n", "\n"):gsub("\r", "\n")
+
+    local data_lines = {}
+    local function flush_event()
+        if #data_lines == 0 then return end
+        local joined = table.concat(data_lines, "\n")
+        data_lines = {}
+        if joined == "" then return end
+        -- skip [DONE] after trimming surrounding whitespace (spacing varies by provider)
+        local trimmed = joined:gsub("^%s+", ""):gsub("%s+$", "")
+        if trimmed == "[DONE]" then return end
+        payloads[#payloads + 1] = joined
     end
 
-    for _, message in ipairs(request_body.messages) do
-        if message.role == "user" then
-            local content = message.content
-            if type(content) == "table" then
-                -- Bedrock Converse format: content is an array of objects like [{"text":"Hello"}]
-                if content[1] and content[1].text then
-                    return content[1].text
+    -- append a trailing newline so the final event (no trailing blank line) flushes
+    for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
+        if line == "" then
+            flush_event()
+        else
+            local data = line:match("^data:(.*)$")
+            if data then
+                data = data:gsub("^ ", "")  -- strip exactly one optional leading space
+                data_lines[#data_lines + 1] = data
+            end
+            -- non-data lines (event:/id:/retry:/comments) are ignored, do not flush
+        end
+    end
+    flush_event()
+
+    return payloads
+end
+
+-- Pure extractors. Each takes the FULL decoded item list ({ raw, decoded }) and
+-- walks it once, appending text + tool-call args in stream order.
+
+local function extract_openai_chat(items)
+    local out = {}
+    for _, it in ipairs(items) do
+        local d = it.decoded
+        if type(d) == "table" and type(d.choices) == "table" then
+            for _, ch in ipairs(d.choices) do
+                local delta = ch.delta
+                if type(delta) == "table" then
+                    if type(delta.content) == "string" then
+                        out[#out + 1] = delta.content
+                    end
+                    if type(delta.tool_calls) == "table" then
+                        for _, tc in ipairs(delta.tool_calls) do
+                            local fn = tc["function"]
+                            if type(fn) == "table" then
+                                if type(fn.name) == "string" then out[#out + 1] = fn.name end
+                                if type(fn.arguments) == "string" then out[#out + 1] = fn.arguments end
+                            end
+                        end
+                    end
                 end
-                -- Fallback: try to serialize the table
-                local ok, serialized = pcall(cjson.encode, content)
-                if ok then
-                    return serialized
-                end
-                return nil
-            elseif type(content) == "string" then
-                return content
             end
         end
     end
+    return table.concat(out)
+end
+
+local function extract_anthropic_messages(items)
+    local out = {}
+    for _, it in ipairs(items) do
+        local d = it.decoded
+        if type(d) == "table" and d.type == "content_block_delta" and type(d.delta) == "table" then
+            local dt = d.delta
+            if dt.type == "text_delta" and type(dt.text) == "string" then
+                out[#out + 1] = dt.text
+            elseif dt.type == "input_json_delta" and type(dt.partial_json) == "string" then
+                out[#out + 1] = dt.partial_json
+            end
+        end
+    end
+    return table.concat(out)
+end
+
+local function extract_openai_responses(items)
+    local out = {}
+    local saw_delta = {}
+
+    local function family_of(t)
+        return (t:gsub("%.delta$", ""):gsub("%.done$", ""))
+    end
+    local function key_of(d, fam)
+        -- Compose ALL present identifiers so distinct content blocks under the same
+        -- output item (which may share output_index but differ in content_index, or
+        -- vice versa) never collide on the .done-fallback key.
+        return table.concat({
+            fam,
+            tostring(d.item_id or ""),
+            tostring(d.output_index or ""),
+            tostring(d.content_index or ""),
+        }, "|")
+    end
+
+    for _, it in ipairs(items) do
+        local d = it.decoded
+        if type(d) == "table" and type(d.type) == "string" then
+            local t = d.type
+            if t:match("^response%.") and t:match("%.delta$") then
+                if type(d.delta) == "string" then
+                    saw_delta[key_of(d, family_of(t))] = true
+                    out[#out + 1] = d.delta
+                end
+            elseif t:match("^response%.") and t:match("%.done$") then
+                -- .done is a fallback: fold its full value only if that key saw no delta
+                -- (.done follows its deltas in real streams, so saw_delta is already set)
+                if not saw_delta[key_of(d, family_of(t))] then
+                    for _, f in ipairs({ "text", "arguments", "input", "code", "refusal" }) do
+                        if type(d[f]) == "string" then
+                            out[#out + 1] = d[f]
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return table.concat(out)
+end
+
+-- Pure: detect provider from decoded payloads (scan until a signature is found).
+local function detect_provider(items)
+    for _, it in ipairs(items) do
+        local d = it.decoded
+        if type(d) == "table" then
+            if type(d.choices) == "table" then
+                for _, ch in ipairs(d.choices) do
+                    if type(ch.delta) == "table" then return "openai_chat" end
+                end
+            end
+            if type(d.type) == "string" then
+                if d.type:match("^response%.") then return "openai_responses" end
+                if d.type == "content_block_delta" or d.type == "content_block_start"
+                    or d.type == "content_block_stop" or d.type:match("^message_") then
+                    return "anthropic_messages"
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- Pure: reconstruct the assistant text (+ tool-call args) from a buffered SSE body.
+local function reconstruct_sse_text(raw, provider)
+    provider = provider or "auto"
+    local payloads = parse_sse(raw)
+    if #payloads == 0 then return "" end
+
+    if provider == "raw" then
+        return table.concat(payloads)
+    end
+
+    local items = {}
+    for i, p in ipairs(payloads) do
+        local ok, decoded = pcall(cjson.decode, p)
+        items[i] = { raw = p, decoded = ok and decoded or nil }
+    end
+
+    local function run(p)
+        if p == "openai_chat" then return extract_openai_chat(items) end
+        if p == "openai_responses" then return extract_openai_responses(items) end
+        if p == "anthropic_messages" then return extract_anthropic_messages(items) end
+        return ""
+    end
+
+    local text
+    if provider == "auto" then
+        local detected = detect_provider(items)
+        text = detected and run(detected) or ""
+    else
+        text = run(provider)
+    end
+
+    if not text or text == "" then
+        -- fallback: concatenate only the payloads that failed JSON decode (raw/plain text).
+        -- A metadata-only JSON stream therefore reconstructs to "" (nothing scanned).
+        local raws = {}
+        for _, it in ipairs(items) do
+            if it.decoded == nil then raws[#raws + 1] = it.raw end
+        end
+        text = table.concat(raws)
+    end
+
+    return text or ""
+end
+
+-- ============================================================================
+
+local function extract_prompt(request_body)
+    if not request_body then return nil end
+
+    if type(request_body.messages) == "table" then
+        for _, message in ipairs(request_body.messages) do
+            if message.role == "user" then
+                local content = message.content
+                if type(content) == "table" then
+                    -- Bedrock Converse format: content is an array of objects like [{"text":"Hello"}]
+                    if content[1] and content[1].text then
+                        return content[1].text
+                    end
+                    -- Fallback: try to serialize the table
+                    local ok, serialized = pcall(cjson.encode, content)
+                    if ok then
+                        return serialized
+                    end
+                    return nil
+                elseif type(content) == "string" then
+                    return content
+                end
+            end
+        end
+    end
+
+    -- OpenAI Responses API: top-level `input` (string, or array of input items).
+    local input = request_body.input
+    if type(input) == "string" then
+        return input
+    elseif type(input) == "table" then
+        local parts = {}
+        for _, item in ipairs(input) do
+            if type(item) == "string" then
+                parts[#parts + 1] = item
+            elseif type(item) == "table" and (item.role == nil or item.role == "user") then
+                local c = item.content
+                if type(c) == "string" then
+                    parts[#parts + 1] = c
+                elseif type(c) == "table" then
+                    for _, part in ipairs(c) do
+                        if type(part) == "string" then
+                            parts[#parts + 1] = part
+                        elseif type(part) == "table" and type(part.text) == "string"
+                            and (part.type == nil or part.type == "input_text") then
+                            parts[#parts + 1] = part.text
+                        end
+                    end
+                end
+            end
+        end
+        if #parts > 0 then
+            return table.concat(parts, " ")
+        end
+    end
+
     return nil
 end
 
@@ -200,15 +468,15 @@ local function build_prompt_payload(config, scan_type, request_body, response_bo
 end
 
 local function send_scan(config, payload)
-    local request_payload_json, json_err = cjson.encode(payload)
-    if json_err then
-        return "blocked", "Internal plugin error: Could not encode payload."
+    local ok_enc, request_payload_json = pcall(cjson.encode, payload)
+    if not ok_enc then
+        return "error", "Internal plugin error: Could not encode payload."
     end
 
     log_debug(config, "Sending scan payload: " .. string.sub(request_payload_json, 1, 500))
 
     local httpc = http.new()
-    httpc:set_timeout(5000)
+    httpc:set_timeout(config.timeout_ms or 5000)
 
     local res, err = httpc:request_uri(config.api_endpoint, {
         method = "POST",
@@ -223,7 +491,7 @@ local function send_scan(config, payload)
 
     if not res then
         pcall(function() httpc:set_keepalive() end)
-        return "blocked", "API call failed: " .. tostring(err)
+        return "error", "API call failed: " .. tostring(err)
     end
 
     local res_body_str = res.body
@@ -234,16 +502,16 @@ local function send_scan(config, payload)
         if res_body_str and res_body_str ~= "" then
             reason = reason .. " Body: " .. string.sub(res_body_str, 1, 500)
         end
-        return "blocked", reason
+        return "error", reason
     end
 
     if not res_body_str or res_body_str == "" then
-        return "blocked", "API response body was empty, despite 200 OK status."
+        return "error", "API response body was empty, despite 200 OK status."
     end
 
-    local res_body_json, decode_err = cjson.decode(res_body_str)
-    if decode_err then
-        return "blocked", "Failed to decode API response JSON: " .. tostring(decode_err)
+    local ok_dec, res_body_json = pcall(cjson.decode, res_body_str)
+    if not ok_dec then
+        return "error", "Failed to decode API response JSON: " .. tostring(res_body_json)
     end
 
     log_debug(config,
@@ -251,16 +519,37 @@ local function send_scan(config, payload)
 
     local action = res_body_json and res_body_json.action
     if not action then
-        return "blocked", "'action' field not found in API response."
+        return "error", "'action' field not found in API response."
     end
 
     return action, "Verdict received from security scan."
 end
 
+-- Pure: HTTP status a non-allow send_scan verdict maps to (nil if allowed).
+--   "allow" -> nil (proceed)
+--   "error" -> 503 (could not get a verdict: AIRS unreachable / non-200 / undecodable;
+--               fail closed -- the scanner, not the content, is the problem)
+--   anything else -> 403 (genuine AIRS policy block)
+local function verdict_status(verdict)
+    if verdict == "allow" then return nil end
+    if verdict == "error" then return 503 end
+    return 403
+end
+
+-- Kong-coupled: deny a request/response based on a non-allow verdict and halt.
+-- Detailed reason is logged server-side only; the client gets a generic body.
+local function deny(verdict, reason, block_message)
+    log_error(reason, verdict)
+    if verdict_status(verdict) == 503 then
+        return kong.response.exit(503, { message = "Security scanning temporarily unavailable." })
+    end
+    return kong.response.exit(403, { message = block_message })
+end
+
 
 -- ACCESS PHASE
 function SecurePrismaAIRSHandler:access(config)
-    kong.log.info("SecurePrismaAIRSHandler: Access phase triggered.")
+    log_debug(config, "Access phase triggered.")
     kong.service.request.enable_buffering()
 
     local request_body, err = kong.request.get_body()
@@ -289,12 +578,7 @@ function SecurePrismaAIRSHandler:access(config)
         local verdict, reason = send_scan(config, payload)
 
         if verdict ~= "allow" then
-            log_error(reason, verdict)
-            return kong.response.exit(403, {
-                message = "MCP request blocked by security policy.",
-                reason = reason,
-                mcp_method = mcp_method
-            })
+            return deny(verdict, reason, "MCP request blocked by security policy.")
         end
 
         log_debug(config, "MCP scan allowed for method: " .. mcp_method)
@@ -308,23 +592,36 @@ function SecurePrismaAIRSHandler:access(config)
 
     if not payload then
         log_error(payload_err, "blocked")
-        return kong.response.exit(403, { message = "Request blocked by security policy.", reason = payload_err })
+        return kong.response.exit(403, { message = "Request blocked by security policy." })
     end
 
     local verdict, reason = send_scan(config, payload)
 
     if verdict ~= "allow" then
-        log_error(reason, verdict)
-        return kong.response.exit(403, { message = "Request blocked by security policy.", reason = reason })
+        return deny(verdict, reason, "Request blocked by security policy.")
     end
 
-    kong.log.info("SecurePrismaAIRSHandler: Prompt scan allowed.")
+    log_debug(config, "Prompt scan allowed.")
     kong.ctx.shared.request_body = request_body
+end
+
+-- Pure (unit-testable) decision for over-cap reconstructed SSE text.
+-- Returns { exceeded, blocked, text }. blocked=true (fail-closed, the secure
+-- default) => caller emits 403; fail-open => caller scans text[1..max].
+local function apply_scan_limit(text, max, fail_closed)
+    max = max or 20000
+    if not text or #text <= max then
+        return { exceeded = false, blocked = false, text = text }
+    end
+    if fail_closed then
+        return { exceeded = true, blocked = true, text = nil }
+    end
+    return { exceeded = true, blocked = false, text = string.sub(text, 1, max) }
 end
 
 -- RESPONSE PHASE
 function SecurePrismaAIRSHandler:response(config)
-    kong.log.info("SecurePrismaAIRSHandler: Response phase triggered.")
+    log_debug(config, "Response phase triggered.")
 
     -- Skip response scanning for bypassed MCP control messages
     if kong.ctx.shared.mcp_bypassed then
@@ -334,9 +631,9 @@ function SecurePrismaAIRSHandler:response(config)
 
     local original_request_body = kong.ctx.shared.request_body
 
-    -- Use Kong PDK to read the upstream response body directly.
-    -- ngx.ctx.buffered_body is not populated for MCP proxy routes.
-    local response_body_str = kong.service.response.get_raw_body()
+    -- Read the full buffered response body via the shared helper (documented
+    -- response-phase PDK call first, upstream's call as fallback).
+    local response_body_str = get_buffered_body()
 
     if not response_body_str or response_body_str == "" then
         kong.log.warn("SecurePrismaAIRSHandler: No response body found in response phase.")
@@ -354,15 +651,61 @@ function SecurePrismaAIRSHandler:response(config)
         local verdict, reason = send_scan(config, payload)
 
         if verdict ~= "allow" then
-            log_error(reason, verdict)
-            return kong.response.exit(403, {
-                message = "MCP response blocked by security policy.",
-                reason = reason
-            })
+            return deny(verdict, reason, "MCP response blocked by security policy.")
         end
 
         log_debug(config, "MCP response scan allowed.")
         return
+    end
+
+    -- Buffered SSE (text/event-stream) response scanning (LLM path only; MCP handled above).
+    -- Reconstruct the assistant text from the buffered SSE frames, then feed it through the
+    -- existing build_prompt_payload via the OpenAI envelope shape so the scan path is reused.
+    if config.scan_sse_responses and is_sse_response() then
+        local provider = config.sse_provider or "auto"
+
+        if config.sse_set_observability_headers then
+            pcall(kong.response.set_header, "x-prisma-airs-sse-detected", "true")
+            pcall(kong.response.set_header, "x-prisma-airs-sse-scan-mode", "buffered")
+            pcall(kong.response.set_header, "x-prisma-airs-sse-provider", provider)
+        end
+
+        local text = reconstruct_sse_text(response_body_str, provider)
+
+        if not text or text == "" then
+            kong.log.warn("SecurePrismaAIRSHandler: SSE detected but no scannable text reconstructed; " ..
+                "skipping response scan. provider=" .. provider ..
+                " raw_body_len=" .. tostring(response_body_str and #response_body_str or 0))
+            return
+        end
+
+        local lim = apply_scan_limit(text, config.sse_max_scan_chars, config.sse_truncation_fail_closed)
+        if lim.exceeded then
+            kong.log.warn("SecurePrismaAIRSHandler: SSE reconstructed text exceeds sse_max_scan_chars (" ..
+                #text .. " > " .. (config.sse_max_scan_chars or 20000) .. ")")
+            if config.sse_set_observability_headers then
+                pcall(kong.response.set_header, "x-prisma-airs-sse-truncated", "true")
+            end
+        end
+        if lim.blocked then
+            -- Secure default: response too large to scan in full -> do not return it.
+            log_error("SSE response exceeds scannable size", "blocked")
+            return kong.response.exit(403, {
+                message = "Response blocked by security policy."
+            })
+        end
+        text = lim.text
+
+        log_debug(config, "SSE reconstructed " .. #text .. " chars for AIRS scan (provider=" .. provider .. ")")
+
+        -- Wrap into the OpenAI envelope build_prompt_payload already understands, so the
+        -- shared builder is reused UNCHANGED and the text lands in contents[0].response.
+        local ok_enc, wrapped = pcall(cjson.encode, { choices = { { message = { content = text } } } })
+        if not ok_enc then
+            kong.log.warn("SecurePrismaAIRSHandler: failed to encode reconstructed SSE text; skipping response scan.")
+            return
+        end
+        response_body_str = wrapped
     end
 
     -- Standard LLM response scanning
@@ -376,11 +719,24 @@ function SecurePrismaAIRSHandler:response(config)
     local verdict, reason = send_scan(config, payload)
 
     if verdict ~= "allow" then
-        log_error(reason, verdict)
-        return kong.response.exit(403, { message = "Response blocked by security policy.", reason = reason })
+        return deny(verdict, reason, "Response blocked by security policy.")
     end
 
-    kong.log.info("SecurePrismaAIRSHandler: Response scan allowed.")
+    log_debug(config, "Response scan allowed.")
 end
+
+-- Pure helpers exposed for the unit test harness (no Kong/ngx dependency).
+SecurePrismaAIRSHandler._sse = {
+    is_sse_content_type = is_sse_content_type,
+    parse_sse = parse_sse,
+    reconstruct_sse_text = reconstruct_sse_text,
+    detect_provider = detect_provider,
+    extract_openai_chat = extract_openai_chat,
+    extract_openai_responses = extract_openai_responses,
+    extract_anthropic_messages = extract_anthropic_messages,
+    extract_prompt = extract_prompt,
+    verdict_status = verdict_status,
+    apply_scan_limit = apply_scan_limit,
+}
 
 return SecurePrismaAIRSHandler
