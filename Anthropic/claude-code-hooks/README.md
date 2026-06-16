@@ -43,12 +43,16 @@ User Prompt ──► scan-user-input.sh ──► Claude Code ──► Tool Ca
 | `scan-user-input.sh` | `UserPromptSubmit` | — | `prompt` | exit 2 |
 | `scan-url.sh` | `PreToolUse` | `WebFetch\|WebSearch` | `prompt` | exit 2 |
 | `scan-mcp-request.sh` | `PreToolUse` | `mcp__*` | `tool_event` (input only) | exit 2 |
-| `scan-response-enhanced.sh` | `PostToolUse` | `WebFetch\|WebSearch` | `response` | JSON `continue: false` |
+| `scan-response-enhanced.sh` | `PostToolUse` | `WebFetch\|WebSearch\|Bash` | `tool_event` (input + output) | JSON `continue: false` |
 | `scan-mcp-response.sh` | `PostToolUse` | `mcp__*` | `tool_event` (input + output) | JSON `continue: false` |
 
 Hooks send Claude Code `session_id` as the AIRS `transaction_id` for session-level tracing. 
 
-`scan-response-enhanced.sh` truncates web tool response content to 20,000 characters and scans it as `response`. MCP tools use `scan-mcp-response.sh`, which sends compact JSON strings in `tool_event.input` and `tool_event.output` without duplicating the payload as generic `prompt` or `response`.
+`scan-response-enhanced.sh` scans built-in tool output (WebFetch / WebSearch / Bash) as a `tool_event`, not a `response`. This matters for indirect prompt injection: AIRS runs prompt-injection / AI-agent / context-poisoning detection on the `prompt` and `tool_event` content types but **not** on `response`, so untrusted fetched content scanned as `response` would silently bypass IPI detection. It truncates output to 20,000 characters and sends `tool_event.input` (the URL / query / command) and `tool_event.output` (the result). MCP tools use `scan-mcp-response.sh`, which uses the same `tool_event` shape.
+
+> **Note on AIRS `ecosystem`:** the `tool_event.metadata.ecosystem` field must be `"mcp"` today (other values return an `unsupported ecosystem` error), so built-in tools are labeled via `server_name` (`claude-code/<tool>`) and `tool_invoked`.
+
+> **Limitation for WebFetch:** Claude Code's WebFetch fetches and summarizes the page with a separate model before the `PostToolUse` hook sees it. The hook therefore scans Claude's processed summary, not the raw HTML - so it cannot recover injection text that summarization already stripped. Scanning as `tool_event` is a strict improvement (injection detection now runs on the content that is present), but full raw-page IPI coverage requires scanning before summarization (e.g., an MCP-based fetch tool, scanned by `scan-mcp-response.sh`, or a gateway in the fetch path).
 
 ---
 

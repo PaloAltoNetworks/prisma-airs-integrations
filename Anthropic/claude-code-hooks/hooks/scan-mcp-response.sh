@@ -157,6 +157,10 @@ elif [[ "$CONTENT_ACTION" != "allow" && "$CONTENT_ACTION" != "unknown" ]]; then
   else
     echo "[$(date)] MCP response warning $TOOL_NAME: $CONTENT_ACTION/$CONTENT_CATEGORY - verdict:${TOOL_VERDICT:-unknown} [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
   fi
+else
+  # allow (or unknown verdict): still log the scan id so every MCP tool scan is
+  # mappable back to SCM, even with no detection.
+  echo "[$(date)] MCP response $TOOL_NAME: $CONTENT_ACTION - verdict:${TOOL_VERDICT:-unknown} [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
 fi
 
 exit 0
