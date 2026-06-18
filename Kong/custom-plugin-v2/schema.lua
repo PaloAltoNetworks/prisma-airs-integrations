@@ -18,6 +18,22 @@ local schema = {
         fields = {
           { api_key = { type = "string", required = true }, },
           { profile_name = { type = "string", required = true }, },
+
+          -- Dynamic per-request profile selection from a signed JWT claim.
+          -- Leave profile_claim unset for the legacy static behavior (profile_name).
+          -- Requires an auth plugin (jwt / openid-connect) in front: this plugin
+          -- runs at priority 1000, below jwt (1450) and openid-connect (1050), so
+          -- the token is already validated when the claim is read.
+          { profile_claim = { type = "string", required = false }, },
+          { profile_claim_map = {
+              type = "map",
+              keys = { type = "string" },
+              values = { type = "string" },
+              required = false,
+            },
+          },
+          -- Strict profile applied when the claim is missing or unmapped (fail closed).
+          { fallback_profile_name = { type = "string", required = false }, },
           { app_name = { type = "string", required = false }, },
           { api_endpoint = {
               type = "string",

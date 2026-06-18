@@ -39,7 +39,10 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 | Parameter | Required | Default | Description |
 |-----------|:--------:|---------|-------------|
 | `api_key` | Yes | - | Prisma AIRS API token |
-| `profile_name` | Yes | - | AIRS security profile name |
+| `profile_name` | Yes | - | AIRS security profile name (static default; see [Dynamic profile selection](#dynamic-profile-selection-claim-based)) |
+| `profile_claim` | No | - | JWT claim that selects the profile per request (e.g. `risk_tier`). Unset = static `profile_name`. |
+| `profile_claim_map` | No | - | Map of claim value to profile name. Omit to use the claim value directly as the profile name. |
+| `fallback_profile_name` | No | `profile_name` | Strict profile applied when the claim is missing or unmapped (fail closed). |
 | `app_name` | No | - | Application identifier (sent as `kong-{app_name}`; also used as MCP `server_name`) |
 | `api_endpoint` | No | `https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request` | AIRS API endpoint |
 | `ssl_verify` | No | `true` | Verify SSL certificates. **Keep `true` on Kong 3.14+** — global `tls_certificate_verify` enforcement rejects a per-plugin `ssl_verify=false`. |
@@ -50,6 +53,49 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 | `sse_max_scan_chars` | No | `20000` | Max reconstructed chars sent to AIRS before the over-limit policy applies. The `20000` default mirrors the conservative response/tool-output scan cap used by other AIRS reference integrations; the `sse_max_scan_chars` field itself is specific to this Kong v2 plugin (see Notes). Over-limit behavior is governed by `sse_truncation_fail_closed`. |
 | `sse_set_observability_headers` | No | `false` | When `true`, add `x-prisma-airs-sse-detected`, `-scan-mode: buffered`, `-provider`, and `-truncated` response headers. |
 | `sse_truncation_fail_closed` | No | `true` | **Secure default.** When `true`, a reconstructed response exceeding `sse_max_scan_chars` cannot be fully scanned, so it is **blocked (403)** rather than returned. Set to `false` to opt into fail-open (scan only the first `sse_max_scan_chars` and return the full response anyway), accepting that content past the cap is returned unscanned. |
+
+## Dynamic profile selection (claim-based)
+
+Apply a different AIRS profile per request on a **single shared route**, chosen
+from a signed JWT claim, instead of a gateway (or route) per app. The profile is
+selected from the caller's already-validated token, so it cannot be spoofed the
+way a header can.
+
+**Requires an auth plugin in front.** This plugin runs at priority `1000`, below
+`jwt` (1450) and `openid-connect` (1050), so the token is validated before the
+claim is read. On a route with no auth plugin, no valid claim is present and
+selection falls **closed** to `fallback_profile_name`. Do not enable claim-based
+selection on an unauthenticated route.
+
+Example — one shared route, profile chosen by a `risk_tier` claim:
+
+```json
+{
+  "name": "prisma-airs-intercept",
+  "config": {
+    "api_key": "YOUR_AIRS_API_KEY",
+    "profile_name": "default-baseline",
+    "profile_claim": "risk_tier",
+    "profile_claim_map": {
+      "high": "strict-production",
+      "medium": "default-baseline",
+      "low": "flexible-internal"
+    },
+    "fallback_profile_name": "strict-production"
+  }
+}
+```
+
+Resolution: claim value to mapped profile; a missing or unmapped claim falls
+closed to `fallback_profile_name`; with no `profile_claim` set, behavior is the
+legacy static `profile_name`. The resolved profile is logged (with `debug`) and
+stamped on the upstream request as `X-AIRS-Profile-Used`.
+
+Unit tests (pure resolver helpers, no Kong runtime needed):
+
+```bash
+lua spec/profile_selection_spec.lua
+```
 
 ## Installation
 
