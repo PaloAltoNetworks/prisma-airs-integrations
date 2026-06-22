@@ -76,14 +76,31 @@ local function resolve_profile(config, auth_header)
     if value == nil then
         return fallback, "fallback:no-claim"
     end
-    value = tostring(value)
+
+    -- The claim may be a scalar (e.g. risk_tier) or a list (Entra groups/roles
+    -- are arrays). Normalize to an ordered list of string candidates. A token
+    -- typically carries a single group, but iterating is also safe if a list
+    -- ever has more than one value (first mapped value wins).
+    local candidates = {}
+    if type(value) == "table" then
+        for _, v in ipairs(value) do candidates[#candidates + 1] = tostring(v) end
+    else
+        candidates[1] = tostring(value)
+    end
+    if #candidates == 0 then
+        return fallback, "fallback:empty-claim"
+    end
+
     local map = config.profile_claim_map
     if map and next(map) ~= nil then
-        local mapped = map[value]
-        if mapped then return mapped, "claim-map:" .. value end
-        return fallback, "fallback:unmapped:" .. value
+        for _, cv in ipairs(candidates) do
+            local mapped = map[cv]
+            if mapped then return mapped, "claim-map:" .. cv end
+        end
+        return fallback, "fallback:unmapped:" .. candidates[1]
     end
-    return value, "claim-direct:" .. value
+    -- Direct mode: the (single) claim value is itself the profile name.
+    return candidates[1], "claim-direct:" .. candidates[1]
 end
 
 -- Request-scoped: resolve once, memoize across access/response phases via

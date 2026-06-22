@@ -57,10 +57,19 @@ local function json_decode(s)
       if c == '}' then return o end; assert(c == ',')
     end
   end
+  local function pa()
+    local a = {}; i = i + 1; sk()
+    if s:sub(i, i) == ']' then i = i + 1; return a end
+    while true do
+      sk(); a[#a + 1] = pv(); sk(); local c = s:sub(i, i); i = i + 1
+      if c == ']' then return a end; assert(c == ',')
+    end
+  end
   pv = function()
     sk(); local c = s:sub(i, i)
     if c == '"' then return ps()
     elseif c == '{' then return po()
+    elseif c == '[' then return pa()
     elseif c == 't' then i = i + 4; return true
     elseif c == 'f' then i = i + 5; return false
     elseif c == 'n' then i = i + 4; return nil
@@ -91,6 +100,15 @@ local conf = {
   fallback_profile_name = "strict-production",
 }
 
+-- Entra `groups` claim is an array of group object-IDs (GUIDs), typically one
+-- group per token. Map the group GUID -> AIRS profile.
+local conf_groups = {
+  profile_name = "default-baseline",
+  profile_claim = "groups",
+  profile_claim_map = { ["a1b2c3d4-1111-2222-3333-444455556666"] = "flexible-internal" },
+  fallback_profile_name = "strict-production",
+}
+
 local cases = {
   { "high -> strict",                 conf, tok('{"risk_tier":"high"}'),  "strict-production" },
   { "low -> flexible",                conf, tok('{"risk_tier":"low"}'),   "flexible-internal" },
@@ -102,6 +120,12 @@ local cases = {
     { profile_name = "d", profile_claim = "airs_profile" }, tok('{"airs_profile":"pii-only"}'), "pii-only" },
   { "legacy static (no claim cfg)",
     { profile_name = "chatbot" }, tok('{"risk_tier":"high"}'),            "chatbot" },
+  -- groups array (single GUID)
+  { "groups[guid] -> mapped",         conf_groups, tok('{"groups":["a1b2c3d4-1111-2222-3333-444455556666"]}'), "flexible-internal" },
+  { "groups[unknown] -> fail closed", conf_groups, tok('{"groups":["00000000-0000-0000-0000-000000000000"]}'), "strict-production" },
+  { "groups multi -> first mapped wins",
+    { profile_name = "d", profile_claim = "groups", profile_claim_map = { g2 = "pii-only" }, fallback_profile_name = "strict-production" },
+    tok('{"groups":["g1","g2"]}'), "pii-only" },
 }
 
 local pass, fail = 0, 0
