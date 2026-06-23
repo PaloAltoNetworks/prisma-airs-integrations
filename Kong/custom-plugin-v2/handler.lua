@@ -25,6 +25,97 @@ local function log_debug(config, msg)
 end
 
 -- ============================================================================
+-- Dynamic AIRS profile selection from a signed JWT claim
+--   Choose the AIRS security profile per request from a claim in the caller's
+--   ALREADY-VALIDATED bearer token, so one shared gateway applies app-specific
+--   guardrails without a gateway per app. This plugin runs at PRIORITY 1000,
+--   i.e. AFTER kong `jwt` (1450) and `openid-connect` (1050), so the signature
+--   is verified before we decode the payload. A signed claim is unspoofable
+--   where a header (X-Prisma-Profile) is not. If no auth plugin precedes us,
+--   no valid claim is present and selection falls CLOSED to fallback_profile_name.
+--   Pure helpers are exposed on `._profile` for tests.
+-- ============================================================================
+
+-- base64url -> bytes (JWT segments are base64url, unpadded).
+local function b64url_decode(input)
+    if not input then return nil end
+    input = input:gsub("-", "+"):gsub("_", "/")
+    local rem = #input % 4
+    if rem == 2 then input = input .. "=="
+    elseif rem == 3 then input = input .. "="
+    elseif rem == 1 then return nil end
+    return ngx.decode_base64(input)
+end
+
+-- Pure: read one claim from a bearer token's payload. Does NOT verify the
+-- signature (the upstream auth plugin already did); only decodes the payload.
+local function get_claim(auth_header, claim_name)
+    if not auth_header or not claim_name then return nil end
+    local token = auth_header:match("^[Bb]earer%s+(.+)$") or auth_header
+    local payload_b64 = token:match("^[^%.]+%.([^%.]+)%.")
+    if not payload_b64 then return nil end
+    local json = b64url_decode(payload_b64)
+    if not json then return nil end
+    local ok, claims = pcall(cjson.decode, json)
+    if not ok or type(claims) ~= "table" then return nil end
+    return claims[claim_name]
+end
+
+-- Pure: resolve the profile name from config + the Authorization header value.
+--   config.profile_claim          claim that selects the profile (e.g. risk_tier)
+--   config.profile_claim_map      { claim_value = profile_name }
+--   config.fallback_profile_name  strict profile for missing/unmapped claim
+--   config.profile_name           static default (legacy / no claim configured)
+-- Returns: profile_name, source (for logging). Missing/unmapped claim fails CLOSED.
+local function resolve_profile(config, auth_header)
+    if not config.profile_claim or config.profile_claim == "" then
+        return config.profile_name, "static"
+    end
+    local fallback = config.fallback_profile_name or config.profile_name
+    local value = get_claim(auth_header, config.profile_claim)
+    if value == nil then
+        return fallback, "fallback:no-claim"
+    end
+
+    -- The claim may be a scalar (e.g. risk_tier) or a list (Entra groups/roles
+    -- are arrays). Normalize to an ordered list of string candidates. A token
+    -- typically carries a single group, but iterating is also safe if a list
+    -- ever has more than one value (first mapped value wins).
+    local candidates = {}
+    if type(value) == "table" then
+        for _, v in ipairs(value) do candidates[#candidates + 1] = tostring(v) end
+    else
+        candidates[1] = tostring(value)
+    end
+    if #candidates == 0 then
+        return fallback, "fallback:empty-claim"
+    end
+
+    local map = config.profile_claim_map
+    if map and next(map) ~= nil then
+        for _, cv in ipairs(candidates) do
+            local mapped = map[cv]
+            if mapped then return mapped, "claim-map:" .. cv end
+        end
+        return fallback, "fallback:unmapped:" .. candidates[1]
+    end
+    -- Direct mode: the (single) claim value is itself the profile name.
+    return candidates[1], "claim-direct:" .. candidates[1]
+end
+
+-- Request-scoped: resolve once, memoize across access/response phases via
+-- kong.ctx.shared, log the choice, and stamp an audit header.
+local function resolve_profile_name(config)
+    local cached = kong.ctx.shared.airs_profile_name
+    if cached then return cached end
+    local name, source = resolve_profile(config, kong.request.get_header("authorization"))
+    kong.ctx.shared.airs_profile_name = name
+    log_debug(config, "Resolved AIRS profile: " .. tostring(name) .. " (" .. source .. ")")
+    pcall(function() kong.service.request.set_header("X-AIRS-Profile-Used", name) end)
+    return name
+end
+
+-- ============================================================================
 -- Buffered SSE (text/event-stream) response scanning
 --   Detect a streamed response, reconstruct the assistant text + tool-call args
 --   from the fully buffered body, and scan that with AIRS. Buffered only --
@@ -391,7 +482,7 @@ local function build_mcp_tool_event_payload(config, request_body, response_body)
 
     local payload = {
         tr_id = request_id,
-        ai_profile = { profile_name = config.profile_name },
+        ai_profile = { profile_name = resolve_profile_name(config) },
         contents = { {
             tool_event = {
                 metadata = {
@@ -455,7 +546,7 @@ local function build_prompt_payload(config, scan_type, request_body, response_bo
 
     local payload = {
         tr_id = request_id,
-        ai_profile = { profile_name = config.profile_name },
+        ai_profile = { profile_name = resolve_profile_name(config) },
         contents = { content_object },
         metadata = {
             app_name = config.app_name and ("kong-" .. config.app_name) or "kong",
@@ -737,6 +828,12 @@ SecurePrismaAIRSHandler._sse = {
     extract_prompt = extract_prompt,
     verdict_status = verdict_status,
     apply_scan_limit = apply_scan_limit,
+}
+
+-- Pure (unit-testable) claim-based profile selection helpers.
+SecurePrismaAIRSHandler._profile = {
+    get_claim = get_claim,
+    resolve = resolve_profile,
 }
 
 return SecurePrismaAIRSHandler
