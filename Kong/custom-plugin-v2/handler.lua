@@ -263,24 +263,42 @@ local function extract_prompt(request_body)
     if not request_body then return nil end
 
     if type(request_body.messages) == "table" then
+        -- Collect all scannable text across the conversation: user-authored content
+        -- AND tool-call arguments. Injected instructions frequently ride inside
+        -- tool_calls[].function.arguments on an assistant message, which previously
+        -- went unscanned (extraction gap, not a detection gap - AIRS blocks the
+        -- payload when it receives it).
+        local parts = {}
         for _, message in ipairs(request_body.messages) do
             if message.role == "user" then
                 local content = message.content
                 if type(content) == "table" then
                     -- Bedrock Converse format: content is an array of objects like [{"text":"Hello"}]
                     if content[1] and content[1].text then
-                        return content[1].text
+                        parts[#parts + 1] = content[1].text
+                    else
+                        -- Fallback: serialize the structured content
+                        local ok, serialized = pcall(cjson.encode, content)
+                        if ok then parts[#parts + 1] = serialized end
                     end
-                    -- Fallback: try to serialize the table
-                    local ok, serialized = pcall(cjson.encode, content)
-                    if ok then
-                        return serialized
-                    end
-                    return nil
                 elseif type(content) == "string" then
-                    return content
+                    parts[#parts + 1] = content
                 end
             end
+
+            -- Tool-call arguments (OpenAI assistant tool_calls). 'function' is a Lua
+            -- keyword, so the field must be indexed as ["function"].
+            if type(message.tool_calls) == "table" then
+                for _, tc in ipairs(message.tool_calls) do
+                    local fn = type(tc) == "table" and tc["function"] or nil
+                    if type(fn) == "table" and type(fn.arguments) == "string" then
+                        parts[#parts + 1] = fn.arguments
+                    end
+                end
+            end
+        end
+        if #parts > 0 then
+            return table.concat(parts, "\n")
         end
     end
 
