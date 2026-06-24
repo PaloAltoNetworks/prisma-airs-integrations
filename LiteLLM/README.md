@@ -2,6 +2,10 @@
 
 This document provides instructions for configuring Prisma AIRS as a security guardrail within the LiteLLM Proxy (LLM Gateway). This integration enables real-time scanning of prompts and responses to protect against threats like prompt injection, malicious content, and data loss.
 
+## IMPORTANT
+
+The contents of this repository are community examples and reference implementations, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 ## Coverage
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
@@ -75,7 +79,7 @@ guardrails:
     * `pre_mcp_call`: Scans MCP tool input *before* tool execution.
     * `during_mcp_call`: Scans MCP tool input *in parallel* with tool execution.
 * **`api_key`**: Your Prisma AIRS API key. It's best practice to load this from an environment variable.
-* **`profile_name`**: The name of your Security Profile from Strata Cloud Manager. Optional if your API key has a linked profile.
+* **`profile_name`**: The name of your Security Profile from Strata Cloud Manager. Technically optional if your AIRS API key has a linked default profile, but most keys do not. Set this field explicitly to avoid an HTTP 400 `"No default AI profile available"` from AIRS, which LiteLLM wraps as a 500 `"Security scan failed"`.
 * **`api_base`**: Regional API endpoint. Use the endpoint matching your deployment profile region for lower latency and data residency compliance.
 
 ### Step 3: Set Environment Variables and Start the Gateway

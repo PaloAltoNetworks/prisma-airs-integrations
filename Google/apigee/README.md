@@ -134,14 +134,15 @@ GOOGLE_APPLICATION_CREDENTIALS="/path/to/sa.json"
 ### KVM Entries (Auto-Created by deploy.sh)
 
 The deployment script creates an encrypted KVM named `private` with:
-- `airs.token` - Your Prisma AIRS API key
-- `airs.profile` - AIRS profile name
+- `prisma.airs.token` - Your Prisma AIRS API key
+- `prisma.airs.profile` - AIRS profile name
+- `prisma.airs.host` - Prisma AIRS API host (e.g. `service.api.aisecurity.paloaltonetworks.com` for US, `service-de.api.aisecurity.paloaltonetworks.com` for EU)
 - `vertex.project` - GCP project ID
 - `vertex.model` - Vertex AI model name
 
-The bundled `vertex-simple.zip` uses the default Prisma AIRS US endpoint. To use a regional endpoint, update the ServiceCallout URL in the proxy bundle before importing it.
+The `prisma.airs.host` entry defaults to the Prisma AIRS US endpoint. To use a regional endpoint, set this KVM value to the matching regional host — no edit to the proxy bundle is required.
 
-> **Manual KVM setup note:** The Apigee X console UI rejects dots in KVM key names (`Use letters, digits, underscores, and hyphens only`). Use `deploy.sh` or the Apigee Management API/CLI to create these dotted keys. If you must create the KVM in the UI, use underscore-based keys such as `airs_token` and update the matching `<Parameter>` values in `KVM-GetConfig.xml` before importing the proxy bundle.
+> **Manual KVM setup note:** The Apigee X console UI rejects dots in KVM key names (`Use letters, digits, underscores, and hyphens only`). Use `deploy.sh` or the Apigee Management API/CLI to create these dotted keys. If you must create the KVM in the UI, use underscore-based keys such as `prisma_airs_token` and update the matching `<Parameter>` values in `KVM-GetConfig.xml` before importing the proxy bundle.
 
 ---
 

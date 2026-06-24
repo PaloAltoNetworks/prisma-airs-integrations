@@ -1,4 +1,7 @@
 # litellm config.yaml for AWS Bedrock
+# This file shows model wiring only. To enable Prisma AIRS guardrails,
+# copy the guardrails: block from config-all.yaml. Set profile_name
+# explicitly in that block. See README "Configure the Guardrail".
 
 model_list:
   - model_name: claude-3-haiku # A friendly alias you'll use in your API calls

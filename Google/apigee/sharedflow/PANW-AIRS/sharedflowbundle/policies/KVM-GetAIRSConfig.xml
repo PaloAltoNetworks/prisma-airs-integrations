@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<KeyValueMapOperations continueOnError="false" enabled="true" name="KVM-GetAIRSConfig" mapIdentifier="airs-config">
+  <DisplayName>KVM-GetAIRSConfig</DisplayName>
+  <Properties/>
+  <ExpiryTimeInSecs>300</ExpiryTimeInSecs>
+  <Get assignTo="airs.token">
+    <Key>
+      <Parameter>airs_token</Parameter>
+    </Key>
+  </Get>
+  <Get assignTo="airs.profile">
+    <Key>
+      <Parameter>airs_profile</Parameter>
+    </Key>
+  </Get>
+  <Scope>environment</Scope>
+</KeyValueMapOperations>

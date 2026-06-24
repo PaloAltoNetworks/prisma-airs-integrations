@@ -136,8 +136,9 @@ Supports OpenAI (chat/completions, responses), Anthropic (v1/messages), and Azur
             string appName = "APIM-" + (string)context.Variables.GetValueOrDefault("appName", "Gateway");
             string profileName = (string)context.Variables.GetValueOrDefault("currentProfile", "example-profile");
             string sessionId = (string)context.Variables["airsSessionId"];
-            string appUser = "anonymous";
-            if (context.Request.Headers.ContainsKey("x-user-id")) {
+            string appUser = context.Variables.GetValueOrDefault<string>("user", "anonymous");
+            string agentId = context.Variables.GetValueOrDefault<string>("agent", string.Empty);
+            if (appUser == "anonymous" && context.Request.Headers.ContainsKey("x-user-id")) {
                 string[] userHeaders = context.Request.Headers["x-user-id"];
                 if (userHeaders != null && userHeaders.Length > 0) {
                     appUser = userHeaders[0];
@@ -152,7 +153,10 @@ Supports OpenAI (chat/completions, responses), Anthropic (v1/messages), and Azur
                     new JProperty("app_name", appName),
                     new JProperty("user_ip", context.Request.IpAddress),
                     new JProperty("ai_model", model),
-                    new JProperty("app_user", appUser)
+                    new JProperty("app_user", appUser),
+                    new JProperty("agent_meta", new JObject(
+                        new JProperty("agent_id", agentId)
+                    ))
                 ))
             );
         }" />

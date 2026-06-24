@@ -2,6 +2,10 @@
 
 This integration adds Palo Alto Networks Prisma AIRS Model Security scanning to a Jenkins Declarative Pipeline. When an AI model changes in the configuration, the pipeline automatically scans the model against security policies before deployment, blocking models that fail the security assessment. This example uses Google Cloud Vertex AI as the deployment target, but the security scanning pattern can be adapted to any infrastructure (e.g., AWS SageMaker, Azure ML, on-prem).
 
+## IMPORTANT
+
+The contents of this repository are community examples and reference implementations, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 > **Note:** This integration uses **Prisma AIRS Model Security** (pre-deployment model file scanning), which is different from AI Runtime Security (prompt/response scanning). It uses the [Model Security SDK](https://docs.paloaltonetworks.com/ai-runtime-security/ai-model-security) rather than the AIRS Runtime API.
 
 ---

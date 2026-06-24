@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  EventFlow JS: runs once per Vertex SSE event in the response stream.
+  Accumulates streamed text in airs.stream.buffer, calls AIRS via httpClient
+  every BUFFER_THRESHOLD chars (or on STOP). On block, sets a sticky flag
+  and replaces this + every subsequent event with an empty / block-shaped
+  payload so the client cannot read past the block point.
+
+  FlowCallout is NOT available inside EventFlow, so the AIRS call uses
+  httpClient.send() directly. AIRS sync scans typically complete in 100-300ms,
+  so timeLimit is bumped to 5000ms (Apigee default 200ms is too tight).
+
+  airs.token / airs.profile / model are populated in PreFlow by FC-CallAIRSInput
+  (via KVM-GetAIRSConfig in the SharedFlow) and EV-ExtractFields. They persist
+  in flow scope through EventFlow.
+-->
+<Javascript continueOnError="false" enabled="true" timeLimit="5000" name="JS-AIRSScanEvent">
+  <DisplayName>JS-AIRSScanEvent</DisplayName>
+  <Properties/>
+  <ResourceURL>jsc://airs-scan-event.js</ResourceURL>
+</Javascript>
