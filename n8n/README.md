@@ -2,6 +2,10 @@
 
 This document provides instructions for using the Prisma AIRS community node within n8n to add a layer of security to your automation workflows. This node allows you to scan prompts and responses for threats directly within a workflow.
 
+## IMPORTANT
+
+The contents of this repository are community examples and reference implementations, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 ## Coverage
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).

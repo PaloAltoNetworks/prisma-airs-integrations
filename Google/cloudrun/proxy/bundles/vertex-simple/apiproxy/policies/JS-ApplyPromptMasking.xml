@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Javascript name="JS-ApplyPromptMasking" timeLimit="200">
+  <ResourceURL>jsc://apply-prompt-masking.js</ResourceURL>
+</Javascript>
+
+
+

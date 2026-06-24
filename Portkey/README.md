@@ -2,6 +2,10 @@
 
 This document describes how to integrate Prisma AIRS as a security guardrail within the Portkey AI Gateway. This setup allows for the automatic scanning of LLM inputs and outputs to detect and block threats in real-time.
 
+## IMPORTANT
+
+The contents of this repository are community examples and reference implementations, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 ## Coverage
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ServiceCallout name="SC-AIRSScan">
+  <Request variable="airs.request"/>
+  <Response>airs.response</Response>
+  <Timeout>5000</Timeout>
+  <HTTPTargetConnection>
+    <!-- URL must begin with a literal scheme — Apigee statically validates
+         target URLs at deploy and rejects any starting with a variable
+         (MalformedTargetUrl). The host comes from the KVM so the AIRS region
+         stays configurable. -->
+    <URL>https://{private.prisma.airs.host}/v1/scan/sync/request</URL>
+  </HTTPTargetConnection>
+</ServiceCallout>

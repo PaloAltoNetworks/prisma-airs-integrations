@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<SharedFlowBundle revision="1" name="PANW-AIRS">
+    <DisplayName>PANW-AIRS</DisplayName>
+    <Description>PANW AIRS sync scan SharedFlow. JSON.stringify-based body builder safely handles quotes/newlines in prompts and model responses.</Description>
+    <SharedFlows>
+        <SharedFlow>default</SharedFlow>
+    </SharedFlows>
+    <subType>SharedFlow</subType>
+</SharedFlowBundle>

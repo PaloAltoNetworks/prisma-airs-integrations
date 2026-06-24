@@ -52,27 +52,50 @@ fi
 # Read JSON input from stdin
 INPUT_JSON=$(cat)
 
-# Parse the hook input
+# Parse the hook input.
+#
+# Claude Code's PreToolUse hook event carries tool arguments under `.tool_input.*`,
+# not at the top level. Reading `.url` (no `.tool_input` prefix) silently returns
+# empty, causing the script to exit 0 (allow) without ever calling the AIRS scan
+# endpoint - which leaves the tool call effectively unvetted. Field names per tool:
+#
+#   WebFetch       -> .tool_input.url     (a URL to fetch)
+#   WebSearch      -> .tool_input.query   (a search query string, not a URL)
+#   Bash           -> .tool_input.command (a shell command; URLs are embedded as
+#                                          arguments to curl/wget/etc.)
+#   mcp__<server>  -> arbitrary, handled by scan-mcp-request.sh
 TOOL_NAME=$(echo "$INPUT_JSON" | jq -r '.tool_name // "unknown"')
-URL=$(echo "$INPUT_JSON" | jq -r '.url // empty')
 
-# If no URL found, exit (nothing to scan)
+case "$TOOL_NAME" in
+    Bash)
+        # Bash commands can contain a URL as an argument to curl, wget, http, etc.
+        # Extract the first URL found in the command line. If none, exit allow
+        # (other Bash-specific checks belong in a separate hook).
+        COMMAND=$(echo "$INPUT_JSON" | jq -r '.tool_input.command // empty')
+        URL=$(printf '%s' "$COMMAND" | grep -oE 'https?://[^[:space:]"'"'"';|`<>]+' | head -1)
+        ;;
+    WebSearch)
+        # WebSearch passes a query string, not a URL. Scan the whole query for
+        # prompt-injection / malicious-URL signals using AIRS's prompt detectors.
+        URL=$(echo "$INPUT_JSON" | jq -r '.tool_input.query // empty')
+        ;;
+    *)
+        # WebFetch and any other URL-carrying tool: read `.tool_input.url`.
+        URL=$(echo "$INPUT_JSON" | jq -r '.tool_input.url // .tool_input.URL // empty')
+        ;;
+esac
+
+# If no URL or scannable content found, exit (nothing to scan)
 if [[ -z "$URL" ]]; then
-    exit 0  # Allow if no URL found
+    exit 0  # Allow if nothing to scan
 fi
 
-# Extract transcript_path for session ID (if available)
-TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
-
-# Generate session UUID
-if [[ -n "$TRANSCRIPT_PATH" ]]; then
-    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
-    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
-        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
-    fi
-else
+# Use Claude Code session_id as the AIRS transaction_id for session-level tracing.
+SESSION_ID=$(echo "$INPUT_JSON" | jq -r '.session_id // empty' 2>/dev/null)
+if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
 fi
+TRANSACTION_ID="$SESSION_ID"
 
 echo "[$(date)] 🌐 $TOOL_NAME: $URL" >> "$LOG_FILE"
 
@@ -80,7 +103,8 @@ AI_PROFILE=$(build_ai_profile)
 
 # Create JSON payload for URL scanning
 PAYLOAD=$(jq -n \
-  --arg tr_id "$SESSION_ID" \
+  --arg session_id "$SESSION_ID" \
+  --arg transaction_id "$TRANSACTION_ID" \
   --argjson ai_profile "$AI_PROFILE" \
   --arg app_user "claude-code-user" \
   --arg app_name "$APP_NAME" \
@@ -88,7 +112,8 @@ PAYLOAD=$(jq -n \
   --arg source "pre-tool-use" \
   --arg url "$URL" \
   '{
-    tr_id: $tr_id,
+    session_id: $session_id,
+    transaction_id: $transaction_id,
     ai_profile: $ai_profile,
     metadata: {app_user: $app_user, app_name: $app_name, tool_name: $tool_name, source: $source},
     contents: [{prompt: $url}]

@@ -4,6 +4,10 @@ Windsurf Cascade hooks that scan prompts, commands, MCP tool calls, and response
 
 Part of the [Prisma AIRS IDE Integrations](https://github.com/PaloAltoNetworks/prisma-airs-integrations) project.
 
+## IMPORTANT
+
+The contents of this repository are community examples and reference implementations, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 ## What it does
 
 | Hook | Event | Action | AIRS Content Type |

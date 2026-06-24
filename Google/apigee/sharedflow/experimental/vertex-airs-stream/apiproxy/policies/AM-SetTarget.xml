@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Streaming proxy needs ?alt=sse to reach Vertex so it returns true SSE events
+  (and EventFlow content-type="text/event-stream" matches). Apigee does NOT
+  auto-append request.querystring when target.url is set dynamically — we
+  have to do it explicitly.
+-->
+<AssignMessage continueOnError="false" enabled="true" name="AM-SetTarget">
+  <DisplayName>AM-SetTarget</DisplayName>
+  <Properties/>
+  <AssignVariable>
+    <Name>targetUrl</Name>
+    <Value>https://{region}-aiplatform.googleapis.com/{proxy.pathsuffix}?{request.querystring}</Value>
+  </AssignVariable>
+  <AssignVariable>
+    <Name>target.url</Name>
+    <Template ref="targetUrl"/>
+  </AssignVariable>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

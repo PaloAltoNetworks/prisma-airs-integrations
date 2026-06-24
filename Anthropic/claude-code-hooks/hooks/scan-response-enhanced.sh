@@ -41,30 +41,19 @@ INPUT_JSON=$(cat)
 TOOL_NAME=$(echo "$INPUT_JSON" | jq -r '.tool_name // "unknown"')
 TOOL_RESPONSE=$(echo "$INPUT_JSON" | jq -r '.tool_response // ""')
 
-# Detect MCP tools and extract server/tool from pattern: mcp__<server>__<tool>
-IS_MCP=false
+# MCP tool responses are handled by scan-mcp-response.sh so they can use
+# AIRS tool_event semantics without generic response duplication.
 if [[ "$TOOL_NAME" == mcp__* ]]; then
-    IS_MCP=true
-    MCP_SERVER=$(echo "$TOOL_NAME" | awk -F'__' '{print $2}')
-    TOOL_INVOKED=$(echo "$TOOL_NAME" | awk -F'__' '{print $3}')
-    TOOL_INPUT_STR=$(echo "$INPUT_JSON" | jq -c '.tool_input // {}' 2>/dev/null)
+    echo "[$(date)] $TOOL_NAME: Skipping MCP response in generic response hook" >> "$LOG_FILE"
+    exit 0
 fi
 
-# Extract transcript_path for session ID (if available)
-TRANSCRIPT_PATH=$(echo "$INPUT_JSON" | jq -r '.transcript_path // empty' 2>/dev/null)
-
-# Generate session UUID
-if [[ -n "$TRANSCRIPT_PATH" ]]; then
-    # Extract session ID from transcript path (e.g., /path/to/.claude/sessions/abc-123/transcript.jsonl)
-    SESSION_ID=$(echo "$TRANSCRIPT_PATH" | sed -E 's/.*\/sessions\/([^\/]+)\/.*/\1/')
-    # If extraction failed, use path hash as fallback
-    if [[ -z "$SESSION_ID" || "$SESSION_ID" == "$TRANSCRIPT_PATH" ]]; then
-        SESSION_ID=$(echo "$TRANSCRIPT_PATH" | md5 | cut -c1-32)
-    fi
-else
-    # Fallback: use working directory hash for session correlation
+# Use Claude Code session_id as the AIRS transaction_id for session-level tracing.
+SESSION_ID=$(echo "$INPUT_JSON" | jq -r '.session_id // empty' 2>/dev/null)
+if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID=$(echo "$PWD" | md5 | cut -c1-32)
 fi
+TRANSACTION_ID="$SESSION_ID"
 
 # Log that we're processing this tool
 echo "[$(date)] 🔍 $TOOL_NAME: PostToolUse hook triggered" >> "$LOG_FILE"
@@ -118,80 +107,86 @@ if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
     exit 2
 fi
 
-# Scan response content if reasonable size (truncate and optimize)
+# Scan tool output as a tool_event (NOT a model response).
+#
+# WebFetch / WebSearch / Bash return external, untrusted content - the classic
+# indirect-prompt-injection (IPI) vector. AIRS only runs prompt-injection / AI-agent /
+# context-poisoning detection on the `prompt` and `tool_event` content types, NOT on
+# `response`. Scanning this output as `response` therefore silently MISSES IPI (the
+# response data type only evaluates dlp / toxic_content / url_cats / malicious_code /
+# db_security / ungrounded / topic_violation). Submitting it as `tool_event` runs the
+# full suite and flags "context poisoning", mirroring scan-mcp-response.sh.
+#
+# NOTE: AIRS currently requires tool_event `ecosystem` to be "mcp" (other values return
+# HTTP error "unsupported ecosystem"). We label the source via server_name/tool_invoked.
 TRUNCATED_CONTENT="$(echo "$RESPONSE_CONTENT" | head -c 20000 | tr '\n' ' ')"
 if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
-    if [[ "$IS_MCP" == true ]]; then
-        # Use tool_event for MCP tools (includes input + output)
-        AI_PROFILE_JSON=$(build_ai_profile)
-        CONTENT_PAYLOAD=$(jq -n \
-          --arg tr_id "$SESSION_ID" \
-          --argjson ai_profile "$AI_PROFILE_JSON" \
-          --arg app_user "claude-code-user" \
-          --arg app_name "$APP_NAME" \
-          --arg server_name "$MCP_SERVER" \
-          --arg tool_invoked "$TOOL_INVOKED" \
-          --arg input "$TOOL_INPUT_STR" \
-          --arg output "$TRUNCATED_CONTENT" \
-          '{
-            tr_id: $tr_id,
-            ai_profile: $ai_profile,
-            metadata: {app_user: $app_user, app_name: $app_name},
-            contents: [{
-              response: $output,
-              tool_event: {
-                metadata: {
-                  ecosystem: "mcp",
-                  method: "tools/call",
-                  server_name: $server_name,
-                  tool_invoked: $tool_invoked
-                },
-                input: $input,
-                output: $output
-              }
-            }]
-          }')
-    else
-        # Use jq for safe JSON construction (no raw variable interpolation)
-        AI_PROFILE_JSON=$(build_ai_profile)
-        CONTENT_PAYLOAD=$(jq -n \
-          --arg tr_id "$SESSION_ID" \
-          --argjson ai_profile "$AI_PROFILE_JSON" \
-          --arg app_user "claude-code-user" \
-          --arg app_name "$APP_NAME" \
-          --arg tool_name "$TOOL_NAME" \
-          --arg response "$TRUNCATED_CONTENT" \
-          '{
-            tr_id: $tr_id,
-            ai_profile: $ai_profile,
-            metadata: {app_user: $app_user, app_name: $app_name, tool_name: $tool_name, source: "response-content"},
-            contents: [{response: $response}]
-          }')
+    # Use jq for safe JSON construction (no raw variable interpolation)
+    AI_PROFILE_JSON=$(build_ai_profile)
+    if [[ -z "$AI_PROFILE_JSON" ]]; then
+        AI_PROFILE_JSON="{}"
     fi
+    # Tool input (URL / query / command) enriches detection; default to {} if absent.
+    TOOL_INPUT_STR=$(echo "$INPUT_JSON" | jq -c '.tool_input // {}' 2>/dev/null)
+    if [[ -z "$TOOL_INPUT_STR" || "$TOOL_INPUT_STR" == "null" ]]; then
+        TOOL_INPUT_STR="{}"
+    fi
+    CONTENT_PAYLOAD=$(jq -n \
+      --arg session_id "$SESSION_ID" \
+      --arg transaction_id "$TRANSACTION_ID" \
+      --argjson ai_profile "$AI_PROFILE_JSON" \
+      --arg app_user "claude-code-user" \
+      --arg app_name "$APP_NAME" \
+      --arg tool_name "$TOOL_NAME" \
+      --arg input "$TOOL_INPUT_STR" \
+      --arg output "$TRUNCATED_CONTENT" \
+      '{
+        session_id: $session_id,
+        transaction_id: $transaction_id,
+        ai_profile: $ai_profile,
+        metadata: {app_user: $app_user, app_name: $app_name, tool_name: $tool_name, source: "tool-output"},
+        contents: [{
+          tool_event: {
+            metadata: {
+              ecosystem: "mcp",
+              method: "tools/call",
+              server_name: ("claude-code/" + $tool_name),
+              tool_invoked: $tool_name
+            },
+            input: $input,
+            output: $output
+          }
+        }]
+      }')
 
     # Curl with timeouts and retries
     CURL_OPTS=(--silent --show-error --location --max-time 10 --retry 1)
     CONTENT_RESULT=$(curl "${CURL_OPTS[@]}" "$PRISMA_AIRS_API_URL" \
-      -H "Content-Type: application/json" -H "x-pan-token: $PRISMA_AIRS_API_KEY" -d "$CONTENT_PAYLOAD")
+      -H "Content-Type: application/json" -H "Accept: application/json" -H "x-pan-token: $PRISMA_AIRS_API_KEY" -d "$CONTENT_PAYLOAD")
     CONTENT_ACTION=$(echo "$CONTENT_RESULT" | jq -r '.action // "unknown"')
     CONTENT_CATEGORY=$(echo "$CONTENT_RESULT" | jq -r '.category // "unknown"')
     CONTENT_SCAN_ID=$(echo "$CONTENT_RESULT" | jq -r '.scan_id // "unknown"')
+    TOOL_VERDICT=$(echo "$CONTENT_RESULT" | jq -r '.tool_detected.verdict // empty')
 
-    # Dynamically extract all true detection fields from both prompt_detected and response_detected
+    # Collect true detections from tool_detected (summary + per-entry input/output)
+    # plus prompt_detected/response_detected as a safety net.
     RESP_DETECTIONS=$(echo "$CONTENT_RESULT" | jq -r '
       [
-        (.prompt_detected // {} | to_entries[] | select(.value == true) | .key),
-        (.response_detected // {} | to_entries[] | select(.value == true) | .key)
+        (.tool_detected.summary.detections // {} | to_entries[]? | select(.value == true) | .key),
+        (.tool_detected.input_detected.detection_entries // [] | .[]? | (.detections // {}) | to_entries[]? | select(.value == true) | .key),
+        (.tool_detected.output_detected.detection_entries // [] | .[]? | (.detections // {}) | to_entries[]? | select(.value == true) | .key),
+        (.prompt_detected // {} | to_entries[]? | select(.value == true) | .key),
+        (.response_detected // {} | to_entries[]? | select(.value == true) | .key)
       ] | unique | join(",")
     ')
 
     if [[ "$CONTENT_ACTION" == "block" ]]; then
       if [[ -n "$RESP_DETECTIONS" ]]; then
-        echo "[$(date)] 🚫 BLOCKED $TOOL_NAME response content: $CONTENT_CATEGORY - detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
-        BLOCK_MSG="🚫 Blocked by Prisma AIRS: $TOOL_NAME response contained $CONTENT_CATEGORY content (detected: $RESP_DETECTIONS)"
+        echo "[$(date)] 🚫 BLOCKED $TOOL_NAME tool output: $CONTENT_CATEGORY - verdict:${TOOL_VERDICT:-unknown} detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
+        BLOCK_MSG="🚫 Blocked by Prisma AIRS: $TOOL_NAME output contained $CONTENT_CATEGORY content (detected: $RESP_DETECTIONS)"
       else
-        echo "[$(date)] 🚫 BLOCKED $TOOL_NAME response content: $CONTENT_CATEGORY [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
-        BLOCK_MSG="🚫 Blocked by Prisma AIRS: $TOOL_NAME response contained $CONTENT_CATEGORY content"
+        echo "[$(date)] 🚫 BLOCKED $TOOL_NAME tool output: $CONTENT_CATEGORY [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
+        BLOCK_MSG="🚫 Blocked by Prisma AIRS: $TOOL_NAME output contained $CONTENT_CATEGORY content"
       fi
       # Show user message on stderr (visible in Claude Code terminal)
       echo "" >&2
@@ -200,17 +195,21 @@ if [[ ${#TRUNCATED_CONTENT} -ge 10 ]]; then
       # Output blocking JSON on stdout (the only thing Claude Code reads from this pipe)
       printf '%s' "$(jq -n --arg msg "$BLOCK_MSG" '{
   "continue": false,
-  "stopReason": "Prisma AIRS blocked tool response",
+  "stopReason": "Prisma AIRS blocked tool output",
   "systemMessage": $msg,
   "hookSpecificOutput": { "hookEventName": "PostToolUse" }
 }')"
       exit 0
     elif [[ "$CONTENT_ACTION" != "allow" && "$CONTENT_ACTION" != "unknown" ]]; then
       if [[ -n "$RESP_DETECTIONS" ]]; then
-        echo "[$(date)] ⚠️  $TOOL_NAME response content warning: $CONTENT_ACTION/$CONTENT_CATEGORY - detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
+        echo "[$(date)] ⚠️  $TOOL_NAME tool output warning: $CONTENT_ACTION/$CONTENT_CATEGORY - detected: [$RESP_DETECTIONS] [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
       else
-        echo "[$(date)] ⚠️  $TOOL_NAME response content warning: $CONTENT_ACTION/$CONTENT_CATEGORY [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
+        echo "[$(date)] ⚠️  $TOOL_NAME tool output warning: $CONTENT_ACTION/$CONTENT_CATEGORY [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
       fi
+    else
+      # allow (or unknown verdict): still log the scan id so every web/tool scan is
+      # mappable back to SCM, even with no detection.
+      echo "[$(date)] ✓ $TOOL_NAME tool output $CONTENT_ACTION [scan:$CONTENT_SCAN_ID]" >> "$LOG_FILE"
     fi
 fi
 

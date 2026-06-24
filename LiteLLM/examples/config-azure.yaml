@@ -1,3 +1,8 @@
+# litellm config.yaml for Azure OpenAI
+# This file shows model wiring only. To enable Prisma AIRS guardrails,
+# copy the guardrails: block from config-all.yaml. Set profile_name
+# explicitly in that block. See README "Configure the Guardrail".
+
 model_list:
   - model_name: gpt-4o
     litellm_params:
