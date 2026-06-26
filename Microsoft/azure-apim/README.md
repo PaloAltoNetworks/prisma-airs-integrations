@@ -4,21 +4,25 @@ A policy fragment that can be integrated into an Azure AI Gateway (part of APIM)
 
 ## Versions
 
-This integration provides two versions of the policy fragment. Choose the one that fits your environment:
+This integration provides the following versions of the policy fragment. Choose the one that fits your environment:
 
-| Feature | v1 | v2 |
-|---------|:--:|:--:|
-| OpenAI chat/completions | ✅ | ✅ |
-| OpenAI Responses API | ✅ | ✅ |
-| Anthropic /v1/messages | ❌ | ✅ |
-| Azure AI Foundry Claude | ❌ | ✅ |
-| Streaming/SSE response scanning | ❌ | ✅ |
-| Anthropic tool_result scanning | ❌ | ✅ |
-| Prompt & response masking | ✅ | ✅ |
-| Tool event scanning | ✅ | ✅ |
+| Feature | v1 | v2 | v2.1 |
+|---------|:--:|:--:|:--:|
+| OpenAI chat/completions | ✅ | ✅ | ✅ |
+| OpenAI Responses API | ✅ | ✅ | ✅ |
+| Anthropic /v1/messages | ❌ | ✅ | ✅ |
+| Azure AI Foundry Claude | ❌ | ✅ | ✅ |
+| Streaming/SSE response scanning | ❌ | ✅ | ✅ |
+| Anthropic tool_result scanning | ❌ | ✅ | ✅ |
+| Prompt & response masking | ✅ | ✅ | ✅ |
+| Tool event scanning | ✅ | ✅ | ✅ |
+| Claude Code session grouping | ❌ | ❌ | ✅ |
+| Claude Code graceful blocking (200 streaming) | ❌ | ❌ | ✅ |
+| Claude Code user/agent attribution | ❌ | ❌ | ✅ |
 
 - **v1** — OpenAI-only. Simpler fragment for environments that only use OpenAI-compatible endpoints.
 - **v2** — Multi-model. Adds Anthropic and Azure AI Foundry Claude support, plus streaming/SSE response scanning.
+- **v2.1** — Claude Code. Builds on v2 with Claude Code session grouping, graceful (non-erroring) blocking, and automatic user/agent attribution. Backward-compatible with existing v2 policies — drop-in, no policy changes required. Ships as the current `panw-airs-scan-v2` fragment.
 
 ## Coverage
 
@@ -34,7 +38,9 @@ This integration provides two versions of the policy fragment. Choose the one th
 | Pre-tool call | ❌ | Not applicable - designed for direct LLM gateway requests |
 | Post-tool call | ✅ | Tool results scanned as `tool_event` with tool name, arguments, and output |
 
-### v2
+### v2 / v2.1
+
+Scanning phases are identical for v2 and v2.1. v2.1 additionally layers Claude Code handling (session grouping, graceful 200-streaming blocking, and user/agent attribution) on top of these phases — see [Session Tracking](#session-tracking) and [Blocking Behavior](#blocking-behavior).
 
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
@@ -76,6 +82,7 @@ It will return bespoke responses dependent on the category detected.
 * Add agent attribution to AIRS metadata via the optional `agent` variable
 * Return masked PII responses if the action is Allow and Masking is enabled
 * Define if the sidecar should FailOpen or FailClosed if Prisma AIRS is not responding or has an error
+* Claude Code (v2.1): graceful blocking (200 streaming refusal so the session continues) plus automatic session/user/agent attribution
 
 ## 📊 Architecture
 ```
@@ -93,7 +100,7 @@ It will return bespoke responses dependent on the category detected.
 * Operational AI Gateway pre-defined connected to your LLM
 * **Minimum role:** Contributor on resource group/subscription to edit the policy of the AI Gateway. 
 No special Azure AD/Entra permissions beyond standard Contributor
-* Prisma AIRS API key from Strata Cloud Manager. Saved as the named value `airs-api` under teh API of your AI Gateway
+* Prisma AIRS API key from Strata Cloud Manager. Saved as the named value `airs-api` under the API of your AI Gateway
 * Prisma AIRS Security Profile within Strata Cloud Manager. Define with your own naming convention, or have a profile called `example-profile`
 
 ### Session Tracking
@@ -106,9 +113,12 @@ The policy fragment automatically tracks multi-turn conversations (including too
 - Works seamlessly across multiple HTTP requests (prompt → tool call → tool result → response)
 
 **Priority order:**
-1. **x-session-id header** (recommended for production) - Guarantees unique sessions
-2. **Conversation hash** (automatic) - Best-effort tracking based on IP + conversation content
-3. **RequestId** (fallback) - For non-conversational or simple requests
+1. **x-claude-code-session-id header** (Claude Code, v2.1) - Sent automatically by Claude Code on every request; used as the session ID with no configuration
+2. **x-session-id header** (recommended for production) - Guarantees unique sessions
+3. **Conversation hash** (automatic) - Best-effort tracking based on IP + conversation content
+4. **RequestId** (fallback) - For non-conversational or simple requests
+
+> **Claude Code (v2.1):** Because Claude Code emits `x-claude-code-session-id` on every call, multi-turn Claude Code sessions are grouped in AIRS automatically — no `x-session-id` required.
 
 **Known limitations:**
 - Same user asking identical questions multiple times may share a session (same IP + same content = same hash)
@@ -152,7 +162,7 @@ curl -X POST "https://<YOUR-HOSTNAME>/<YOUR API>/chat/completions" \
 
 ## 📁 What's Included
 * `prisma-airs-policy-fragment-v1/panw-airs-scan` : Prisma AIRS policy fragment for OpenAI endpoints (chat/completions, responses).
-* `prisma-airs-policy-fragment-v2/panw-airs-scan-v2` : Prisma AIRS policy fragment with multi-model support (OpenAI, Anthropic, Azure AI Foundry Claude) and streaming/SSE scanning.
+* `prisma-airs-policy-fragment-v2/panw-airs-scan-v2` : Prisma AIRS policy fragment with multi-model support (OpenAI, Anthropic, Azure AI Foundry Claude) and streaming/SSE scanning. The current file is the **v2.1** release, which adds Claude Code support and is backward-compatible with v2 policies.
 * `policy-example` : An example policy for an LLM API.
 
 ## 🔧 Configuration
@@ -162,8 +172,8 @@ Policy fragment is configured in the policy using the following variables:
 - `toolProfile`: (string) The name of the AIRS profile to use when scanning tool events. Defaults to `currentProfile` if not set.
 - `scanTools`: (boolean) `true` to scan tool result submissions, `false` to pass them through. Defaults to `true`.
 - `appName`: (string) The name of the application. Defaults to "APIM-Gateway".
-- `user`: (string, optional) Authenticated user identifier included in AIRS as `metadata.app_user`. If not set, the fragment falls back to the `x-user-id` request header, then `"anonymous"`.
-- `agent`: (string, optional) Agent or workflow identifier included in AIRS as `metadata.agent_meta.agent_id`. Set this from trusted APIM policy or backend routing context, not directly from untrusted client input.
+- `user`: (string, optional) Authenticated user identifier included in AIRS as `metadata.app_user`. If not set, the fragment falls back to the `x-user-id` request header, then to Claude Code's body `metadata.user_id` (`account_uuid`/`device_id`), then `"anonymous"`.
+- `agent`: (string, optional) Agent or workflow identifier included in AIRS as `metadata.agent_meta.agent_id`. Prefer setting this from trusted APIM policy or backend routing context. If unset, the fragment falls back to Claude Code's `x-claude-code-agent-id` header (subagent attribution only — treat as untrusted client-supplied metadata, not a security boundary).
 - `FailOpen`: (boolean) `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.
 - `airsDescriptions`: (JObject) A JObject containing custom error messages for detected threats. If not provided, the default messages in `scanDescriptions` will be used.
 
@@ -182,6 +192,7 @@ Policy fragment is configured in the policy using the following variables:
     - Fail-closed: Blocks requests/response if AIRS is unreachable
     - Fail-open: Continues with request/response if AIRS is unreachable
 HTTP 403: Returns clear error messages when content is blocked
+Claude Code (v2.1): blocked prompts/responses are returned as a normal **200 streaming message** (`🛡️ … REQUEST/RESPONSE BLOCKED`) so the session continues instead of erroring, with an `x-airs-blocked: true` response header. The block is still logged and enforced in AIRS — only the client-facing delivery changes. Scoped to Claude Code (detected via `x-claude-code-session-id` / `x-app: cli`); all other clients keep the 403.
 Correlation: Same tr_id for prompt and response scans (enables log correlation)
 
 ## 🧐 Samples
