@@ -100,7 +100,7 @@ It will return bespoke responses dependent on the category detected.
 * Operational AI Gateway pre-defined connected to your LLM
 * **Minimum role:** Contributor on resource group/subscription to edit the policy of the AI Gateway. 
 No special Azure AD/Entra permissions beyond standard Contributor
-* Prisma AIRS API key from Strata Cloud Manager. Saved as the named value `airs-api` under teh API of your AI Gateway
+* Prisma AIRS API key from Strata Cloud Manager. Saved as the named value `airs-api` under the API of your AI Gateway
 * Prisma AIRS Security Profile within Strata Cloud Manager. Define with your own naming convention, or have a profile called `example-profile`
 
 ### Session Tracking
