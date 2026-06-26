@@ -113,17 +113,21 @@ TOOL CALL HANDLING:
     if (!string.IsNullOrEmpty(varKey)) { return varKey; }
 
     // Priority 2: Fall back to named value
-    // NOTE: Named value AIRS-API must exist in APIM or fragment upload will fail
-    string namedValue = "{{AIRS-API}}";
+    // NOTE: Named value must exist in APIM or fragment upload will fail.
+    // This instance uses lowercase named value 'airs-api' (not 'AIRS-API').
+    string namedValue = "{{airs-api}}";
     return !string.IsNullOrEmpty(namedValue) ? namedValue : null;
 }" />
 	<!-- Load configuration variables with defaults -->
-	<set-variable name="scanType" value="@(context.Variables.GetValueOrDefault<string>("scanType", "prompt"))" />
+	<!-- Backward-compat: accept both ScanType (v2 convention) and scanType (v2.1). ScanType wins when a v2-era policy sets it per-phase. -->
+	<set-variable name="scanType" value="@(context.Variables.GetValueOrDefault<string>("ScanType", context.Variables.GetValueOrDefault<string>("scanType", "prompt")))" />
 	<set-variable name="currentProfile" value="@(context.Variables.GetValueOrDefault<string>("currentProfile", "example-profile"))" />
 	<set-variable name="toolProfile" value="@(context.Variables.GetValueOrDefault<string>("toolProfile", (string)context.Variables["currentProfile"]))" />
-	<set-variable name="scanTools" value="@(context.Variables.GetValueOrDefault<bool>("scanTools", true))" />
+	<!-- Backward-compat: Convert.ToBoolean accepts string "true"/"false" as well as a real bool (strict GetValueOrDefault<bool> throws 500 on a string). -->
+	<set-variable name="scanTools" value="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("scanTools", true)))" />
 	<set-variable name="appName" value="@(context.Variables.GetValueOrDefault<string>("appName", "Gateway"))" />
-	<set-variable name="FailOpen" value="@(context.Variables.GetValueOrDefault<bool>("FailOpen", false))" />
+	<!-- Backward-compat: Convert.ToBoolean accepts string "true"/"false" as well as a real bool (strict GetValueOrDefault<bool> throws 500 on a string). -->
+	<set-variable name="FailOpen" value="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)))" />
 	<!-- Optional agent metadata -->
 	<set-variable name="agentId" value="@{
     // Priority 1: Context variable (explicit override)
@@ -135,6 +139,14 @@ TOOL CALL HANDLING:
         string[] agentHeaders = context.Request.Headers.GetValueOrDefault("X-Agent-ID", new string[0]);
         if (agentHeaders.Length > 0 && !string.IsNullOrEmpty(agentHeaders[0])) {
             return agentHeaders[0];
+        }
+    }
+
+    // Priority 3: Claude Code subagent header
+    if (context.Request.Headers.ContainsKey("x-claude-code-agent-id")) {
+        string[] ccAgent = context.Request.Headers.GetValueOrDefault("x-claude-code-agent-id", new string[0]);
+        if (ccAgent.Length > 0 && !string.IsNullOrEmpty(ccAgent[0])) {
+            return ccAgent[0];
         }
     }
 
@@ -214,6 +226,18 @@ TOOL CALL HANDLING:
 	<!-- Determine if we're in inbound or outbound phase -->
 	<!-- Note: Some APIM features create empty Response objects in inbound, so check Body too -->
 	<set-variable name="isInbound" value="@(context.Response == null || context.Response.Body == null)" />
+	<!-- Detect Claude Code clients (session header or x-app: cli) for scoped, graceful block handling -->
+	<set-variable name="isClaudeCode" value="@{
+    if (context.Request.Headers.ContainsKey("x-claude-code-session-id")) {
+        string[] s = context.Request.Headers.GetValueOrDefault("x-claude-code-session-id", new string[0]);
+        if (s.Length > 0 && !string.IsNullOrEmpty(s[0])) { return true; }
+    }
+    if (context.Request.Headers.ContainsKey("x-app")) {
+        string[] a = context.Request.Headers.GetValueOrDefault("x-app", new string[0]);
+        if (a.Length > 0 && a[0] == "cli") { return true; }
+    }
+    return false;
+}" />
 	<!-- Decide if scanning should occur based on scanType, API type, and phase -->
 	<set-variable name="shouldScan" value="@{
     string type = (string)context.Variables["scanType"];
@@ -259,6 +283,14 @@ TOOL CALL HANDLING:
      ============================================================================ -->
 			<!-- Generate or extract session ID for conversation tracking -->
 			<set-variable name="sessionId" value="@{
+    // Priority 0: Claude Code session header (documented gateway header)
+    if (context.Request.Headers.ContainsKey("x-claude-code-session-id")) {
+        string[] ccSession = context.Request.Headers.GetValueOrDefault("x-claude-code-session-id", new string[0]);
+        if (ccSession.Length > 0 && !string.IsNullOrEmpty(ccSession[0])) {
+            return ccSession[0];
+        }
+    }
+
     // Priority 1: Check for x-session-id header
     if (context.Request.Headers.ContainsKey("x-session-id")) {
         string[] headerValues = context.Request.Headers.GetValueOrDefault("x-session-id", new string[0]);
@@ -440,6 +472,20 @@ TOOL CALL HANDLING:
         if (userHeaders.Length > 0 && !string.IsNullOrEmpty(userHeaders[0])) {
             appUser = userHeaders[0];
         }
+    }
+
+    // Fallback: Claude Code body metadata.user_id (JSON-encoded; prefer account_uuid, else device_id)
+    if (appUser == "anonymous" && body != null) {
+        try {
+            var uidRaw = body["metadata"]?["user_id"]?.ToString();
+            if (!string.IsNullOrEmpty(uidRaw)) {
+                var uidObj = JObject.Parse(uidRaw);
+                var acct = uidObj["account_uuid"]?.ToString();
+                var dev  = uidObj["device_id"]?.ToString();
+                appUser = !string.IsNullOrEmpty(acct) ? acct
+                        : (!string.IsNullOrEmpty(dev) ? dev : uidRaw);
+            }
+        } catch { }
     }
 
     // Select profile based on API type
@@ -722,6 +768,7 @@ TOOL CALL HANDLING:
                 var body = (JObject)context.Variables["requestBodyJson"];
                 string scanType = (string)context.Variables["scanType"];
                 bool scanTools = (bool)context.Variables["scanTools"];
+                bool isCC = (bool)context.Variables["isClaudeCode"];
                 var contents = new JArray();
 
                 string promptText = "";
@@ -769,6 +816,7 @@ TOOL CALL HANDLING:
                                         }
                                     }
                                 }
+                                if (isCC) { break; }
                             } else if (scanTools && role == "tool") {
                                 // OpenAI tool result
                                 var content = msg["content"];
@@ -1078,13 +1126,74 @@ TOOL CALL HANDLING:
                 return response.ToString(Newtonsoft.Json.Formatting.None);
             }
         }" />
-									<return-response>
-										<set-status code="403" reason="Forbidden" />
-										<set-header name="Content-Type" exists-action="override">
-											<value>application/json</value>
-										</set-header>
-										<set-body>@((string)context.Variables["errorBody"])</set-body>
-									</return-response>
+									<choose>
+										<when condition="@((bool)context.Variables["isClaudeCode"] && (string)context.Variables["apiType"] == "llm" && context.Variables.ContainsKey("requestBodyJson") && context.Variables["requestBodyJson"] != null && ((JObject)context.Variables["requestBodyJson"])["stream"] != null && (bool)((JObject)context.Variables["requestBodyJson"])["stream"])">
+											<!-- Claude Code (streaming): return a 200 SSE assistant refusal so the session keeps going. AIRS still logged/enforced the block; this only changes how the client is told. -->
+											<return-response>
+												<set-status code="200" reason="OK" />
+												<set-header name="Content-Type" exists-action="override">
+													<value>text/event-stream</value>
+												</set-header>
+												<set-header name="x-airs-blocked" exists-action="override">
+													<value>true</value>
+												</set-header>
+												<set-body>@{
+            var result = (JObject)context.Variables["airsResult"];
+            var descriptions = (JObject)context.Variables["finalDescriptions"];
+            string scanType = (string)context.Variables["scanType"];
+            var detected = (scanType == "response" ? result["response_detected"] : result["prompt_detected"]) as JObject;
+            var threatSb = new System.Text.StringBuilder();
+            if (detected != null) {
+                foreach (JProperty prop in detected.Properties()) {
+                    if (prop.Value.Type == JTokenType.Boolean && (bool)prop.Value == true) {
+                        string key = prop.Name;
+                        string desc = (descriptions != null && descriptions[key] != null) ? descriptions[key].ToString() : key;
+                        if (threatSb.Length > 0) { threatSb.Append(", "); }
+                        threatSb.Append(desc);
+                    }
+                }
+            }
+            string notice = "🛡️ PRISMA AIRS SECURITY ALERT: " + (scanType == "response" ? "RESPONSE BLOCKED" : "REQUEST BLOCKED") + (threatSb.Length > 0 ? (": " + threatSb.ToString()) : "");
+
+            var reqBody = (JObject)context.Variables["requestBodyJson"];
+            string model = (reqBody != null && reqBody["model"] != null) ? reqBody["model"].ToString() : "claude";
+
+            var msgStart = new JObject(new JProperty("type", "message_start"), new JProperty("message", new JObject(
+                new JProperty("id", "msg_airs_block"), new JProperty("type", "message"), new JProperty("role", "assistant"),
+                new JProperty("model", model), new JProperty("content", new JArray()),
+                new JProperty("stop_reason", null), new JProperty("stop_sequence", null),
+                new JProperty("usage", new JObject(new JProperty("input_tokens", 0), new JProperty("output_tokens", 0))))));
+            var cbStart = new JObject(new JProperty("type", "content_block_start"), new JProperty("index", 0),
+                new JProperty("content_block", new JObject(new JProperty("type", "text"), new JProperty("text", ""))));
+            var cbDelta = new JObject(new JProperty("type", "content_block_delta"), new JProperty("index", 0),
+                new JProperty("delta", new JObject(new JProperty("type", "text_delta"), new JProperty("text", notice))));
+            var cbStop = new JObject(new JProperty("type", "content_block_stop"), new JProperty("index", 0));
+            var msgDelta = new JObject(new JProperty("type", "message_delta"),
+                new JProperty("delta", new JObject(new JProperty("stop_reason", "end_turn"), new JProperty("stop_sequence", null))),
+                new JProperty("usage", new JObject(new JProperty("output_tokens", 0))));
+            var msgStop = new JObject(new JProperty("type", "message_stop"));
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("event: message_start\ndata: ").Append(msgStart.ToString(Newtonsoft.Json.Formatting.None)).Append("\n\n");
+            sb.Append("event: content_block_start\ndata: ").Append(cbStart.ToString(Newtonsoft.Json.Formatting.None)).Append("\n\n");
+            sb.Append("event: content_block_delta\ndata: ").Append(cbDelta.ToString(Newtonsoft.Json.Formatting.None)).Append("\n\n");
+            sb.Append("event: content_block_stop\ndata: ").Append(cbStop.ToString(Newtonsoft.Json.Formatting.None)).Append("\n\n");
+            sb.Append("event: message_delta\ndata: ").Append(msgDelta.ToString(Newtonsoft.Json.Formatting.None)).Append("\n\n");
+            sb.Append("event: message_stop\ndata: ").Append(msgStop.ToString(Newtonsoft.Json.Formatting.None)).Append("\n\n");
+            return sb.ToString();
+        }</set-body>
+											</return-response>
+										</when>
+										<otherwise>
+											<return-response>
+												<set-status code="403" reason="Forbidden" />
+												<set-header name="Content-Type" exists-action="override">
+													<value>application/json</value>
+												</set-header>
+												<set-body>@((string)context.Variables["errorBody"])</set-body>
+											</return-response>
+										</otherwise>
+									</choose>
 								</when>
 								<!-- ALLOW: Content is safe, continue (possibly with masking) -->
 								<otherwise>
