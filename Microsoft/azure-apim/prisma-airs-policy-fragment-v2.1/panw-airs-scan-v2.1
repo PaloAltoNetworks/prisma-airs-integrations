@@ -244,6 +244,42 @@ TOOL CALL HANDLING:
     string apiType = (string)context.Variables["apiType"];
     bool isInbound = (bool)context.Variables["isInbound"];
 
+    // Claude Code: only scan real agent turns. Real turns carry the full tool set AND a large
+    // max_tokens (32000). Background utility calls (title / recap / suggestion) are toolless
+    // and/or tiny completions ("2-12 words") derived from already-scanned content. Skip them so
+    // AIRS sees only the user's input and the response they receive. (suggestion-mode carries
+    // tools, so the max_tokens floor is what catches it.)
+    if ((bool)context.Variables["isClaudeCode"]) {
+        try {
+            var ccReqBody = context.Request.Body.As<JObject>(preserveContent: true);
+            var ccTools = ccReqBody?["tools"] as JArray;
+            int ccMaxTokens = ccReqBody?["max_tokens"]?.Value<int?>() ?? 0;
+            if (ccTools == null || ccTools.Count == 0 || (ccMaxTokens > 0 && ccMaxTokens <= 4096)) { return false; }
+            // suggestion/autocomplete carries tools AND a large max_tokens, so only its content
+            // marker identifies it. Checked on the LAST USER message's text (never tool_result), so a
+            // marker embedded in tool output can't skip a real turn. Benign failure: if Claude Code
+            // renames the marker, this call is simply scanned again -- never a security gap.
+            var ccMsgs = ccReqBody?["messages"] as JArray;
+            if (ccMsgs != null) {
+                for (int j = ccMsgs.Count - 1; j >= 0; j--) {
+                    var m = ccMsgs[j] as JObject;
+                    if (m?["role"]?.ToString() == "user") {
+                        var mc = m["content"];
+                        string mtext = "";
+                        if (mc != null && mc.Type == JTokenType.String) { mtext = mc.ToString(); }
+                        else if (mc != null && mc.Type == JTokenType.Array) {
+                            foreach (var blk in (JArray)mc) {
+                                if (blk["type"]?.ToString() == "text") { mtext += blk["text"]?.ToString() ?? ""; }
+                            }
+                        }
+                        if (mtext.Contains("[SUGGESTION MODE:")) { return false; }
+                        break;
+                    }
+                }
+            }
+        } catch { }
+    }
+
     // Skip unknown API types
     if (apiType == "unknown") { return false; }
 
@@ -797,15 +833,25 @@ TOOL CALL HANDLING:
                             if (role == "user") {
                                 var content = msg["content"];
                                 if (content?.Type == JTokenType.String) {
-                                    if (promptParts.Length > 0) { promptParts.Insert(0, "\n"); }
-                                    promptParts.Insert(0, content.ToString());
+                                    string ut = content.ToString();
+                                    // isCC: strip Claude Code's own <system-reminder> scaffolding from USER text only
+                                    if (isCC) { ut = System.Text.RegularExpressions.Regex.Replace(ut, "<system-reminder>[\\s\\S]*?</system-reminder>", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim(); }
+                                    if (ut.Length > 0) {
+                                        if (promptParts.Length > 0) { promptParts.Insert(0, "\n"); }
+                                        promptParts.Insert(0, ut);
+                                    }
                                 } else if (content?.Type == JTokenType.Array) {
                                     // Anthropic content blocks
                                     foreach (var block in (JArray)content) {
                                         var blockType = block["type"]?.ToString();
                                         if (blockType == "text") {
-                                            if (promptParts.Length > 0) { promptParts.Insert(0, "\n"); }
-                                            promptParts.Insert(0, block["text"]?.ToString() ?? "");
+                                            string bt = block["text"]?.ToString() ?? "";
+                                            // isCC: strip Claude Code's own <system-reminder> scaffolding from USER text only
+                                            if (isCC) { bt = System.Text.RegularExpressions.Regex.Replace(bt, "<system-reminder>[\\s\\S]*?</system-reminder>", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim(); }
+                                            if (bt.Length > 0) {
+                                                if (promptParts.Length > 0) { promptParts.Insert(0, "\n"); }
+                                                promptParts.Insert(0, bt);
+                                            }
                                         } else if (scanTools && blockType == "tool_result") {
                                             // Anthropic tool result
                                             var toolContent = block["content"];
@@ -827,6 +873,8 @@ TOOL CALL HANDLING:
                             }
                         }
 
+                        // <system-reminder> scaffolding is stripped per USER text block above (isCC only),
+                        // NOT on the combined text — so tool_result / command output is never altered.
                         promptText = promptParts.ToString();
                     }
                 }
