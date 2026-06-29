@@ -852,8 +852,12 @@ TOOL CALL HANDLING:
                                                 if (promptParts.Length > 0) { promptParts.Insert(0, "\n"); }
                                                 promptParts.Insert(0, bt);
                                             }
-                                        } else if (scanTools && blockType == "tool_result") {
-                                            // Anthropic tool result
+                                        } else if (scanTools && !isCC && blockType == "tool_result") {
+                                            // Anthropic tool result. Claude Code (isCC): NOT folded into the prompt
+                                            // scan -- tool output is not user input, and folding it in scans benign
+                                            // local tool chatter (file reads, memory lookups) as a "prompt".
+                                            // Untrusted tool I/O is covered at the APIM MCP registry chokepoint
+                                            // (apiType=="mcp" tool_event path) instead.
                                             var toolContent = block["content"];
                                             if (toolContent?.Type == JTokenType.String) {
                                                 if (promptParts.Length > 0) { promptParts.Insert(0, "\n"); }
@@ -863,7 +867,7 @@ TOOL CALL HANDLING:
                                     }
                                 }
                                 if (isCC) { break; }
-                            } else if (scanTools && role == "tool") {
+                            } else if (scanTools && !isCC && role == "tool") {
                                 // OpenAI tool result
                                 var content = msg["content"];
                                 if (content?.Type == JTokenType.String) {
