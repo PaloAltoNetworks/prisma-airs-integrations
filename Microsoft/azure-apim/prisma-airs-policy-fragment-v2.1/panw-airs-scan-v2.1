@@ -1,7 +1,7 @@
 <!--
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║ PRISMA AIRS SECURITY SCANNING FRAGMENT                                      ║
-║ Version: 2.1.0                                                               ║
+║ Version: 2.1.1                                                               ║
 ║ Built for: Azure API Management (APIM)                                      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
@@ -33,10 +33,13 @@ Context Variables (set before fragment inclusion):
     Default: service.api.aisecurity.paloaltonetworks.com
   - scanType (string): "prompt", "response", or "both" (default: "prompt")
   - currentProfile (string): AIRS profile name (default: "example-profile")
+  - currentProfileUUID (string, optional): AIRS profile UUID (takes priority over currentProfile if defined)
   - toolProfile (string): AIRS profile for tool events (default: currentProfile)
+  - toolProfileUUID (string, optional): AIRS profile UUID for tool events (takes priority over toolProfile if defined)
   - scanTools (boolean): Scan tool results (default: true)
   - appName (string): Application name (default: "Gateway")
-  - FailOpen (boolean): Allow on AIRS failure (default: false)
+  - failOpen (boolean): Allow on AIRS failure (default: false)
+    Note: FailOpen (uppercase) is also supported for backward compatibility
   - airsDescriptions (JObject): Custom threat descriptions (optional)
   - agentID (string): Optional agent identifier
   - agentVersion (string): Optional agent version
@@ -119,15 +122,28 @@ TOOL CALL HANDLING:
     return !string.IsNullOrEmpty(namedValue) ? namedValue : null;
 }" />
 	<!-- Load configuration variables with defaults -->
-	<!-- Backward-compat: accept both ScanType (v2 convention) and scanType (v2.1). ScanType wins when a v2-era policy sets it per-phase. -->
-	<set-variable name="scanType" value="@(context.Variables.GetValueOrDefault<string>("ScanType", context.Variables.GetValueOrDefault<string>("scanType", "prompt")))" />
+	<!-- v2.1.1: scanType (lowercase) is preferred; ScanType (uppercase) is backward compatibility -->
+	<set-variable name="scanType" value="@(context.Variables.GetValueOrDefault<string>("scanType", context.Variables.GetValueOrDefault<string>("ScanType", "prompt")))" />
 	<set-variable name="currentProfile" value="@(context.Variables.GetValueOrDefault<string>("currentProfile", "example-profile"))" />
+	<set-variable name="currentProfileUUID" value="@(context.Variables.GetValueOrDefault<string>("currentProfileUUID", null))" />
 	<set-variable name="toolProfile" value="@(context.Variables.GetValueOrDefault<string>("toolProfile", (string)context.Variables["currentProfile"]))" />
+	<set-variable name="toolProfileUUID" value="@(context.Variables.GetValueOrDefault<string>("toolProfileUUID", null))" />
 	<!-- Backward-compat: Convert.ToBoolean accepts string "true"/"false" as well as a real bool (strict GetValueOrDefault<bool> throws 500 on a string). -->
 	<set-variable name="scanTools" value="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("scanTools", true)))" />
 	<set-variable name="appName" value="@(context.Variables.GetValueOrDefault<string>("appName", "Gateway"))" />
-	<!-- Backward-compat: Convert.ToBoolean accepts string "true"/"false" as well as a real bool (strict GetValueOrDefault<bool> throws 500 on a string). -->
-	<set-variable name="FailOpen" value="@(Convert.ToBoolean(context.Variables.GetValueOrDefault<object>("FailOpen", false)))" />
+	<!-- Backward-compat: failOpen (lowercase) is preferred, but FailOpen (uppercase) is also supported. Convert.ToBoolean accepts string "true"/"false" as well as a real bool (strict GetValueOrDefault<bool> throws 500 on a string). -->
+	<set-variable name="FailOpen" value="@{
+	    // Priority 1: Check for failOpen (lowercase - preferred)
+	    object failOpenLower = context.Variables.GetValueOrDefault<object>("failOpen", null);
+	    if (failOpenLower != null) { return Convert.ToBoolean(failOpenLower); }
+
+	    // Priority 2: Fall back to FailOpen (uppercase - backward compatibility)
+	    object failOpenUpper = context.Variables.GetValueOrDefault<object>("FailOpen", null);
+	    if (failOpenUpper != null) { return Convert.ToBoolean(failOpenUpper); }
+
+	    // Default: false (fail-closed)
+	    return false;
+	}" />
 	<!-- Optional agent metadata -->
 	<set-variable name="agentId" value="@{
     // Priority 1: Context variable (explicit override)
@@ -526,10 +542,21 @@ TOOL CALL HANDLING:
 
     // Select profile based on API type
     string profileName;
+    string profileUUID;
     if (apiType == "mcp") {
         profileName = (string)context.Variables["toolProfile"];
+        profileUUID = (string)context.Variables["toolProfileUUID"];
     } else {
         profileName = (string)context.Variables["currentProfile"];
+        profileUUID = (string)context.Variables["currentProfileUUID"];
+    }
+
+    // Build ai_profile object - use profile_id if UUID is defined, otherwise use profile_name
+    JObject aiProfile;
+    if (!string.IsNullOrEmpty(profileUUID)) {
+        aiProfile = new JObject(new JProperty("profile_id", profileUUID));
+    } else {
+        aiProfile = new JObject(new JProperty("profile_name", profileName));
     }
 
     // Build metadata object
@@ -555,9 +582,7 @@ TOOL CALL HANDLING:
     return new JObject(
         new JProperty("tr_id", (string)context.Variables["transactionId"]),
         new JProperty("session_id", (string)context.Variables["sessionId"]),
-        new JProperty("ai_profile", new JObject(
-            new JProperty("profile_name", profileName)
-        )),
+        new JProperty("ai_profile", aiProfile),
         new JProperty("metadata", metadata)
     );
 }" />
