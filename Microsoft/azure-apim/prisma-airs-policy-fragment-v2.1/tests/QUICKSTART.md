@@ -1,6 +1,6 @@
-# Quick Start Guide - AIRS v3 Unified Fragment
+# Quick Start Guide - AIRS v2.1.1 Unified Fragment
 
-Test all API types supported by the unified v3 fragment: MCP, OpenAI, Anthropic, and Azure AI Foundry Claude.
+Test all API types supported by the unified v2.1.1 fragment: MCP, OpenAI, Anthropic, and Azure AI Foundry Claude.
 
 ## Setup (One-time)
 
@@ -244,7 +244,7 @@ curl -v "https://${AZURE_SERVICE}.azure-api.net/${OPENAI_API_NAME}/chat/completi
 
 1. **Verify fragment is uploaded:**
    ```bash
-   # Check if panw-airs-scan-v3 exists in APIM
+   # Check if panw-airs-scan-v2.1 exists in APIM
    az apim api policy show --api-id <API_NAME> --service-name $AZURE_SERVICE --resource-group $AZURE_RG
    ```
 
@@ -252,11 +252,11 @@ curl -v "https://${AZURE_SERVICE}.azure-api.net/${OPENAI_API_NAME}/chat/completi
    ```xml
    <inbound>
        <set-variable name="scanType" value="prompt" />
-       <include-fragment fragment-id="panw-airs-scan-v3" />
+       <include-fragment fragment-id="panw-airs-scan-v2.1" />
    </inbound>
    <outbound>
        <set-variable name="scanType" value="response" />
-       <include-fragment fragment-id="panw-airs-scan-v3" />
+       <include-fragment fragment-id="panw-airs-scan-v2.1" />
    </outbound>
    ```
 
@@ -275,17 +275,17 @@ curl -v "https://${AZURE_SERVICE}.azure-api.net/${OPENAI_API_NAME}/chat/completi
 
 ## Updating the Fragment
 
-After modifying `panw-airs-scan-v3` locally:
+After modifying `panw-airs-scan-v2.1` locally:
 
 ```bash
-./scripts/update-fragment.sh panw-airs-scan-v3
+./scripts/update-fragment.sh panw-airs-scan-v2.1
 ```
 
 ## Test Configuration
 
 ### API Detection (automatic)
 
-The v3 fragment automatically detects API type:
+The v2.1.1 fragment automatically detects API type:
 
 - **MCP**: Detects `method="tools/call"` in request body
 - **OpenAI**: Detects path `/chat/completions`
@@ -301,7 +301,7 @@ Configure error handling in your API policy:
 <inbound>
     <!-- Fail-closed (default): Block when AIRS fails -->
     <set-variable name="FailOpen" value="@(false)" />
-    <include-fragment fragment-id="panw-airs-scan-v3" />
+    <include-fragment fragment-id="panw-airs-scan-v2.1" />
 </inbound>
 
 <!-- OR -->
@@ -309,7 +309,7 @@ Configure error handling in your API policy:
 <inbound>
     <!-- Fail-open: Allow when AIRS fails (with warning) -->
     <set-variable name="FailOpen" value="@(true)" />
-    <include-fragment fragment-id="panw-airs-scan-v3" />
+    <include-fragment fragment-id="panw-airs-scan-v2.1" />
 </inbound>
 ```
 
@@ -330,7 +330,7 @@ Configure error handling in your API policy:
 
 ## Coverage
 
-The v3 unified fragment supports:
+The v2.1.1 unified fragment supports:
 
 | API Type | Endpoint | Prompt Scan | Response Scan | Streaming | Tool Events |
 |----------|----------|:-----------:|:-------------:|:---------:|:-----------:|

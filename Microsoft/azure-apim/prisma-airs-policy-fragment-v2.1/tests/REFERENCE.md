@@ -1,6 +1,6 @@
 # Quick Reference Card
 
-## Policy Fragment: `panw-airs-scan-v3`
+## Policy Fragment: `panw-airs-scan-v2.1`
 
 ### One-Liner
 Unified AIRS scanning for LLM APIs (MCP, OpenAI, Anthropic, Azure AI Foundry) - detects threats and sensitive data using Prisma AIRS.
@@ -16,8 +16,8 @@ Unified AIRS scanning for LLM APIs (MCP, OpenAI, Anthropic, Azure AI Foundry) - 
 
 ```xml
 <outbound>
-    <!-- Unified v3 fragment - auto-detects API type -->
-    <include-fragment fragment-id="panw-airs-scan-v3" />
+    <!-- Unified v2.1.1 fragment - auto-detects API type -->
+    <include-fragment fragment-id="panw-airs-scan-v2.1" />
 </outbound>
 ```
 
@@ -79,20 +79,20 @@ Unified AIRS scanning for LLM APIs (MCP, OpenAI, Anthropic, Azure AI Foundry) - 
 ```xml
 <!-- RECOMMENDED: Scan both prompt and response (outbound only) -->
 <outbound>
-    <include-fragment fragment-id="panw-airs-scan-v3" />
+    <include-fragment fragment-id="panw-airs-scan-v2.1" />
 </outbound>
 
 <!-- Scan only prompts (before backend) -->
 <inbound>
-    <include-fragment fragment-id="panw-airs-scan-v3" />
+    <include-fragment fragment-id="panw-airs-scan-v2.1" />
 </inbound>
 
 <!-- Scan prompts and responses separately (2 AIRS calls per request) -->
 <inbound>
-    <include-fragment fragment-id="panw-airs-scan-v3" />
+    <include-fragment fragment-id="panw-airs-scan-v2.1" />
 </inbound>
 <outbound>
-    <include-fragment fragment-id="panw-airs-scan-v3" />
+    <include-fragment fragment-id="panw-airs-scan-v2.1" />
 </outbound>
 ```
 
@@ -100,7 +100,7 @@ Unified AIRS scanning for LLM APIs (MCP, OpenAI, Anthropic, Azure AI Foundry) - 
 
 ```bash
 # Upload fragment
-./scripts/update-fragment.sh panw-airs-scan-v3
+./scripts/update-fragment.sh panw-airs-scan-v2.1
 
 # Quick test all APIs
 ./scripts/test-all.sh quick
@@ -162,8 +162,8 @@ jq '.traceEntries.outbound[] | select(.source == "panw-airs-mcp-scan")' traces/t
 
 | File | Purpose |
 |------|---------|
-| [panw-airs-scan-v3](../panw-airs-scan-v3) | Unified v3 policy fragment XML |
-| [panw-airs-scan-v3-optimized](../panw-airs-scan-v3-optimized) | Optimized version (APIM-compatible) |
+| [panw-airs-scan-v2.1](../panw-airs-scan-v2.1) | Unified v2.1.1 policy fragment XML |
+| [panw-airs-scan-v2.1-optimized](../panw-airs-scan-v2.1-optimized) | Optimized version (APIM-compatible) |
 | [README.md](../README.md) | Full documentation |
 | [QUICKSTART.md](QUICKSTART.md) | Testing quick start |
 | [scripts/README.md](scripts/README.md) | Detailed script reference |
@@ -187,7 +187,7 @@ jq '.traceEntries.outbound[] | select(.source == "panw-airs-mcp-scan")' traces/t
 
 ### Version Info
 
-- **Current Version**: v3 (Unified)
+- **Current Version**: v2.1.1 (Unified)
 - **Last Updated**: 2026-05-19
 - **APIM API Version**: 2023-05-01-preview
 - **Tested APIM Tiers**: Developer, Standard, Premium

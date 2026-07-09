@@ -1,6 +1,6 @@
-# Azure APIM AIRS v3 Testing Scripts
+# Azure APIM AIRS v2.1.1 Testing Scripts
 
-Test scripts for validating the unified AIRS v3 fragment with multiple LLM API types: MCP, OpenAI, Anthropic, Gemini, and Azure AI Foundry (Claude/GPT).
+Test scripts for validating the unified AIRS v2.1.1 fragment with multiple LLM API types: MCP, OpenAI, Anthropic, Gemini, and Azure AI Foundry (Claude/GPT).
 
 ## Prerequisites
 
@@ -117,7 +117,7 @@ az account show
 **Output:**
 ```
 ╔════════════════════════════════════════════════════════════════╗
-║           AIRS v3 Unified Fragment - Test Suite              ║
+║           AIRS v2.1.1 Unified Fragment - Test Suite              ║
 ╚════════════════════════════════════════════════════════════════╝
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -198,7 +198,7 @@ az account show
 
 ### test-openai.sh
 
-**Test OpenAI Chat Completions API** with AIRS v3 fragment.
+**Test OpenAI Chat Completions API** with AIRS v2.1.1 fragment.
 
 **Usage:**
 
@@ -240,7 +240,7 @@ az account show
 
 ### test-anthropic.sh
 
-**Test Anthropic Messages API** with AIRS v3 fragment.
+**Test Anthropic Messages API** with AIRS v2.1.1 fragment.
 
 **Usage:**
 
@@ -287,7 +287,7 @@ Tool calling (Anthropic format):
 
 ### test-gemini.sh
 
-**Test Google Gemini API (generateContent/streamGenerateContent)** with AIRS v3 fragment.
+**Test Google Gemini API (generateContent/streamGenerateContent)** with AIRS v2.1.1 fragment.
 
 **Usage:**
 
@@ -344,7 +344,7 @@ Gemini API response:
 
 ### test-foundry-gpt.sh
 
-**Test Azure AI Foundry GPT (OpenAI Responses API)** with AIRS v3 fragment.
+**Test Azure AI Foundry GPT (OpenAI Responses API)** with AIRS v2.1.1 fragment.
 
 **Usage:**
 
@@ -662,20 +662,20 @@ curl -v "https://${AZURE_SERVICE}.azure-api.net/${AZURE_API_NAME}/mcp"
 
 3. **Check APIM configuration in Azure Portal:**
    - Go to your APIM instance → APIs → Select your API
-   - Check **All operations** policy - should include the `panw-airs-scan-v3` fragment
+   - Check **All operations** policy - should include the `panw-airs-scan-v2.1` fragment
    - Verify **Named Values** - should have `AIRS-API` with your Prisma AIRS API key
    - Check **Products** - API should be in a product
 
 4. **Verify fragment inclusion:**
    
-   The `panw-airs-scan-v3` fragment should be in your API policy:
+   The `panw-airs-scan-v2.1` fragment should be in your API policy:
    
    ```xml
    <policies>
        <inbound>
            <base />
            <!-- Optional: Scan prompts before backend -->
-           <!-- <include-fragment fragment-id="panw-airs-scan-v3" /> -->
+           <!-- <include-fragment fragment-id="panw-airs-scan-v2.1" /> -->
        </inbound>
        <backend>
            <base />
@@ -683,7 +683,7 @@ curl -v "https://${AZURE_SERVICE}.azure-api.net/${AZURE_API_NAME}/mcp"
        <outbound>
            <base />
            <!-- RECOMMENDED: Scan both prompts and responses in outbound -->
-           <include-fragment fragment-id="panw-airs-scan-v3" />
+           <include-fragment fragment-id="panw-airs-scan-v2.1" />
        </outbound>
        <on-error>
            <base />
@@ -726,7 +726,7 @@ curl -v "https://${AZURE_SERVICE}.azure-api.net/${AZURE_API_NAME}/mcp"
 ## File Structure
 
 ```
-prisma-airs-policy-fragment-v3/
+prisma-airs-policy-fragment-v2.1/
 ├── tests/
 │   ├── env.sample                     # Template environment configuration
 │   ├── .env                           # Your local configuration (git-ignored)
@@ -749,8 +749,8 @@ prisma-airs-policy-fragment-v3/
 │   ├── .mcp_session_id                # Cached MCP session ID (git-ignored)
 │   ├── old_xml/                       # Archived policy fragments (git-ignored)
 │   └── traces/                        # APIM trace files (git-ignored)
-├── panw-airs-scan-v3                  # Unified v3 policy fragment
-├── panw-airs-scan-v3-optimized        # Optimized version (APIM-compatible)
+├── panw-airs-scan-v2.1                  # Unified v2.1.1 policy fragment
+├── panw-airs-scan-v2.1-optimized        # Optimized version (APIM-compatible)
 └── README.md                          # Main integration documentation
 ```
 
@@ -837,11 +837,11 @@ prisma-airs-policy-fragment-v3/
 1. **Place fragment in outbound** - Scans both prompt and response with one AIRS call
 2. **Monitor AIRS latency** - Check APIM analytics for slow AIRS responses
 3. **Configure appropriate timeouts** - Default 10s may need adjustment for high-latency scenarios
-4. **Use optimized fragment** - Consider `panw-airs-scan-v3-optimized` for better performance
+4. **Use optimized fragment** - Consider `panw-airs-scan-v2.1-optimized` for better performance
 
 ## Integration with AIRS
 
-The test scripts send LLM API requests through Azure APIM, which applies the `panw-airs-scan-v3` policy fragment. The policy:
+The test scripts send LLM API requests through Azure APIM, which applies the `panw-airs-scan-v2.1` policy fragment. The policy:
 
 1. **Auto-detects API type** (MCP, OpenAI, Anthropic, Foundry)
 2. **Extracts content** (prompts, responses, tool events)
@@ -910,7 +910,7 @@ Scans tool calling activity (arguments and results):
 
 ## Summary
 
-This testing framework provides comprehensive validation for the unified AIRS v3 fragment across all supported LLM API types. Key capabilities:
+This testing framework provides comprehensive validation for the unified AIRS v2.1.1 fragment across all supported LLM API types. Key capabilities:
 
 ✅ **Unified Testing** - Single test suite for MCP, OpenAI, Anthropic, and Azure AI Foundry  
 ✅ **Security Validation** - DLP masking, malicious content blocking, injection detection  
