@@ -6,14 +6,20 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 
 > Use v1 for OpenAI-only / AI-Gateway-fronted LLM traffic. Use v2 when the same Kong service also brokers MCP tool calls (typically MCP-over-HTTP or SSE-framed remote MCP servers), and/or **serves streamed (`text/event-stream`) LLM responses** that you want scanned.
 
+## What's new in 0.2.3
+
+- **Fix — Gemini/Vertex responses are now scanned.** The response extractor handled only OpenAI (`choices`) and Bedrock (`output`); Gemini/Vertex responses (`candidates[].content.parts[].text`) extracted nothing, so response-side detections passed **unscanned** on the gateway path. Because the plugin runs before `ai-proxy` normalizes, it sees the provider-native body and now parses the Gemini shape.
+- **Fix — multi-turn chat scans the latest user turn.** `extract_prompt` returned the *first* user message; in a multi-turn conversation the client resends the full history, so the plugin re-scanned turn 1 forever and never inspected the new prompt. It now scans the **last** user turn.
+- **Feature (opt-in) — AIRS observability headers.** With `set_observability_headers: true` (default **false**), the plugin emits `x-airs-*` headers on allow and block, for LLM and MCP legs (see the config table).
+
 ## Coverage
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
 
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
-| Prompt | ✅ | Access phase scans user prompts (OpenAI `messages[]` and Bedrock Converse `content[].text`) |
-| Response | ✅ | Response phase scans LLM completions (OpenAI `choices[].message.content` and Bedrock `output.message.content`) |
+| Prompt | ✅ | Access phase scans user prompts (OpenAI `messages[]` and Bedrock Converse `content[].text`). In multi-turn chat the **latest** user turn is scanned. |
+| Response | ✅ | Response phase scans LLM completions (OpenAI `choices[].message.content`, Bedrock `output.message.content`, and Gemini/Vertex `candidates[].content.parts[].text`) |
 | Streaming | ✅ | `text/event-stream` responses are detected, the streamed text + tool-call args reconstructed from the **fully buffered** body, and scanned before return. The client receives the full response **after completion, not token-by-token**. Covers OpenAI chat, OpenAI Responses, and Anthropic Messages SSE. |
 | Pre-tool call | ✅ | MCP `tools/call` requests scanned as `tool_event` (`input` = arguments JSON) |
 | Post-tool call | ✅ | MCP `tools/call` responses scanned as `tool_event` (`output` = result JSON; SSE framing stripped) |
@@ -29,10 +35,10 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 | SSE framing | N/A | Strips `event: message\ndata: {...}` envelopes from remote MCP servers before decoding |
 | Buffered SSE response scanning | N/A | Detects `text/event-stream`, reconstructs OpenAI chat / OpenAI Responses / Anthropic Messages text + tool-call args, scans the completed response (LLM path only; MCP behavior unchanged) |
 | Plugin `PRIORITY` | `760` (runs after `ai-proxy` priority `770`) | `1000` (runs **before** `ai-proxy`) |
-| `VERSION` string | `0.3.0` | `0.2.2` |
+| `VERSION` string | `0.3.0` | `0.2.3` |
 | `timeout_ms` / `debug` config | Honored | **Honored** (`timeout_ms` applied to the AIRS call; debug logs gated on `debug`) |
 
-> ⚠️ **Priority change.** v2 runs at priority `1000`, **above** Kong's `ai-proxy` (`770`). If you front a non-OpenAI provider with AI Proxy and rely on Proxy's request normalization, v2 will see the **un-normalized** request body (e.g., Bedrock Converse). v2 handles Bedrock Converse natively, but other shapes (Anthropic Messages, Gemini `contents`, etc.) are not parsed. Use v1 if you want the AIRS scan to see AI-Proxy-normalized OpenAI JSON.
+> ⚠️ **Priority change.** v2 runs at priority `1000`, **above** Kong's `ai-proxy` (`770`). If you front a non-OpenAI provider with AI Proxy and rely on Proxy's request normalization, v2 will see the **un-normalized** request body (e.g., Bedrock Converse). v2 handles Bedrock Converse **request** bodies natively and scans **Gemini/Vertex responses** (`candidates[].content.parts[].text`); other **request** shapes (Anthropic Messages, Gemini `contents`, etc.) are not parsed. Use v1 if you want the AIRS scan to see AI-Proxy-normalized OpenAI JSON.
 
 ## Configuration
 
@@ -52,6 +58,7 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 | `sse_provider` | No | `auto` | SSE wire format: `auto`, `openai_chat`, `openai_responses`, `anthropic_messages`, or `raw`. `auto` detects from the stream. |
 | `sse_max_scan_chars` | No | `20000` | Max reconstructed chars sent to AIRS before the over-limit policy applies. The `20000` default mirrors the conservative response/tool-output scan cap used by other AIRS reference integrations; the `sse_max_scan_chars` field itself is specific to this Kong v2 plugin (see Notes). Over-limit behavior is governed by `sse_truncation_fail_closed`. |
 | `sse_set_observability_headers` | No | `false` | When `true`, add `x-prisma-airs-sse-detected`, `-scan-mode: buffered`, `-provider`, and `-truncated` response headers. |
+| `set_observability_headers` | No | `false` | When `true`, emit `x-airs-*` response headers on **allow and block**, for **LLM and MCP** legs: `x-airs-verdict`, `x-airs-category`, `x-airs-scan-id`, `x-airs-session-id`, per-phase (`x-airs-request-ms` / `x-airs-response-ms`) + `x-airs-total-ms` AIRS latency, `x-airs-*-tokens` / `x-airs-model`, and the base64 full scan result (`x-airs-request-result` / `x-airs-response-result`). Lets a caller see the AIRS verdict/latency and correlate `scan_id` to SCM, and makes a gateway block non-opaque (which detection fired). |
 | `sse_truncation_fail_closed` | No | `true` | **Secure default.** When `true`, a reconstructed response exceeding `sse_max_scan_chars` cannot be fully scanned, so it is **blocked (403)** rather than returned. Set to `false` to opt into fail-open (scan only the first `sse_max_scan_chars` and return the full response anyway), accepting that content past the cap is returned unscanned. |
 
 ## Dynamic profile selection (claim-based)
@@ -91,10 +98,11 @@ closed to `fallback_profile_name`; with no `profile_claim` set, behavior is the
 legacy static `profile_name`. The resolved profile is logged (with `debug`) and
 stamped on the upstream request as `X-AIRS-Profile-Used`.
 
-Unit tests (pure resolver helpers, no Kong runtime needed):
+Unit tests (pure helpers, no Kong runtime needed):
 
 ```bash
-lua spec/profile_selection_spec.lua
+lua spec/profile_selection_spec.lua   # claim-based profile resolution
+lua spec/extract_prompt_spec.lua      # prompt extraction incl. multi-turn (latest user turn)
 ```
 
 ## Installation
@@ -312,7 +320,7 @@ MCP control messages and MCP response phase scans that find no body **fail open*
 - **Buffered SSE.** Streamed `text/event-stream` responses **are** scanned, but only after the full response is buffered and reconstructed — the client receives the completed response, **not token-by-token**. True per-frame streaming pass-through is not implemented. Requires an **HTTP/1.1 upstream and HTTP/1.1 `proxy_listen`** (Kong response buffering does not apply to HTTP/2 / gRPC upstreams, and AI-Gateway streaming is unsupported on HTTP/2). MCP `text/event-stream` handling is unchanged (the narrow `event: message\ndata: {...}` strip); buffered reconstruction applies to the LLM response path only.
 - Buffered SSE reconstruction is capped at `sse_max_scan_chars` (default 20000). By default (`sse_truncation_fail_closed=true`) a response exceeding the cap **cannot be fully scanned and is blocked (403)** — we do not return a response we could not scan in full. Operators who prefer availability can set `sse_truncation_fail_closed=false` to scan only the first `sse_max_scan_chars` and return the full (partly unscanned) response anyway. Over-limit always emits a `kong.log.warn` and, when `sse_set_observability_headers=true`, an `x-prisma-airs-sse-truncated: true` header.
 - **Provenance of the `20000` default.** It mirrors the conservative response / tool-output scan cap used by other Prisma AIRS reference integrations (e.g. the `codex-hooks`, `claude-code-hooks`, `Cline`, and `Windsurf` integration READMEs all cap scanned output at 20,000 chars). The `sse_max_scan_chars` and `scan_sse_responses` config **fields are specific to this Kong v2 plugin** — no other public AIRS integration exposes an SSE-specific scan-size knob (the Apigee Vertex SSE proxy uses a smaller per-event threshold for cumulative scanning, a different model). Adjust the cap to your AIRS profile's limits and latency budget.
-- LLM request prompt is read from `messages[].content` for the first `role=user` message: string content is scanned directly; array/table content uses the first item's `.text` when present, otherwise the table is JSON-serialized and scanned as-is. This covers OpenAI chat completions, common Anthropic Messages text blocks, and Bedrock Converse. OpenAI Responses is read from top-level `input` (string or array). Only a body with neither a usable `messages` user turn nor `input` falls through to "no prompt found".
+- LLM request prompt is read from `messages[].content` for the **latest** `role=user` message (multi-turn conversations resend the full history, so the newest turn is scanned): string content is scanned directly; array/table content uses the first item's `.text` when present, otherwise the table is JSON-serialized and scanned as-is. This covers OpenAI chat completions, common Anthropic Messages text blocks, and Bedrock Converse. OpenAI Responses is read from top-level `input` (string or array). Only a body with neither a usable `messages` user turn nor `input` falls through to "no prompt found".
 - MCP detection keys off JSON-RPC `method`/`jsonrpc` fields; non-JSON-RPC tool protocols are not recognized
 - Single plugin instance per route — if you need different profiles for LLM vs MCP traffic, split them across separate Kong services/routes
 

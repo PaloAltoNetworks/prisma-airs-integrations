@@ -7,7 +7,7 @@ local cjson = require("cjson")
 
 local SecurePrismaAIRSHandler = {
     PRIORITY = 1000,
-    VERSION = "0.2.2",
+    VERSION = "0.2.3",
 }
 
 local function log_error(reason, verdict)
@@ -552,6 +552,19 @@ local function build_prompt_payload(config, scan_type, request_body, response_bo
                     if #parts > 0 then content_object.response = table.concat(parts, "") end
                 end
             end
+            -- Capture token usage + model so observability headers survive a block
+            -- (the 403 body carries no usage). Gemini: usageMetadata + modelVersion;
+            -- OpenAI/Bedrock: usage + model.
+            local um = decoded_response.usageMetadata
+            if type(um) == "table" then
+                kong.ctx.shared.airs_usage = {
+                    prompt = um.promptTokenCount, completion = um.candidatesTokenCount, total = um.totalTokenCount }
+            elseif type(decoded_response.usage) == "table" then
+                local u = decoded_response.usage
+                kong.ctx.shared.airs_usage = {
+                    prompt = u.prompt_tokens, completion = u.completion_tokens, total = u.total_tokens }
+            end
+            kong.ctx.shared.airs_model = decoded_response.modelVersion or decoded_response.model
         end
     end
 
@@ -589,6 +602,7 @@ local function send_scan(config, payload)
     local httpc = http.new()
     httpc:set_timeout(config.timeout_ms or 5000)
 
+    local t_scan_start = ngx.now()
     local res, err = httpc:request_uri(config.api_endpoint, {
         method = "POST",
         body = request_payload_json,
@@ -602,6 +616,7 @@ local function send_scan(config, payload)
 
     if not res then
         pcall(function() httpc:set_keepalive() end)
+        kong.log.err("AIRS API call failed: " .. tostring(err))
         return "error", "API call failed: " .. tostring(err)
     end
 
@@ -633,7 +648,60 @@ local function send_scan(config, payload)
         return "error", "'action' field not found in API response."
     end
 
+    -- Record scan telemetry for observability headers (see response phase). Each call
+    -- (request scan, response scan) appends one entry; the response phase summarizes them.
+    pcall(function()
+        local scans = kong.ctx.shared.airs_scans or {}
+        scans[#scans + 1] = {
+            action = action,
+            category = res_body_json.category,
+            scan_id = res_body_json.scan_id,
+            session_id = res_body_json.session_id,
+            ms = math.floor((ngx.now() - t_scan_start) * 1000 + 0.5),
+            raw = res_body_str,  -- full AIRS scan result JSON (for the raw-result headers)
+        }
+        kong.ctx.shared.airs_scans = scans
+    end)
+
     return action, "Verdict received from security scan."
+end
+
+-- Kong-coupled: stamp AIRS observability headers from recorded scan telemetry.
+-- Opt-in via config.set_observability_headers. Safe to call in any phase where
+-- response headers can still be set (response phase, or before kong.response.exit).
+local function set_airs_observability_headers(config)
+    if not config.set_observability_headers then return end
+    local scans = kong.ctx.shared.airs_scans
+    if not scans or #scans == 0 then return end
+    local total_ms, verdict, category = 0, "allow", nil
+    for _, s in ipairs(scans) do
+        total_ms = total_ms + (s.ms or 0)
+        if s.action and s.action ~= "allow" then verdict = s.action end
+        if s.category and s.category ~= "benign" then category = s.category end
+    end
+    pcall(kong.response.set_header, "x-airs-verdict", verdict)
+    if category then pcall(kong.response.set_header, "x-airs-category", category) end
+    pcall(kong.response.set_header, "x-airs-total-ms", tostring(total_ms))
+    pcall(kong.response.set_header, "x-airs-scan-count", tostring(#scans))
+    if scans[1] then
+        pcall(kong.response.set_header, "x-airs-request-ms", tostring(scans[1].ms or 0))
+        if scans[1].scan_id then pcall(kong.response.set_header, "x-airs-scan-id", scans[1].scan_id) end
+        if scans[1].session_id then pcall(kong.response.set_header, "x-airs-session-id", scans[1].session_id) end
+        -- Full request-scan result JSON (base64) so the caller shows the same raw detail as the SDK.
+        if scans[1].raw then pcall(kong.response.set_header, "x-airs-request-result", ngx.encode_base64(scans[1].raw)) end
+    end
+    if scans[2] then
+        pcall(kong.response.set_header, "x-airs-response-ms", tostring(scans[2].ms or 0))
+        if scans[2].raw then pcall(kong.response.set_header, "x-airs-response-result", ngx.encode_base64(scans[2].raw)) end
+    end
+    -- Token usage + model captured from the scanned LLM response, so they survive a 403 block.
+    local usage = kong.ctx.shared.airs_usage
+    if type(usage) == "table" then
+        if usage.prompt ~= nil then pcall(kong.response.set_header, "x-airs-prompt-tokens", tostring(usage.prompt)) end
+        if usage.completion ~= nil then pcall(kong.response.set_header, "x-airs-completion-tokens", tostring(usage.completion)) end
+        if usage.total ~= nil then pcall(kong.response.set_header, "x-airs-total-tokens", tostring(usage.total)) end
+    end
+    if kong.ctx.shared.airs_model then pcall(kong.response.set_header, "x-airs-model", tostring(kong.ctx.shared.airs_model)) end
 end
 
 -- Pure: HTTP status a non-allow send_scan verdict maps to (nil if allowed).
@@ -649,11 +717,14 @@ end
 
 -- Kong-coupled: deny a request/response based on a non-allow verdict and halt.
 -- Detailed reason is logged server-side only; the client gets a generic body.
-local function deny(verdict, reason, block_message)
+local function deny(config, verdict, reason, block_message)
     log_error(reason, verdict)
     if verdict_status(verdict) == 503 then
         return kong.response.exit(503, { message = "Security scanning temporarily unavailable." })
     end
+    -- Stamp AIRS verdict/category headers on the 403 so the caller learns WHICH detection
+    -- fired (otherwise a gateway block is opaque). Opt-in via set_observability_headers.
+    set_airs_observability_headers(config)
     return kong.response.exit(403, { message = block_message })
 end
 
@@ -689,7 +760,7 @@ function SecurePrismaAIRSHandler:access(config)
         local verdict, reason = send_scan(config, payload)
 
         if verdict ~= "allow" then
-            return deny(verdict, reason, "MCP request blocked by security policy.")
+            return deny(config, verdict, reason, "MCP request blocked by security policy.")
         end
 
         log_debug(config, "MCP scan allowed for method: " .. mcp_method)
@@ -709,7 +780,7 @@ function SecurePrismaAIRSHandler:access(config)
     local verdict, reason = send_scan(config, payload)
 
     if verdict ~= "allow" then
-        return deny(verdict, reason, "Request blocked by security policy.")
+        return deny(config, verdict, reason, "Request blocked by security policy.")
     end
 
     log_debug(config, "Prompt scan allowed.")
@@ -762,10 +833,13 @@ function SecurePrismaAIRSHandler:response(config)
         local verdict, reason = send_scan(config, payload)
 
         if verdict ~= "allow" then
-            return deny(verdict, reason, "MCP response blocked by security policy.")
+            return deny(config, verdict, reason, "MCP response blocked by security policy.")
         end
 
         log_debug(config, "MCP response scan allowed.")
+        -- Allowed MCP path: stamp AIRS verdict/latency/scan-id headers too, so tool-call
+        -- legs are as observable as LLM legs (per-leg detail + SCM deep-links).
+        set_airs_observability_headers(config)
         return
     end
 
@@ -830,10 +904,12 @@ function SecurePrismaAIRSHandler:response(config)
     local verdict, reason = send_scan(config, payload)
 
     if verdict ~= "allow" then
-        return deny(verdict, reason, "Response blocked by security policy.")
+        return deny(config, verdict, reason, "Response blocked by security policy.")
     end
 
     log_debug(config, "Response scan allowed.")
+    -- Allowed path: stamp AIRS latency/verdict headers on the proxied response.
+    set_airs_observability_headers(config)
 end
 
 -- Pure helpers exposed for the unit test harness (no Kong/ngx dependency).
