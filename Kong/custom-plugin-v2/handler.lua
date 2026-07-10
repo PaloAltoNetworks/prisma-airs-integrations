@@ -354,23 +354,31 @@ local function extract_prompt(request_body)
     if not request_body then return nil end
 
     if type(request_body.messages) == "table" then
+        -- Scan the LATEST user turn, not the first. In a multi-turn conversation the
+        -- client sends the full history; prior turns were already scanned, so returning
+        -- on the first user message would re-scan turn 1 forever and never inspect the
+        -- new prompt. Capture the last user message and scan that.
+        local last_user_content
         for _, message in ipairs(request_body.messages) do
             if message.role == "user" then
-                local content = message.content
-                if type(content) == "table" then
-                    -- Bedrock Converse format: content is an array of objects like [{"text":"Hello"}]
-                    if content[1] and content[1].text then
-                        return content[1].text
-                    end
-                    -- Fallback: try to serialize the table
-                    local ok, serialized = pcall(cjson.encode, content)
-                    if ok then
-                        return serialized
-                    end
-                    return nil
-                elseif type(content) == "string" then
-                    return content
+                last_user_content = message.content
+            end
+        end
+        if last_user_content ~= nil then
+            local content = last_user_content
+            if type(content) == "table" then
+                -- Bedrock Converse format: content is an array of objects like [{"text":"Hello"}]
+                if content[1] and content[1].text then
+                    return content[1].text
                 end
+                -- Fallback: try to serialize the table
+                local ok, serialized = pcall(cjson.encode, content)
+                if ok then
+                    return serialized
+                end
+                return nil
+            elseif type(content) == "string" then
+                return content
             end
         end
     end
