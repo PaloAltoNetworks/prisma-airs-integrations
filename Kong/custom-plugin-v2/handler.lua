@@ -539,6 +539,18 @@ local function build_prompt_payload(config, scan_type, request_body, response_bo
                 elseif type(resp_content) == "string" then
                     content_object.response = resp_content
                 end
+                -- Gemini / Vertex native format: candidates[].content.parts[].text
+                -- (this plugin runs before ai-proxy normalizes, so LLM responses arrive
+                -- in the upstream provider's raw shape).
+            elseif decoded_response.candidates and decoded_response.candidates[1] then
+                local cand = decoded_response.candidates[1]
+                if cand.content and type(cand.content.parts) == "table" then
+                    local parts = {}
+                    for _, prt in ipairs(cand.content.parts) do
+                        if type(prt.text) == "string" then parts[#parts + 1] = prt.text end
+                    end
+                    if #parts > 0 then content_object.response = table.concat(parts, "") end
+                end
             end
         end
     end
