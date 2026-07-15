@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
-  Calls the AIRS sync scan API.
-  Uses the request message built by AM-BuildAIRSRequest-Input or -Output.
-  AIRS authenticates via the x-pan-token header (not GoogleAccessToken).
+  Calls the AIRS sync scan API. The host is templated from airs.cfg.endpoint so
+  a proxy can select a regional tenant (US default; EU/IN/SG/JP/AU) via the
+  prismaAirsEndpoint variable.
+
+  continueOnError="true": a scanner failure must NOT hard-fault the proxy — it is
+  routed by JS-ProcessVerdict to the configured fail-open / fail-closed posture.
 -->
-<ServiceCallout continueOnError="false" enabled="true" name="SC-AIRSScan">
+<ServiceCallout continueOnError="true" enabled="true" name="SC-AIRSScan">
   <DisplayName>SC-AIRSScan</DisplayName>
   <Request variable="airsScanRequest">
     <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
@@ -12,7 +15,7 @@
   <Response>airsScanResponse</Response>
   <Timeout>5000</Timeout>
   <HTTPTargetConnection>
-    <URL>https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request</URL>
+    <URL>https://{airs.cfg.endpoint}/v1/scan/sync/request</URL>
     <Properties/>
   </HTTPTargetConnection>
 </ServiceCallout>

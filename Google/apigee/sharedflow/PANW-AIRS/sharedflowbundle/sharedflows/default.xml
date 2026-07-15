@@ -1,59 +1,64 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  PANW-AIRS — unified AIRS scan flow.
+
+  Called from a proxy's request flow (type=user-prompt) and/or response flow
+  (type=response-prompt | both). The same steps run in either leg; the phase and
+  the parsed message decide what is scanned. Steps after detection are gated so
+  the flow is a clean no-op when there is nothing to scan.
+-->
 <SharedFlow name="default">
-  <!-- 1. Pull AIRS token + profile from env-scoped KVM (airs-config) -->
+
+  <!-- 1. Config: token + profile from KVM, then normalise all knobs. -->
+  <Step><Name>KVM-GetAIRSConfig</Name></Step>
+  <Step><Name>JS-InitConfig</Name></Step>
+
+  <!-- 2. Fail-closed guard: no token configured. -->
   <Step>
-    <Name>KVM-GetAIRSConfig</Name>
+    <Name>RF-ConfigError</Name>
+    <Condition>airs.cfg.keyMissing = "true" and airs.cfg.failOpen = "false"</Condition>
   </Step>
 
-  <!-- 2. Build the AIRS scan body in JS using JSON.stringify (safe for quotes, newlines, etc.) -->
+  <!-- 3. Detect API type / Claude Code / shouldScan / identifiers. -->
+  <Step><Name>JS-DetectContext</Name></Step>
+
+  <!-- 4. Extract content (multi-format + inline tool calls). -->
+  <Step>
+    <Name>JS-ExtractContent</Name>
+    <Condition>airs.shouldScan = "true"</Condition>
+  </Step>
+
+  <!-- 5. Build body → call AIRS → parse verdict → decide outcome.
+       Gated on hasContent so text-less turns never send an empty scan. -->
   <Step>
     <Name>JS-BuildAIRSScanBody</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
   </Step>
-
-  <!-- 3. Set the outbound HTTP request (verb, headers, payload from variable) -->
   <Step>
     <Name>AM-SetAIRSScanRequest</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
   </Step>
-
-  <!-- 4. POST to AIRS sync/request endpoint -->
   <Step>
     <Name>SC-AIRSScan</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
   </Step>
-
-  <!-- 5. Parse verdict: action, category, scan_id + per-detector booleans -->
   <Step>
     <Name>EV-ParseAIRSVerdict</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-ProcessVerdict</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
   </Step>
 
-  <!-- 6. Category-specific blocks (Vertex-shaped 200 OK responses so calling apps
-       need no special handling). Conditions inspect the per-detector booleans
-       which AIRS returns under prompt_detected / response_detected — these are
-       the granular signals; airs.category is just the umbrella malicious/benign. -->
+  <!-- 6. Act on the verdict: mask in place, or block with a native-shape response. -->
   <Step>
-    <Name>RF-PromptInjection-Detected</Name>
-    <Condition>airs.action = "block" and airs.prompt.injection = "true"</Condition>
+    <Name>JS-ApplyMasking</Name>
+    <Condition>airs.outcome = "mask"</Condition>
   </Step>
   <Step>
-    <Name>RF-DLP-Detected</Name>
-    <Condition>airs.action = "block" and (airs.prompt.dlp = "true" or airs.response.dlp = "true")</Condition>
-  </Step>
-  <Step>
-    <Name>RF-MaliciousCode-Detected</Name>
-    <Condition>airs.action = "block" and airs.response.malicious_code = "true"</Condition>
-  </Step>
-  <Step>
-    <Name>RF-MaliciousURL-Detected</Name>
-    <Condition>airs.action = "block" and (airs.prompt.url_cats = "true" or airs.response.url_cats = "true")</Condition>
-  </Step>
-  <Step>
-    <Name>RF-Toxic-Detected</Name>
-    <Condition>airs.action = "block" and (airs.prompt.toxic_content = "true" or airs.response.toxic_content = "true")</Condition>
+    <Name>RF-Block</Name>
+    <Condition>airs.outcome = "block"</Condition>
   </Step>
 
-  <!-- 7. Catch-all: AIRS blocked but no specific RF matched (e.g. db_security,
-       ungrounded, or any future detector we haven't wired a tailored response for). -->
-  <Step>
-    <Name>RF-Generic-Block</Name>
-    <Condition>airs.action = "block"</Condition>
-  </Step>
 </SharedFlow>

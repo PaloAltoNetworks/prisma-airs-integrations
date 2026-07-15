@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Returns the block (or fail-closed) response built by JS-ProcessVerdict in the
+  caller's native dialect. Status, Content-Type, reason and body are all set from
+  variables, so one policy serves Vertex, OpenAI (chat + Responses), Anthropic,
+  MCP JSON-RPC, and the Claude Code graceful-SSE refusal.
+
+  x-airs-blocked / x-airs-category headers make the block detectable even when
+  the body is a native 200-shaped envelope.
+-->
+<RaiseFault continueOnError="false" enabled="true" name="RF-Block">
+  <DisplayName>RF-Block</DisplayName>
+  <Properties/>
+  <FaultResponse>
+    <Set>
+      <Headers>
+        <Header name="Content-Type">{airs.block.ctype}</Header>
+        <Header name="x-airs-blocked">true</Header>
+        <Header name="x-airs-category">{airs.block.category}</Header>
+        <Header name="x-airs-scan-id">{airs.scan_id}</Header>
+      </Headers>
+      <Payload>{airs.block.body}</Payload>
+      <StatusCode>{airs.block.status}</StatusCode>
+      <ReasonPhrase>{airs.block.reason}</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>
