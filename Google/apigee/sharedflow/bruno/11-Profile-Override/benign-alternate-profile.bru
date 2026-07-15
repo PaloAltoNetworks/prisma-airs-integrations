@@ -1,0 +1,43 @@
+meta {
+  name: Profile Override — benign with alternate profile
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}{{basePath}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  X-Session-ID: {{sessionId}}
+  X-Pan-Profile: {{airsProfile}}
+}
+
+body:json {
+  {
+    "contents": [
+      {
+        "role": "user",
+        "parts": [{"text": "What are the top 5 benefits of zero-trust network architecture?"}]
+      }
+    ]
+  }
+}
+
+docs {
+  Tests the X-Pan-Profile header override capability.
+  The shared flow reads X-Pan-Profile and uses it instead of the KVM default profile.
+  Change {{airsProfile}} in the dev environment to test with a different profile.
+}
+
+tests {
+  test("HTTP 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("Has response", function() {
+    expect(res.body.candidates || res.body.error).to.exist;
+  });
+}
