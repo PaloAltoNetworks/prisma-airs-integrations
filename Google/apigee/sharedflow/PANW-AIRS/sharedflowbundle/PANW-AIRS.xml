@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <SharedFlowBundle revision="1" name="PANW-AIRS">
     <DisplayName>PANW-AIRS</DisplayName>
-    <Description>PANW AIRS sync scan SharedFlow. JSON.stringify-based body builder safely handles quotes/newlines in prompts and model responses.</Description>
+    <Description>Prisma AIRS unified security-scanning SharedFlow for Apigee X. Multi-format (OpenAI chat + Responses, Anthropic, Gemini/Vertex, MCP), prompt/response/both, streaming, DLP masking, inline tool-call scanning, and Claude Code aware. Included from any proxy's request and response flows.</Description>
     <SharedFlows>
         <SharedFlow>default</SharedFlow>
     </SharedFlows>

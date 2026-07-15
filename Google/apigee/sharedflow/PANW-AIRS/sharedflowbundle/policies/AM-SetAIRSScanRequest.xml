@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
-  Materialises a fresh outbound HTTP request message (airsScanRequest)
-  for the ServiceCallout. The payload is interpolated at the message body
-  level from the pre-built JSON string in airsScanRequestBody — so the JSON
-  is constructed once by JSON.stringify and never re-escaped.
+  Materialises the outbound HTTP request (airsScanRequest) for SC-AIRSScan.
+  The body is the pre-built JSON string airsScanRequestBody, interpolated at the
+  message-body level so JSON.stringify's escaping is preserved (never re-escaped).
+  AIRS authenticates via x-pan-token.
 -->
 <AssignMessage continueOnError="false" enabled="true" name="AM-SetAIRSScanRequest">
   <DisplayName>AM-SetAIRSScanRequest</DisplayName>

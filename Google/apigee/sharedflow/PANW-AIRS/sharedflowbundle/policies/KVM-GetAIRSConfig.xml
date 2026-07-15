@@ -1,17 +1,19 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Reads the AIRS token + default profile from the env-scoped encrypted KVM
+  `airs-config`. Same map as the V1 bundle, so a single KVM serves both.
+  Cached 300s. The profile here is the fallback; a proxy may override per
+  request via the currentProfile / toolProfile flow variables.
+-->
 <KeyValueMapOperations continueOnError="false" enabled="true" name="KVM-GetAIRSConfig" mapIdentifier="airs-config">
   <DisplayName>KVM-GetAIRSConfig</DisplayName>
   <Properties/>
   <ExpiryTimeInSecs>300</ExpiryTimeInSecs>
   <Get assignTo="airs.token">
-    <Key>
-      <Parameter>airs_token</Parameter>
-    </Key>
+    <Key><Parameter>airs_token</Parameter></Key>
   </Get>
   <Get assignTo="airs.profile">
-    <Key>
-      <Parameter>airs_profile</Parameter>
-    </Key>
+    <Key><Parameter>airs_profile</Parameter></Key>
   </Get>
   <Scope>environment</Scope>
 </KeyValueMapOperations>
