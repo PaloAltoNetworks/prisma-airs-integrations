@@ -6,23 +6,26 @@ A policy fragment that can be integrated into an Azure AI Gateway (part of APIM)
 
 This integration provides the following versions of the policy fragment. Choose the one that fits your environment:
 
-| Feature | v1 | v2 | v2.1 |
-|---------|:--:|:--:|:--:|
-| OpenAI chat/completions | ✅ | ✅ | ✅ |
-| OpenAI Responses API | ✅ | ✅ | ✅ |
-| Anthropic /v1/messages | ❌ | ✅ | ✅ |
-| Azure AI Foundry Claude | ❌ | ✅ | ✅ |
-| Streaming/SSE response scanning | ❌ | ✅ | ✅ |
-| Anthropic tool_result scanning | ❌ | ✅ | ✅ |
-| Prompt & response masking | ✅ | ✅ | ✅ |
-| Tool event scanning | ✅ | ✅ | ✅ |
-| Claude Code session grouping | ❌ | ❌ | ✅ |
-| Claude Code graceful blocking (200 streaming) | ❌ | ❌ | ✅ |
-| Claude Code user/agent attribution | ❌ | ❌ | ✅ |
+| Feature | v1 | v2 | v2.1 | v2.1.1 |
+|---------|:--:|:--:|:--:|:--:|
+| OpenAI chat/completions | ✅ | ✅ | ✅ | ✅ |
+| OpenAI Responses API | ✅ | ✅ | ✅ | ✅ |
+| Anthropic /v1/messages | ❌ | ✅ | ✅ | ✅ |
+| Azure AI Foundry Claude | ❌ | ✅ | ✅ | ✅ |
+| Streaming/SSE response scanning | ❌ | ✅ | ✅ | ✅ |
+| Anthropic tool_result scanning | ❌ | ✅ | ✅ | ✅ |
+| Prompt & response masking | ✅ | ✅ | ✅ | ✅ |
+| Tool event scanning | ✅ | ✅ | ✅ | ✅ |
+| Claude Code session grouping | ❌ | ❌ | ✅ | ✅ |
+| Claude Code graceful blocking (200 streaming) | ❌ | ❌ | ✅ | ✅ |
+| Claude Code user/agent attribution | ❌ | ❌ | ✅ | ✅ |
+| Standards-based `failOpen` variable | ❌ | ❌ | ❌ | ✅ |
+| Profile UUID support (preferred over name) | ❌ | ❌ | ❌ | ✅ |
 
 - **v1** — OpenAI-only. Simpler fragment for environments that only use OpenAI-compatible endpoints.
 - **v2** — Multi-model. Adds Anthropic and Azure AI Foundry Claude support, plus streaming/SSE response scanning.
 - **v2.1** — Claude Code. Builds on v2 with Claude Code session grouping, graceful (non-erroring) blocking, and automatic user/agent attribution. Backward-compatible with existing v2 policies — drop-in, no policy changes required. Ships as the current `panw-airs-scan-v2` fragment.
+- **v2.1.1** — Standards and UUID. Adds standards-based `failOpen` variable (lowercase) with backward compatibility for `FailOpen`, plus AIRS profile UUID support (`currentProfileUUID`, `toolProfileUUID`) which takes priority over profile names when defined.
 
 ## Coverage
 
@@ -78,6 +81,7 @@ It will return bespoke responses dependent on the category detected.
 * Define a different security profile for each scan (prompts, responses, and tool events)
 * Configure tool scanning behavior with `scanTools` variable (enable/disable)
 * Use dedicated security profiles for tool events via `toolProfile` variable
+* **v2.1.1+**: UUID-based profile selection (preferred over names for immutability)
 * Group multi-turn communication through a defined header in the request
 * Add agent attribution to AIRS metadata via the optional `agent` variable
 * Return masked PII responses if the action is Allow and Masking is enabled
@@ -132,7 +136,7 @@ The policy fragment automatically tracks multi-turn conversations (including too
 
 3. **Configure the AI Gateway inbound policy** to call the fragment
 ```xml
-        <set-variable name="ScanType" value="prompt" />
+        <set-variable name="scanType" value="prompt" />
         <!-- Optional: Configure tool scanning -->
         <set-variable name="toolProfile" value="tool-security-profile" />
         <set-variable name="scanTools" value="true" />
@@ -145,7 +149,7 @@ The policy fragment automatically tracks multi-turn conversations (including too
 ```
 4. **Configure the AI Gateway outbound policy** to call the fragment
 ```xml
-        <set-variable name="ScanType" value="response" />
+        <set-variable name="scanType" value="response" />
         <include-fragment fragment-id="panw-airs-scan" />
 ```
 5. **Test it:**
@@ -167,14 +171,28 @@ curl -X POST "https://<YOUR-HOSTNAME>/<YOUR API>/chat/completions" \
 
 ## 🔧 Configuration
 Policy fragment is configured in the policy using the following variables:
-- `ScanType`: (string) "prompt" or "response". Defaults to "prompt".
-- `currentProfile`: (string) The name of the AIRS profile to use for scanning. Defaults to "example-profile".
-- `toolProfile`: (string) The name of the AIRS profile to use when scanning tool events. Defaults to `currentProfile` if not set.
-- `scanTools`: (boolean) `true` to scan tool result submissions, `false` to pass them through. Defaults to `true`.
+
+### Core Configuration
+- `scanType` / `ScanType`: (string) "prompt" or "response". Defaults to "prompt". 
+  - v2.1.1: Both `scanType` (lowercase) and `ScanType` (uppercase) are supported for backward compatibility. `scanType` takes priority if both are set.
 - `appName`: (string) The name of the application. Defaults to "APIM-Gateway".
+- `scanTools`: (boolean) `true` to scan tool result submissions, `false` to pass them through. Defaults to `true`.
+
+### Profile Configuration
+- `currentProfile`: (string) The name of the AIRS profile to use for scanning. Defaults to "example-profile".
+- `currentProfileUUID`: (string, optional) **v2.1.1+** The UUID of the AIRS profile. **Takes priority over `currentProfile` when defined.** Recommended for production as UUIDs are immutable even if profile names change.
+- `toolProfile`: (string) The name of the AIRS profile to use when scanning tool events. Defaults to `currentProfile` if not set.
+- `toolProfileUUID`: (string, optional) **v2.1.1+** The UUID of the AIRS profile for tool events. **Takes priority over `toolProfile` when defined.**
+
+### User & Agent Attribution
 - `user`: (string, optional) Authenticated user identifier included in AIRS as `metadata.app_user`. If not set, the fragment falls back to the `x-user-id` request header, then to Claude Code's body `metadata.user_id` (`account_uuid`/`device_id`), then `"anonymous"`.
 - `agent`: (string, optional) Agent or workflow identifier included in AIRS as `metadata.agent_meta.agent_id`. Prefer setting this from trusted APIM policy or backend routing context. If unset, the fragment falls back to Claude Code's `x-claude-code-agent-id` header (subagent attribution only — treat as untrusted client-supplied metadata, not a security boundary).
-- `FailOpen`: (boolean) `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.
+
+### Error Handling
+- `failOpen`: (boolean) **v2.1.1+** Standards-based variable (lowercase). `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.
+- `FailOpen`: (boolean) Backward compatibility for v2.1 and earlier. **v2.1.1+** `failOpen` (lowercase) takes priority if both are set.
+
+### Customization
 - `airsDescriptions`: (JObject) A JObject containing custom error messages for detected threats. If not provided, the default messages in `scanDescriptions` will be used.
 
 ## 🔒 Security Features
