@@ -16,6 +16,12 @@ PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-YOUR_GCP_PROJECT_ID}"
 # Prisma AIRS configuration
 PRISMA_AIRS_API_KEY="${PRISMA_AIRS_API_KEY}"
 PRISMA_AIRS_PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME}"
+PRISMA_AIRS_HOST="${PRISMA_AIRS_HOST:-service.api.aisecurity.paloaltonetworks.com}"
+
+# Deployment service account (email only — no key file). Apigee mgmt API
+# deploys "as" this SA via the deployments endpoint's serviceAccount= param;
+# your own gcloud identity just needs iam.serviceAccounts.actAs on it.
+DEPLOY_SA="${DEPLOY_SA}"
 
 # Validate required secrets/credentials
 if [[ -z "$PRISMA_AIRS_API_KEY" ]]; then
@@ -28,8 +34,8 @@ if [[ -z "$PRISMA_AIRS_PROFILE_NAME" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
-  echo "ERROR: GOOGLE_APPLICATION_CREDENTIALS not found: $GOOGLE_APPLICATION_CREDENTIALS"
+if [[ -z "$DEPLOY_SA" ]]; then
+  echo "ERROR: DEPLOY_SA is not set (deployment service account email, e.g. sa-apigee-dev@$PROJECT_ID.iam.gserviceaccount.com)"
   exit 1
 fi
 
@@ -47,25 +53,51 @@ echo "Vertex Model: $VERTEX_MODEL"
 echo "AIRS Profile: $PRISMA_AIRS_PROFILE_NAME"
 echo ""
 
-# Step 1: Create or update KVM
+# Step 1: Create or update KVM (pure REST — no apigeecli dependency)
 echo "== Setting up KVM =="
-apigeecli kvms create -o "$ORG" -e "$ENV" --name private 2>/dev/null || echo "OK: KVM 'private' already exists"
+AUTH_TOKEN=$(gcloud auth print-access-token)
+KVM_PATH="/organizations/$ORG/environments/$ENV/keyvaluemaps"
 
-# Helper function to update KVM entry
+KVM_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $AUTH_TOKEN" \
+  "https://apigee.googleapis.com/v1${KVM_PATH}/private")
+if [[ "$KVM_STATUS" == "200" ]]; then
+  echo "OK: KVM 'private' already exists"
+else
+  CREATE_RESP=$(curl -sS -X POST -H "Authorization: Bearer $AUTH_TOKEN" -H "Content-Type: application/json" \
+    -d '{"name":"private","encrypted":true}' \
+    -w "\n%{http_code}" \
+    "https://apigee.googleapis.com/v1${KVM_PATH}")
+  CREATE_CODE="${CREATE_RESP##*$'\n'}"
+  [[ "$CREATE_CODE" =~ ^(200|201)$ ]] || { echo "ERROR: KVM create failed (HTTP $CREATE_CODE): ${CREATE_RESP%$'\n'*}"; exit 1; }
+  echo "OK: KVM 'private' created (encrypted)"
+fi
+
+# Helper function to upsert a KVM entry via the Management API directly.
 update_kvm_entry() {
-  local key=$1
-  local value=$2
-  
-  # Delete if exists
-  apigeecli kvms entries delete -o "$ORG" -e "$ENV" --map private --key "$key" &>/dev/null || true
-  
-  # Create new entry
-  apigeecli kvms entries create -o "$ORG" -e "$ENV" --map private --key "$key" --value "$value"
+  local key=$1 value=$2
+  local entry_path="https://apigee.googleapis.com/v1${KVM_PATH}/private/entries/$key"
+  local payload
+  payload=$(jq -n --arg n "$key" --arg v "$value" '{name:$n, value:$v}')
+
+  local entry_status
+  entry_status=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $AUTH_TOKEN" "$entry_path")
+
+  local resp code
+  if [[ "$entry_status" == "200" ]]; then
+    resp=$(curl -sS -X PUT -H "Authorization: Bearer $AUTH_TOKEN" -H "Content-Type: application/json" \
+      -d "$payload" -w "\n%{http_code}" "$entry_path")
+  else
+    resp=$(curl -sS -X POST -H "Authorization: Bearer $AUTH_TOKEN" -H "Content-Type: application/json" \
+      -d "$payload" -w "\n%{http_code}" "https://apigee.googleapis.com/v1${KVM_PATH}/private/entries")
+  fi
+  code="${resp##*$'\n'}"
+  [[ "$code" =~ ^(200|201)$ ]] || { echo "ERROR: KVM entry $key upsert failed (HTTP $code): ${resp%$'\n'*}"; exit 1; }
 }
 
 echo "Setting KVM entries..."
-update_kvm_entry "airs.token" "$PRISMA_AIRS_API_KEY"
-update_kvm_entry "airs.profile" "$PRISMA_AIRS_PROFILE_NAME"
+update_kvm_entry "prisma.airs.token" "$PRISMA_AIRS_API_KEY"
+update_kvm_entry "prisma.airs.profile" "$PRISMA_AIRS_PROFILE_NAME"
+update_kvm_entry "prisma.airs.host" "$PRISMA_AIRS_HOST"
 update_kvm_entry "vertex.project" "$VERTEX_PROJECT"
 update_kvm_entry "vertex.model" "$VERTEX_MODEL"
 
@@ -142,11 +174,15 @@ REVISION=$(echo "$IMPORT_RESPONSE" | jq -r '.revision')
 
 echo "OK: Imported as revision $REVISION"
 
-# Deploy the proxy with service account
-# Use the deployment SA (from GOOGLE_APPLICATION_CREDENTIALS)
-DEPLOY_SA=$(jq -r '.client_email' "$GOOGLE_APPLICATION_CREDENTIALS")
+# Deploy the proxy with service account (email only — see DEPLOY_SA above).
+# override=true auto-undeploys any older revision of this proxy in the env.
 echo "Deploying revision $REVISION with SA: $DEPLOY_SA..."
-apigeecli apis deploy -o "$ORG" -e "$ENV" -n vertex-simple --rev "$REVISION" --sa "$DEPLOY_SA" --ovr --wait 2>&1 | tail -2
+DEPLOY_RESP=$(curl -sS -X POST -H "Authorization: Bearer $AUTH_TOKEN" \
+  -w "\n%{http_code}" \
+  "https://apigee.googleapis.com/v1/organizations/$ORG/environments/$ENV/apis/vertex-simple/revisions/$REVISION/deployments?override=true&serviceAccount=$DEPLOY_SA")
+DEPLOY_CODE="${DEPLOY_RESP##*$'\n'}"
+[[ "$DEPLOY_CODE" =~ ^(200|201)$ ]] || { echo "ERROR: Deploy failed (HTTP $DEPLOY_CODE): ${DEPLOY_RESP%$'\n'*}"; exit 1; }
+echo "OK: Deploy request accepted (may take a few seconds to become ACTIVE)"
 
 echo ""
 echo "=========================================="
@@ -155,11 +191,21 @@ echo "=========================================="
 echo ""
 echo "Test with:"
 echo ""
-echo "curl -i -k \\"
-echo "  -H \"Host: api.$ORG.internal\" \\"
-echo "  -H \"Content-Type: application/json\" \\"
-echo "  -X POST \\"
-echo "  https://YOUR_PSC_IP/vertex \\"
-echo "  -d '{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"Write a haiku\"}]}]}'"
+if [[ -n "${HOSTNAME:-}" ]]; then
+  echo "curl -i \\"
+  echo "  -H \"Content-Type: application/json\" \\"
+  echo "  -X POST \\"
+  echo "  https://${HOSTNAME}/vertex \\"
+  echo "  -d '{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"Write a haiku\"}]}]}'"
+else
+  echo "curl -i -k \\"
+  echo "  -H \"Host: api.$ORG.internal\" \\"
+  echo "  -H \"Content-Type: application/json\" \\"
+  echo "  -X POST \\"
+  echo "  https://YOUR_PSC_IP/vertex \\"
+  echo "  -d '{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"Write a haiku\"}]}]}'"
+  echo ""
+  echo "(Set HOSTNAME in .env to print a ready-to-use curl next time.)"
+fi
 echo ""
 
