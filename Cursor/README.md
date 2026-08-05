@@ -163,13 +163,17 @@ The bash hooks depend on `bash`, `jq`, and `curl`, which aren't reliably present
 Get-Content .cursor\hooks\prisma-airs.log -Wait
 ```
 
-For an automated contract check of all four hooks (no API key or network needed), run `test-hooks.ps1` from the `Cursor/` directory. It pipes sample JSON into each hook and asserts the stdout and exit codes, and skips the fail-closed cases automatically when credentials are configured:
+For an automated check of all four hooks, run `test-hooks.ps1` from the `Cursor/` directory. With no credentials it runs offline contract tests only (allow/skip and fail-closed paths, no network). When `PRISMA_AIRS_API_KEY` and a profile are configured, it also runs live detection tests: a benign prompt that should pass, plus prompt-injection and EICAR payloads that should block. Pass `-NoLive` to force offline-only.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File test-hooks.ps1
-# or, with PowerShell 7:
+# PowerShell 7:
 pwsh -NoProfile -File test-hooks.ps1
+# offline only, even with credentials set:
+pwsh -NoProfile -File test-hooks.ps1 -NoLive
 ```
+
+Live detection depends on your AIRS profile: a malicious payload that returns "allow" usually means the profile does not block that category, not a hook bug. The verdict is printed for each live case.
 
 **Windows notes**
 
