@@ -1,0 +1,71 @@
+{
+  "//": "Codex CLI. Copy .codex/ into your project (or ~/). Requires codex_hooks=true in ~/.codex/config.toml.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .codex/hooks/airs-hooks.sh --vendor codex --event UserPromptSubmit",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .codex/hooks/airs-hooks.sh --vendor codex --event PreToolUse",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .codex/hooks/airs-hooks.sh --vendor codex --event PreToolUse",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .codex/hooks/airs-hooks.sh --vendor codex --event PostToolUse",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .codex/hooks/airs-hooks.sh --vendor codex --event PostToolUse",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .codex/hooks/airs-hooks.sh --vendor codex --event Stop",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

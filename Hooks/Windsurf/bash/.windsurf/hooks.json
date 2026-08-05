@@ -1,0 +1,32 @@
+{
+  "//": "Windsurf Cascade. Copy .windsurf/ into your project root. Post-hooks alert only.",
+  "hooks": {
+    "pre_user_prompt": [
+      {
+        "command": "bash .windsurf/hooks/airs-hooks.sh --vendor windsurf --event pre_user_prompt"
+      }
+    ],
+    "pre_run_command": [
+      {
+        "command": "bash .windsurf/hooks/airs-hooks.sh --vendor windsurf --event pre_run_command"
+      }
+    ],
+    "pre_mcp_tool_use": [
+      {
+        "command": "bash .windsurf/hooks/airs-hooks.sh --vendor windsurf --event pre_mcp_tool_use",
+        "show_output": true
+      }
+    ],
+    "post_mcp_tool_use": [
+      {
+        "command": "bash .windsurf/hooks/airs-hooks.sh --vendor windsurf --event post_mcp_tool_use",
+        "show_output": true
+      }
+    ],
+    "post_cascade_response": [
+      {
+        "command": "bash .windsurf/hooks/airs-hooks.sh --vendor windsurf --event post_cascade_response"
+      }
+    ]
+  }
+}

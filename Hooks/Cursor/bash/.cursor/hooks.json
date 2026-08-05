@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "//": "Cursor. Copy .cursor/ into your project root. Cursor reads decisions on fd 3 (handled by the engine).",
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "bash .cursor/hooks/airs-hooks.sh --vendor cursor --event beforeSubmitPrompt",
+        "timeout": 5000
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "bash .cursor/hooks/airs-hooks.sh --vendor cursor --event beforeMCPExecution",
+        "timeout": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash .cursor/hooks/airs-hooks.sh --vendor cursor --event postToolUse",
+        "timeout": 5000
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": "bash .cursor/hooks/airs-hooks.sh --vendor cursor --event afterAgentResponse",
+        "timeout": 5000
+      }
+    ]
+  }
+}

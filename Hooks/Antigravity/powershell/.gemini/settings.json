@@ -1,0 +1,55 @@
+{
+  "_comment": "Google Antigravity / Gemini CLI contract. Merge this 'hooks' block into .gemini/settings.json.",
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor antigravity -EventName BeforeAgent",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor antigravity -EventName BeforeTool",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor antigravity -EventName AfterTool",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor antigravity -EventName AfterAgent",
+            "timeout": 15000
+          }
+        ]
+      }
+    ]
+  }
+}

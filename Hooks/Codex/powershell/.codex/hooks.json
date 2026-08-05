@@ -1,0 +1,71 @@
+{
+  "//": "Codex CLI. Copy .codex/ into your project (or ~/). Requires codex_hooks=true in ~/.codex/config.toml.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/airs-hooks.ps1 -Vendor codex -EventName UserPromptSubmit",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/airs-hooks.ps1 -Vendor codex -EventName PreToolUse",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/airs-hooks.ps1 -Vendor codex -EventName PreToolUse",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/airs-hooks.ps1 -Vendor codex -EventName PostToolUse",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/airs-hooks.ps1 -Vendor codex -EventName PostToolUse",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/airs-hooks.ps1 -Vendor codex -EventName Stop",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
