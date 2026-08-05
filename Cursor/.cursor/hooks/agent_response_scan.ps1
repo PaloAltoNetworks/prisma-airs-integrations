@@ -4,7 +4,7 @@
 #
 # Output contract: exit 0 = allow (no JSON), exit 2 = block
 
-. "$PSScriptRoot\prisma-airs.ps1"
+. (Join-Path $PSScriptRoot 'prisma-airs.ps1')
 
 $InputJson = [Console]::In.ReadToEnd()
 try { $data = $InputJson | ConvertFrom-Json } catch { $data = $null }

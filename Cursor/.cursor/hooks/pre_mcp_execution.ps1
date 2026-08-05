@@ -6,7 +6,7 @@
 #   stdout -> {"permission":"allow"}  or  {"permission":"deny","user_message":...,"agent_message":...}
 #   exit 0 = allow, exit 2 = deny
 
-. "$PSScriptRoot\prisma-airs.ps1"
+. (Join-Path $PSScriptRoot 'prisma-airs.ps1')
 
 function Send-Allow { Write-HookJson '{"permission":"allow"}' }
 function Send-Deny([string]$UserMsg, [string]$AgentMsg) {

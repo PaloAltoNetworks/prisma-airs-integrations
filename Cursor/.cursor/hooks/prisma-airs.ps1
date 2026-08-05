@@ -1,7 +1,7 @@
 # Shared Prisma AIRS configuration for Cursor IDE hooks (Windows / PowerShell)
 #
 # Dot-source this from each hook script:
-#     . "$PSScriptRoot\prisma-airs.ps1"
+#     . (Join-Path $PSScriptRoot 'prisma-airs.ps1')
 #
 # PowerShell port of prisma-airs.sh. Requires Windows PowerShell 5.1+ (ships with
 # Windows 10/11) or PowerShell 7+ (pwsh). No external tools (no bash/jq/curl).
@@ -13,7 +13,7 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 # --- Resolve paths relative to this script (equivalent of BASH_SOURCE/dirname) ---
 $Script:HooksDir   = $PSScriptRoot
-$Script:ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$Script:ProjectDir = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
 
 # --- Load .env from project root if present (KEY=VALUE -> process env) ---
 $envFile = Join-Path $Script:ProjectDir '.env'

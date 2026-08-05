@@ -12,7 +12,7 @@
 #   stdout -> {} (allow)  or  {"updated_mcp_tool_output":"..."} (block)
 #   NEVER emit: permission, additional_context.  NEVER exit 2.
 
-. "$PSScriptRoot\prisma-airs.ps1"
+. (Join-Path $PSScriptRoot 'prisma-airs.ps1')
 
 function Send-Allow { Write-HookJson '{}' }
 function Send-Block([string]$Message) {

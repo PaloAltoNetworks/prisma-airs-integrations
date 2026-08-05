@@ -6,7 +6,7 @@
 #   stdout -> {"continue":true}  or  {"continue":false,"user_message":"..."}
 #   exit 0 = allow, exit 2 = block
 
-. "$PSScriptRoot\prisma-airs.ps1"
+. (Join-Path $PSScriptRoot 'prisma-airs.ps1')
 
 function Send-Allow { Write-HookJson '{"continue":true}' }
 function Send-Deny([string]$Message) {

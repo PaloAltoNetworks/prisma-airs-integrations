@@ -163,6 +163,14 @@ The bash hooks depend on `bash`, `jq`, and `curl`, which aren't reliably present
 Get-Content .cursor\hooks\prisma-airs.log -Wait
 ```
 
+For an automated contract check of all four hooks (no API key or network needed), run `test-hooks.ps1` from the `Cursor/` directory. It pipes sample JSON into each hook and asserts the stdout and exit codes, and skips the fail-closed cases automatically when credentials are configured:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File test-hooks.ps1
+# or, with PowerShell 7:
+pwsh -NoProfile -File test-hooks.ps1
+```
+
 **Windows notes**
 
 - **Execution policy:** the example config passes `-ExecutionPolicy Bypass` so the scripts run under a `Restricted` *user* policy. If your fleet enforces `AllSigned` via Group Policy, code-sign the `.ps1` files with a trusted certificate.
