@@ -1,0 +1,48 @@
+{
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .devin/hooks/airs-hooks.ps1 -Vendor devin -EventName UserPromptSubmit",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": ".*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .devin/hooks/airs-hooks.ps1 -Vendor devin -EventName PreToolUse",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": ".*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .devin/hooks/airs-hooks.ps1 -Vendor devin -EventName PostToolUse",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .devin/hooks/airs-hooks.ps1 -Vendor devin -EventName Stop",
+          "timeout": 15
+        }
+      ]
+    }
+  ]
+}

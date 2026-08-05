@@ -43,7 +43,7 @@ $AppName = switch ($Vendor) {
   'codex'       { 'Codex CLI' }
   'cursor'      { 'Cursor' }
   'cline'       { 'Cline' }
-  'windsurf'    { 'Windsurf Cascade' }
+  'devin'       { 'Devin CLI' }
   'antigravity' { 'Antigravity' }
   'gemini'      { 'Gemini CLI' }
   default       { 'Claude Code' }
@@ -62,7 +62,6 @@ function Field($obj, [string]$name) { if ($null -eq $obj) { return $null } $p = 
 $RawEvent = if ($EventName) { $EventName } else { [string](Field $In 'hook_event_name') }
 $IEvent = switch ($Vendor) {
   'cursor' { switch ($RawEvent) { 'beforeSubmitPrompt'{'UserPromptSubmit'} 'beforeMCPExecution'{'PreToolUse'} 'postToolUse'{'PostToolUse'} 'afterAgentResponse'{'Stop'} default{''} } }
-  'windsurf' { switch ($RawEvent) { 'pre_user_prompt'{'UserPromptSubmit'} 'pre_run_command'{'PreToolUse'} 'pre_mcp_tool_use'{'PreToolUse'} 'post_mcp_tool_use'{'PostToolUse'} 'post_cascade_response'{'Stop'} default{''} } }
   'cline' { switch ($RawEvent) { 'UserPromptSubmit'{'UserPromptSubmit'} 'PreToolUse'{'PreToolUse'} 'PostToolUse'{'PostToolUse'} 'TaskComplete'{'Stop'} default{''} } }
   { $_ -in @('antigravity','gemini') } { switch ($RawEvent) { {$_ -in @('BeforeAgent','UserPromptSubmit','PreInvocation')}{'UserPromptSubmit'} {$_ -in @('BeforeTool','PreToolUse')}{'PreToolUse'} {$_ -in @('AfterTool','PostToolUse')}{'PostToolUse'} {$_ -in @('AfterAgent','Stop','SubagentStop','PostInvocation')}{'Stop'} default{''} } }
   default { switch ($RawEvent) { 'UserPromptSubmit'{'UserPromptSubmit'} 'PreToolUse'{'PreToolUse'} 'PostToolUse'{'PostToolUse'} {$_ -in @('Stop','SubagentStop')}{'Stop'} default{''} } }
@@ -129,8 +128,16 @@ function Render([string]$kind, [string]$text) {
       } elseif ($kind -eq 'warn') { $out = @{ cancel=$false; contextModification=("Prisma AIRS: " + $text) } | ConvertTo-Json -Compress -Depth 6 }
       else { $out = '{"cancel":false}' }
     }
-    'windsurf' {
-      if ($kind -eq 'block') { if ($IEvent -in @('PostToolUse','Stop')) { $code = 0 } else { $code = 2 } }
+    'devin' {
+      # Devin CLI: PreToolUse is the only hard block (exit 2). UserPromptSubmit can
+      # only inject additionalContext (advisory); PostToolUse/Stop are advisory too.
+      if ($kind -eq 'block') {
+        switch ($IEvent) {
+          'PreToolUse'       { $code = 2 }
+          'UserPromptSubmit' { $out = @{ hookSpecificOutput = @{ hookEventName='UserPromptSubmit'; additionalContext=("⚠️ Prisma AIRS flagged this prompt: " + $text) } } | ConvertTo-Json -Compress -Depth 6 }
+          default            { $code = 0 }
+        }
+      }
     }
     { $_ -in @('antigravity','gemini') } {
       if ($kind -eq 'block') {
@@ -146,7 +153,7 @@ function Render([string]$kind, [string]$text) {
   if ($fd3) { Write-Fd3 $fd3 }
   if ($kind -eq 'warn') { [Console]::Error.Write("[Prisma AIRS] $text`n") }
   elseif ($kind -eq 'block') {
-    if ($Vendor -eq 'windsurf' -and $IEvent -in @('PostToolUse','Stop')) { [Console]::Error.Write("`n[ALERT] cannot block on Windsurf post-hooks - $text`n`n") }
+    if ($Vendor -eq 'devin' -and $IEvent -in @('UserPromptSubmit','PostToolUse','Stop')) { [Console]::Error.Write("`n[ALERT] Devin $IEvent is advisory (not a hard block) - $text`n`n") }
     else { [Console]::Error.Write("`n[BLOCKED] $text`n`n") }
   }
   exit $code
@@ -238,7 +245,6 @@ switch ($IEvent) {
     $Label='user prompt'; $Kind='prompt'
     $Text = switch ($Vendor) {
       'cline'    { [string](Field (Field $In 'userPromptSubmit') 'prompt') }
-      'windsurf' { [string](Field (Field $In 'tool_info') 'user_prompt') }
       default    { [string](Field $In 'prompt') }
     }
   }
@@ -246,10 +252,6 @@ switch ($IEvent) {
     $Kind='toolInput'; $ti=$null
     switch ($Vendor) {
       'cline'    { $ToolName=[string](Field (Field $In 'preToolUse') 'toolName'); $ti=Field (Field $In 'preToolUse') 'parameters' }
-      'windsurf' {
-        if ($RawEvent -eq 'pre_run_command') { $ToolName='Bash'; $ti=[pscustomobject]@{ command=[string](Field (Field $In 'tool_info') 'command_line') } }
-        else { $tinfo=Field $In 'tool_info'; $ToolName="mcp__$([string](Field $tinfo 'mcp_server_name'))__$([string](Field $tinfo 'mcp_tool_name'))"; $ti=Field $tinfo 'mcp_tool_arguments' }
-      }
       'cursor'   { $ToolName=NormToolName([string](Field $In 'tool_name')); $ti=Field $In 'tool_input' }
       { $_ -in @('antigravity','gemini') } { $tn=Field $In 'tool_name'; if (-not $tn) { $tn=Field (Field $In 'toolCall') 'name' }; $ToolName=[string]$tn; $ti=Field $In 'tool_input'; if ($null -eq $ti) { $ti=Field (Field $In 'toolCall') 'args' } }
       default    { $ToolName=[string](Field $In 'tool_name'); $ti=Field $In 'tool_input' }
@@ -262,7 +264,6 @@ switch ($IEvent) {
     $Kind='toolOutput'; $ti=$null; $tr=$null
     switch ($Vendor) {
       'cline'    { $ptu=Field $In 'postToolUse'; $ToolName=[string](Field $ptu 'toolName'); $ti=Field $ptu 'parameters'; $tr=Field $ptu 'result' }
-      'windsurf' { $tinfo=Field $In 'tool_info'; $ToolName="mcp__$([string](Field $tinfo 'mcp_server_name'))__$([string](Field $tinfo 'mcp_tool_name'))"; $ti=Field $tinfo 'mcp_tool_arguments'; $tr=Field $tinfo 'mcp_result' }
       'cursor'   { $ToolName=NormToolName([string](Field $In 'tool_name')); $ti=Field $In 'tool_input'; $tr=Field $In 'tool_response'; if ($null -eq $tr) { $tr=Field $In 'tool_output' } }
       { $_ -in @('antigravity','gemini') } { $tn=Field $In 'tool_name'; if (-not $tn) { $tn=Field (Field $In 'toolCall') 'name' }; $ToolName=[string]$tn; $ti=Field $In 'tool_input'; $tr=Field $In 'tool_response'; if ($null -eq $tr) { $tr=Field $In 'tool_result' } }
       default    { $ToolName=[string](Field $In 'tool_name'); $ti=Field $In 'tool_input'; $tr=Field $In 'tool_response'; if ($null -eq $tr) { $tr=Field $In 'tool_result' } }
@@ -276,7 +277,6 @@ switch ($IEvent) {
     $Label='model answer'; $Kind='response'
     switch ($Vendor) {
       'cline'    { $Text=[string](Field (Field $In 'taskComplete') 'task') }
-      'windsurf' { $Text=[string](Field (Field $In 'tool_info') 'response') }
       'cursor'   { $t=Field $In 'text'; foreach ($k in @('response','message','content','output')) { if (-not $t) { $t=Field $In $k } }; $Text=[string]$t }
       { $_ -in @('antigravity','gemini') } { $t=Field $In 'last_assistant_message'; foreach ($k in @('prompt_response','response','agent_response')) { if (-not $t) { $t=Field $In $k } }; $Text=[string]$t; $StopActive=[bool](Field $In 'stop_hook_active') }
       default    { $Text=[string](Field $In 'last_assistant_message'); $StopActive=[bool](Field $In 'stop_hook_active') }

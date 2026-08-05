@@ -21,6 +21,4 @@ three runtimes.
 |:---:|:---:|:---:|:---:|:---:|
 | ✅ | ✅ | ❌ | ✅ | ✅ |
 
-Prompt scanned on input; the model's answer on Stop; tool input/output as
-`tool_event` (method `tools/call`) so tool results are checked for **indirect
-prompt injection**, not treated as a plain response.
+Prompt scanned on input; the model's answer on Stop; tool input/output as `tool_event` (method `tools/call`) so tool results are checked for **indirect prompt injection**, not treated as a plain response.

@@ -235,9 +235,9 @@ function normalizeAction(v) {
 }
 function collectDetections(json) {
   const found = /* @__PURE__ */ new Set();
-  const harvest = (obj3) => {
-    if (!obj3 || typeof obj3 !== "object") return;
-    for (const [key, val] of Object.entries(obj3)) {
+  const harvest = (obj2) => {
+    if (!obj2 || typeof obj2 !== "object") return;
+    for (const [key, val] of Object.entries(obj2)) {
       if (val === true) found.add(key);
     }
   };
@@ -588,22 +588,22 @@ function blockOutcome(event, reason) {
 \u{1F6AB} ${reason}
 
 `;
-  let obj3;
+  let obj2;
   switch (event) {
     case "PreToolUse":
-      obj3 = { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
+      obj2 = { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
       break;
     case "UserPromptSubmit":
-      obj3 = { decision: "block", reason, hookSpecificOutput: { hookEventName: "UserPromptSubmit" } };
+      obj2 = { decision: "block", reason, hookSpecificOutput: { hookEventName: "UserPromptSubmit" } };
       break;
     case "PostToolUse":
-      obj3 = { decision: "block", reason, hookSpecificOutput: { hookEventName: "PostToolUse" } };
+      obj2 = { decision: "block", reason, hookSpecificOutput: { hookEventName: "PostToolUse" } };
       break;
     case "Stop":
-      obj3 = { decision: "block", reason };
+      obj2 = { decision: "block", reason };
       break;
   }
-  return { exitCode: 0, stdout: JSON.stringify(obj3), stderr };
+  return { exitCode: 0, stdout: JSON.stringify(obj2), stderr };
 }
 
 // src/adapters/codex.ts
@@ -812,54 +812,18 @@ var clineAdapter = {
   }
 };
 
-// src/adapters/windsurf.ts
-function obj2(v) {
-  return v && typeof v === "object" ? v : {};
-}
-function str4(v) {
-  return typeof v === "string" ? v : void 0;
-}
-var windsurfAdapter = {
-  name: "windsurf",
-  appName: "Windsurf Cascade",
+// src/adapters/devin.ts
+var devinAdapter = {
+  name: "devin",
+  appName: "Devin CLI",
   capabilities: { rewriteInput: false, rewriteOutput: false, postCanBlock: false },
   normalize(raw, eventName) {
-    const input = {};
-    const ti = obj2(raw.tool_info);
-    if (typeof raw.trajectory_id === "string") input.session_id = raw.trajectory_id;
-    const mcpName = () => `mcp__${str4(ti.mcp_server_name) ?? "unknown"}__${str4(ti.mcp_tool_name) ?? "unknown"}`;
-    switch (eventName) {
-      case "pre_user_prompt":
-        input.hook_event_name = "UserPromptSubmit";
-        input.prompt = str4(ti.user_prompt);
-        break;
-      case "pre_run_command":
-        input.hook_event_name = "PreToolUse";
-        input.tool_name = "Bash";
-        input.tool_input = { command: str4(ti.command_line) ?? "" };
-        break;
-      case "pre_mcp_tool_use":
-        input.hook_event_name = "PreToolUse";
-        input.tool_name = mcpName();
-        input.tool_input = obj2(ti.mcp_tool_arguments);
-        break;
-      case "post_mcp_tool_use":
-        input.hook_event_name = "PostToolUse";
-        input.tool_name = mcpName();
-        input.tool_input = obj2(ti.mcp_tool_arguments);
-        input.tool_response = ti.mcp_result;
-        break;
-      case "post_cascade_response":
-        input.hook_event_name = "Stop";
-        input.last_assistant_message = str4(ti.response);
-        break;
-      default:
-        input.hook_event_name = "";
-    }
+    const input = { ...raw };
+    input.hook_event_name = eventName ?? (typeof raw.hook_event_name === "string" ? raw.hook_event_name : "");
+    if (input.hook_event_name === "Stop") input.last_assistant_message = void 0;
     return input;
   },
   render(event, decision) {
-    const isPost = event === "PostToolUse" || event === "Stop";
     switch (decision.kind) {
       case "allow":
         return { exitCode: 0 };
@@ -867,14 +831,33 @@ var windsurfAdapter = {
         return { exitCode: 0, stderr: `[Prisma AIRS] ${decision.message}
 ` };
       case "block":
-        return isPost ? { exitCode: 0, stderr: `
-\u26A0\uFE0F  ALERT (cannot block on Windsurf post-hooks) \u2014 ${decision.reason}
-
-` } : { exitCode: 2, stderr: `
+        switch (event) {
+          case "PreToolUse":
+            return { exitCode: 2, stderr: `
 \u{1F6AB} ${decision.reason}
 
 ` };
-      // Windsurf can't rewrite; masking is gated off for it.
+          case "UserPromptSubmit":
+            return {
+              exitCode: 0,
+              stdout: JSON.stringify({
+                hookSpecificOutput: {
+                  hookEventName: "UserPromptSubmit",
+                  additionalContext: `\u26A0\uFE0F Prisma AIRS flagged this prompt: ${decision.reason}`
+                }
+              }),
+              stderr: `
+\u26A0\uFE0F  ALERT (Devin UserPromptSubmit cannot block; enforcement is at the tool gate) \u2014 ${decision.reason}
+
+`
+            };
+          default:
+            return { exitCode: 0, stderr: `
+\u26A0\uFE0F  ALERT (Devin ${event} is advisory) \u2014 ${decision.reason}
+
+` };
+        }
+      // Devin doesn't rewrite output here; masking stays gated off.
       case "maskInput":
       case "maskOutput":
         return { exitCode: 0 };
@@ -979,7 +962,7 @@ var ADAPTERS = {
   codex: codexAdapter,
   cursor: cursorAdapter,
   cline: clineAdapter,
-  windsurf: windsurfAdapter,
+  devin: devinAdapter,
   // Antigravity reuses Gemini CLI's verified hook contract; `gemini` is the same
   // adapter with Gemini-CLI attribution.
   antigravity: antigravityAdapter,

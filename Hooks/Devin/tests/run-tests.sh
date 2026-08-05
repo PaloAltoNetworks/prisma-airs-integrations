@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validation harness for Windsurf — runs the shared fixtures through all three
+# Validation harness for Devin — runs the shared fixtures through all three
 # runtimes and prints the wire format each emits (stdout AND Cursor's fd 3).
 #
 #   ./run-tests.sh          OFFLINE (default): credentials are unset, so input-side
@@ -9,7 +9,7 @@
 #                           LIVE: benign fixture should allow, injection should block.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
-V="windsurf"; EV="pre_user_prompt"
+V="devin"; EV="UserPromptSubmit"
 if [ "${1:-}" != "live" ]; then unset PRISMA_AIRS_API_KEY PRISMA_AIRS_PROFILE_NAME PRISMA_AIRS_PROFILE_ID; MODE="offline (fail-closed)"; else MODE="live"; fi
 run() {
   local flavor="$1"; shift
@@ -20,7 +20,7 @@ run() {
     printf '  %-11s %-22s rc=%-2s %s%s\n' "$flavor" "$(basename "$fx")" "$rc" "${out:+stdout=${out:0:58} }" "${f3:+fd3=${f3:0:58}}"
   done
 }
-echo "== Windsurf: fixtures x 3 runtimes [$MODE] =="
-command -v node >/dev/null && run nodejs     node      "$HERE/../nodejs/.windsurf/hooks/hooks.mjs"     --vendor "$V" --event "$EV"
-command -v bash >/dev/null && run bash       bash      "$HERE/../bash/.windsurf/hooks/airs-hooks.sh"   --vendor "$V" --event "$EV"
-command -v pwsh >/dev/null && run powershell pwsh -File "$HERE/../powershell/.windsurf/hooks/airs-hooks.ps1" -Vendor "$V" -EventName "$EV"
+echo "== Devin: fixtures x 3 runtimes [$MODE] =="
+command -v node >/dev/null && run nodejs     node      "$HERE/../nodejs/.devin/hooks/hooks.mjs"     --vendor "$V" --event "$EV"
+command -v bash >/dev/null && run bash       bash      "$HERE/../bash/.devin/hooks/airs-hooks.sh"   --vendor "$V" --event "$EV"
+command -v pwsh >/dev/null && run powershell pwsh -File "$HERE/../powershell/.devin/hooks/airs-hooks.ps1" -Vendor "$V" -EventName "$EV"

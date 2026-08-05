@@ -8,6 +8,10 @@ agent's loop — prompt, tool input, tool output, and final answer — through
 (`nodejs`, `bash`, `powershell`). Each cell ships the agent's real config directory
 (`.cursor/`, `.claude/`, …) so install is *copy the folder into your project root*.
 
+> **_IMPORTANT_**
+
+> These hooks are **community examples and reference implementations**, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 ## Agents
 
 | Integration | Category | Prompt | Response | Streaming | Pre-tool | Post-tool |
@@ -16,10 +20,15 @@ agent's loop — prompt, tool input, tool output, and final answer — through
 | [Codex](Codex/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Cursor](Cursor/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Cline](Cline/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
-| [Windsurf](Windsurf/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Devin](Devin/) | AI Coding Assistant | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
 | [Antigravity](Antigravity/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 
 > Detection categories & use cases: <https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/>
+
+> **Devin** has a deliberately narrower row: its CLI hook contract exposes no
+> final-answer text at `Stop` (no Response scan) and cannot hard-block at
+> `UserPromptSubmit` or `PostToolUse` (scan + advisory only). `PreToolUse` is the
+> enforcing gate — see [Devin/](Devin/).
 
 ## Runtimes
 - **nodejs** — the full engine (DLP mask-in-place + chunking); Node 18+, zero deps.

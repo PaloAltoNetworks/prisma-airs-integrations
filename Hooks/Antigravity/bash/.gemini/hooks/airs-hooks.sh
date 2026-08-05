@@ -57,7 +57,7 @@ case "$VENDOR" in
   codex)       APP_NAME="Codex CLI" ;;
   cursor)      APP_NAME="Cursor" ;;
   cline)       APP_NAME="Cline" ;;
-  windsurf)    APP_NAME="Windsurf Cascade" ;;
+  devin)       APP_NAME="Devin CLI" ;;
   antigravity) APP_NAME="Antigravity" ;;
   gemini)      APP_NAME="Gemini CLI" ;;
   *)           APP_NAME="Claude Code" ;;
@@ -86,15 +86,6 @@ case "$VENDOR" in
       beforeMCPExecution)  IEVENT="PreToolUse" ;;
       postToolUse)         IEVENT="PostToolUse" ;;
       afterAgentResponse)  IEVENT="Stop" ;;
-      *) IEVENT="" ;;
-    esac ;;
-  windsurf)
-    case "$RAW_EVENT" in
-      pre_user_prompt)     IEVENT="UserPromptSubmit" ;;
-      pre_run_command)     IEVENT="PreToolUse" ;;
-      pre_mcp_tool_use)    IEVENT="PreToolUse" ;;
-      post_mcp_tool_use)   IEVENT="PostToolUse" ;;
-      post_cascade_response) IEVENT="Stop" ;;
       *) IEVENT="" ;;
     esac ;;
   cline)
@@ -190,11 +181,16 @@ render() {
       else
         out='{"cancel": false}'
       fi ;;
-    windsurf)
+    devin)
+      # Devin CLI: PreToolUse is the ONLY hard block (exit 2). UserPromptSubmit can
+      # only inject additionalContext (advisory). PostToolUse/Stop are advisory too.
       if [ "$kind" = "block" ]; then
         case "$IEVENT" in
-          PostToolUse|Stop) code=0; err=$'\n⚠️  ALERT (cannot block on Windsurf post-hooks) — '"$text"$'\n\n' ;;  # post can't block
-          *) code=2 ;;
+          PreToolUse) code=2 ;;   # reason already on stderr ($err)
+          UserPromptSubmit)
+            out="$(jq -nc --arg r "$text" '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:("⚠️ Prisma AIRS flagged this prompt: "+$r)}}')"
+            err=$'\n⚠️  ALERT (Devin UserPromptSubmit cannot block; enforcement is at the tool gate) — '"$text"$'\n\n' ;;
+          PostToolUse|Stop) code=0; err=$'\n⚠️  ALERT (Devin '"$IEVENT"' is advisory) — '"$text"$'\n\n' ;;
         esac
       fi ;;
     antigravity|gemini)
@@ -297,7 +293,6 @@ case "$IEVENT" in
     LABEL="user prompt"; KIND="prompt"
     case "$VENDOR" in
       cline)    TEXT="$(j '.userPromptSubmit.prompt // empty')" ;;
-      windsurf) TEXT="$(j '.tool_info.user_prompt // empty')" ;;
       *)        TEXT="$(j '.prompt // empty')" ;;
     esac ;;
 
@@ -305,13 +300,6 @@ case "$IEVENT" in
     KIND="toolInput"
     case "$VENDOR" in
       cline)    TOOL_NAME="$(j '.preToolUse.toolName // empty')"; TI="$(jc '.preToolUse.parameters // {}')" ;;
-      windsurf)
-        if [ "$RAW_EVENT" = "pre_run_command" ]; then
-          TOOL_NAME="Bash"; TI="$(jc '{command: (.tool_info.command_line // "")}')"
-        else
-          TOOL_NAME="mcp__$(j '.tool_info.mcp_server_name // "unknown"')__$(j '.tool_info.mcp_tool_name // "unknown"')"
-          TI="$(jc '.tool_info.mcp_tool_arguments // {}')"
-        fi ;;
       cursor)   TOOL_NAME="$(norm_tool_name "$(j '.tool_name // empty')")"; TI="$(jc '.tool_input // {}')" ;;
       antigravity|gemini) TOOL_NAME="$(j '.tool_name // .toolCall.name // empty')"; TI="$(jc '.tool_input // .toolCall.args // {}')" ;;
       *)        TOOL_NAME="$(j '.tool_name // empty')"; TI="$(jc '.tool_input // {}')" ;;
@@ -325,7 +313,6 @@ case "$IEVENT" in
     KIND="toolOutput"
     case "$VENDOR" in
       cline)    TOOL_NAME="$(j '.postToolUse.toolName // empty')"; TI="$(jc '.postToolUse.parameters // {}')"; TR="$(jc '.postToolUse.result // null')" ;;
-      windsurf) TOOL_NAME="mcp__$(j '.tool_info.mcp_server_name // "unknown"')__$(j '.tool_info.mcp_tool_name // "unknown"')"; TI="$(jc '.tool_info.mcp_tool_arguments // {}')"; TR="$(jc '.tool_info.mcp_result // null')" ;;
       cursor)   TOOL_NAME="$(norm_tool_name "$(j '.tool_name // empty')")"; TI="$(jc '.tool_input // {}')"; TR="$(jc '.tool_response // .tool_output // null')" ;;
       antigravity|gemini) TOOL_NAME="$(j '.tool_name // .toolCall.name // empty')"; TI="$(jc '.tool_input // .toolCall.args // {}')"; TR="$(jc '.tool_response // .tool_result // null')" ;;
       *)        TOOL_NAME="$(j '.tool_name // empty')"; TI="$(jc '.tool_input // {}')"; TR="$(jc '.tool_response // .tool_result // null')" ;;
@@ -340,7 +327,6 @@ case "$IEVENT" in
     LABEL="model answer"; KIND="response"
     case "$VENDOR" in
       cline)    TEXT="$(j '.taskComplete.task // empty')" ;;
-      windsurf) TEXT="$(j '.tool_info.response // empty')" ;;
       cursor)   TEXT="$(j '.text // .response // .message // .content // .output // empty')" ;;
       antigravity|gemini) TEXT="$(j '.last_assistant_message // .prompt_response // .response // .agent_response // empty')"; STOP_ACTIVE="$(j '.stop_hook_active // false')" ;;
       *)        TEXT="$(j '.last_assistant_message // empty')"; STOP_ACTIVE="$(j '.stop_hook_active // false')" ;;

@@ -1,0 +1,48 @@
+{
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node .devin/hooks/hooks.mjs --vendor devin --event UserPromptSubmit",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": ".*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node .devin/hooks/hooks.mjs --vendor devin --event PreToolUse",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": ".*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node .devin/hooks/hooks.mjs --vendor devin --event PostToolUse",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node .devin/hooks/hooks.mjs --vendor devin --event Stop",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}
