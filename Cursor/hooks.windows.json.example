@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {"command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .cursor/hooks/pre_submit_prompt.ps1", "timeout": 10000, "failClosed": false}
+    ],
+    "beforeMCPExecution": [
+      {"command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .cursor/hooks/pre_mcp_execution.ps1", "timeout": 10000, "failClosed": false}
+    ],
+    "postToolUse": [
+      {"command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .cursor/hooks/scan_response.ps1", "timeout": 10000, "failClosed": false}
+    ],
+    "afterAgentResponse": [
+      {"command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .cursor/hooks/agent_response_scan.ps1", "timeout": 10000, "failClosed": false}
+    ]
+  }
+}
