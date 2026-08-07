@@ -1,5 +1,5 @@
 {
-  "_comment": "Google Antigravity / Gemini CLI contract. Merge this 'hooks' block into .gemini/settings.json.",
+  "_comment": "Gemini CLI hooks \u2014 merge this 'hooks' block into .gemini/settings.json. Blocks BeforeAgent/BeforeTool/AfterTool via exit code 2 (stderr = reason).",
   "hooks": {
     "BeforeAgent": [
       {
@@ -7,7 +7,7 @@
           {
             "name": "prisma-airs",
             "type": "command",
-            "command": "node .gemini/hooks/hooks.mjs --vendor antigravity --event BeforeAgent",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor gemini -EventName BeforeAgent",
             "timeout": 15000
           }
         ]
@@ -20,7 +20,7 @@
           {
             "name": "prisma-airs",
             "type": "command",
-            "command": "node .gemini/hooks/hooks.mjs --vendor antigravity --event BeforeTool",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor gemini -EventName BeforeTool",
             "timeout": 15000
           }
         ]
@@ -33,7 +33,7 @@
           {
             "name": "prisma-airs",
             "type": "command",
-            "command": "node .gemini/hooks/hooks.mjs --vendor antigravity --event AfterTool",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor gemini -EventName AfterTool",
             "timeout": 15000
           }
         ]
@@ -45,7 +45,7 @@
           {
             "name": "prisma-airs",
             "type": "command",
-            "command": "node .gemini/hooks/hooks.mjs --vendor antigravity --event AfterAgent",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor gemini -EventName AfterAgent",
             "timeout": 15000
           }
         ]

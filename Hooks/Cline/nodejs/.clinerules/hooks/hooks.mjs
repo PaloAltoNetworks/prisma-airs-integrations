@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-// src/index.ts
-import { writeSync } from "node:fs";
-
 // src/config.ts
 var DEFAULT_BASE_URL = "https://service.api.aisecurity.paloaltonetworks.com";
 var SCAN_PATH = "/v1/scan/sync/request";
@@ -665,6 +662,8 @@ function mapEvent3(name) {
   switch (name) {
     case "beforeSubmitPrompt":
       return "UserPromptSubmit";
+    case "beforeShellExecution":
+      return "PreToolUse";
     case "beforeMCPExecution":
       return "PreToolUse";
     case "postToolUse":
@@ -683,11 +682,17 @@ function normalizeToolName(name) {
 var cursorAdapter = {
   name: "cursor",
   appName: "Cursor",
-  capabilities: { rewriteInput: false, rewriteOutput: true, postCanBlock: true },
+  // Pre-tool is the hard block. postToolUse can redact MCP output / inject context (no hard block).
+  capabilities: { rewriteInput: false, rewriteOutput: false, postCanBlock: true },
   normalize(raw, eventName) {
     const input = { ...raw };
     input.hook_event_name = mapEvent3(eventName);
-    if (raw.tool_name !== void 0) input.tool_name = normalizeToolName(raw.tool_name);
+    if (eventName === "beforeShellExecution") {
+      input.tool_name = "Shell";
+      input.tool_input = { command: typeof raw.command === "string" ? raw.command : "" };
+    } else if (raw.tool_name !== void 0) {
+      input.tool_name = normalizeToolName(raw.tool_name);
+    }
     if (input.tool_response === void 0 && raw.tool_output !== void 0) input.tool_response = raw.tool_output;
     if (input.last_assistant_message === void 0) {
       const t = raw.text ?? raw.response ?? raw.message ?? raw.content ?? raw.output;
@@ -710,21 +715,22 @@ var cursorAdapter = {
 `;
         switch (event) {
           case "UserPromptSubmit":
-            return { exitCode: 0, fd3: JSON.stringify({ continue: false, user_message: decision.reason }), stderr };
+            return { exitCode: 0, stdout: JSON.stringify({ continue: false, user_message: decision.reason }), stderr };
           case "PreToolUse":
-            return { exitCode: 0, fd3: JSON.stringify({ permission: "deny", user_message: decision.reason, agent_message: decision.reason }), stderr };
+            return { exitCode: 0, stdout: JSON.stringify({ permission: "deny", user_message: decision.reason, agent_message: decision.reason }), stderr };
           case "PostToolUse":
-            return { exitCode: 0, fd3: JSON.stringify({ updated_mcp_tool_output: `BLOCKED by Prisma AIRS: ${decision.reason}` }), stderr };
+            return { exitCode: 0, stdout: JSON.stringify({ updated_mcp_tool_output: `[Prisma AIRS blocked this tool output: ${decision.reason}]`, additional_context: `\u26A0\uFE0F Prisma AIRS flagged this tool output: ${decision.reason}` }), stderr };
           case "Stop":
-            return { exitCode: 2, stderr };
-        }
-      }
-      case "maskOutput":
-        return { exitCode: 0, fd3: JSON.stringify({ updated_mcp_tool_output: decision.updatedOutput }), stderr: `
-\u{1F6E1}\uFE0F  ${decision.note}
+          default:
+            return { exitCode: 0, stderr: `
+\u26A0\uFE0F  ALERT (Cursor cannot block at ${event}) \u2014 ${decision.reason}
 
 ` };
+        }
+      }
+      // No input/output masking on Cursor.
       case "maskInput":
+      case "maskOutput":
         return allowOutcome(event);
     }
   }
@@ -732,12 +738,10 @@ var cursorAdapter = {
 function allowOutcome(event) {
   switch (event) {
     case "UserPromptSubmit":
-      return { exitCode: 0, fd3: JSON.stringify({ continue: true }) };
+      return { exitCode: 0, stdout: JSON.stringify({ continue: true }) };
     case "PreToolUse":
-      return { exitCode: 0, fd3: JSON.stringify({ permission: "allow" }) };
-    case "PostToolUse":
-      return { exitCode: 0, fd3: "{}" };
-    case "Stop":
+      return { exitCode: 0, stdout: JSON.stringify({ permission: "allow" }) };
+    default:
       return { exitCode: 0 };
   }
 }
@@ -948,9 +952,13 @@ function blockOutcome2(event, reason) {
     case "PreToolUse":
       return { exitCode: 2, stderr };
     case "PostToolUse":
-      return { exitCode: 0, stdout: JSON.stringify({ decision: "block", reason, hookSpecificOutput: { hookEventName: "AfterTool" } }), stderr };
+      return { exitCode: 2, stderr };
     case "Stop":
-      return { exitCode: 0, stdout: JSON.stringify({ continue: false, stopReason: reason }), stderr };
+    default:
+      return { exitCode: 0, stderr: `
+\u26A0\uFE0F  ALERT (Gemini response scanned; not hard-blocked to avoid retry loop) \u2014 ${reason}
+
+` };
   }
 }
 var antigravityAdapter = makeGeminiAdapter("antigravity", "Antigravity");
@@ -1005,13 +1013,6 @@ async function main() {
     const { event, decision } = await route(input, cfg, log, adapter.capabilities);
     const outcome = adapter.render(event, decision);
     if (outcome.stderr) process.stderr.write(outcome.stderr);
-    if (outcome.fd3 !== void 0) {
-      try {
-        writeSync(3, outcome.fd3.endsWith("\n") ? outcome.fd3 : outcome.fd3 + "\n");
-      } catch {
-        if (!outcome.stdout) process.stdout.write(outcome.fd3);
-      }
-    }
     if (outcome.stdout) process.stdout.write(outcome.stdout);
     process.exit(outcome.exitCode ?? 0);
   } catch (err) {

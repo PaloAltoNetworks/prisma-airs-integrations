@@ -82,10 +82,11 @@ RAW_EVENT="$EVENT"
 case "$VENDOR" in
   cursor)
     case "$RAW_EVENT" in
-      beforeSubmitPrompt)  IEVENT="UserPromptSubmit" ;;
-      beforeMCPExecution)  IEVENT="PreToolUse" ;;
-      postToolUse)         IEVENT="PostToolUse" ;;
-      afterAgentResponse)  IEVENT="Stop" ;;
+      beforeSubmitPrompt)   IEVENT="UserPromptSubmit" ;;
+      beforeShellExecution) IEVENT="PreToolUse" ;;
+      beforeMCPExecution)   IEVENT="PreToolUse" ;;
+      postToolUse)          IEVENT="PostToolUse" ;;
+      afterAgentResponse)   IEVENT="Stop" ;;
       *) IEVENT="" ;;
     esac ;;
   cline)
@@ -126,7 +127,7 @@ esac
 #   render <allow|warn|block> <text>
 # ----------------------------------------------------------------------------
 render() {
-  local kind="$1" text="$2" out="" fd3="" err="" code=0
+  local kind="$1" text="$2" out="" err="" code=0
   case "$kind" in
     warn)  err="[Prisma AIRS] $text"$'\n' ;;
     block) err=$'\n🚫 '"$text"$'\n\n' ;;
@@ -153,20 +154,25 @@ render() {
         [ "$IEVENT" = "Stop" ] && out='{"continue": true}'
       fi ;;
     cursor)
-      # Cursor reads decisions on FILE DESCRIPTOR 3.
+      # Cursor reads decisions from STDOUT. Pre-tool (beforeShell/beforeMCP) HARD-blocks
+      # via {"permission":"deny"}. postToolUse can't hard-block — for MCP tools it REDACTS
+      # the model-visible output (updated_mcp_tool_output) + warns (additional_context);
+      # for non-MCP it can only warn. beforeSubmitPrompt {"continue":false} is advisory
+      # (record-only); afterAgentResponse can't block.
       if [ "$kind" = "block" ]; then
         case "$IEVENT" in
-          UserPromptSubmit) fd3="$(jq -nc --arg r "$text" '{continue:false,user_message:$r}')" ;;
-          PreToolUse)       fd3="$(jq -nc --arg r "$text" '{permission:"deny",user_message:$r,agent_message:$r}')" ;;
-          PostToolUse)      fd3="$(jq -nc --arg r "$text" '{updated_mcp_tool_output:("BLOCKED by Prisma AIRS: "+$r)}')" ;;
-          Stop)             code=2 ;;
+          UserPromptSubmit) out="$(jq -nc --arg r "$text" '{continue:false,user_message:$r}')" ;;
+          PreToolUse)       out="$(jq -nc --arg r "$text" '{permission:"deny",user_message:$r,agent_message:$r}')" ;;
+          # updated_mcp_tool_output redacts the model-visible output (Cursor applies it
+          # for MCP tools, ignores it for non-MCP); additional_context warns for any tool.
+          PostToolUse)      out="$(jq -nc --arg r "$text" '{updated_mcp_tool_output:("[Prisma AIRS blocked this tool output: "+$r+"]"),additional_context:("⚠️ Prisma AIRS flagged this tool output: "+$r)}')" ;;
+          Stop)             err=$'\n⚠️  ALERT (Cursor cannot block the model answer) — '"$text"$'\n\n' ;;
         esac
       else
         case "$IEVENT" in
-          UserPromptSubmit) fd3='{"continue": true}' ;;
-          PreToolUse)       fd3='{"permission": "allow"}' ;;
-          PostToolUse)      fd3='{}' ;;
-          Stop)             fd3="" ;;
+          UserPromptSubmit) out='{"continue":true}' ;;
+          PreToolUse)       out='{"permission":"allow"}' ;;
+          PostToolUse)      out='{}' ;;
         esac
       fi ;;
     cline)
@@ -194,17 +200,18 @@ render() {
         esac
       fi ;;
     antigravity|gemini)
+      # Gemini CLI blocks via exit code 2 (stderr = reason) on BeforeAgent/BeforeTool/
+      # AfterTool. AfterAgent(Stop) is advisory — exit 2 there triggers a model RETRY
+      # (loop risk), so we scan + alert instead of hard-blocking the answer.
       if [ "$kind" = "block" ]; then
         case "$IEVENT" in
-          UserPromptSubmit|PreToolUse) code=2 ;;
-          PostToolUse) out="$(jq -nc --arg r "$text" '{decision:"block",reason:$r,hookSpecificOutput:{hookEventName:"AfterTool"}}')" ;;
-          Stop)        out="$(jq -nc --arg r "$text" '{continue:false,stopReason:$r}')" ;;
+          UserPromptSubmit|PreToolUse|PostToolUse) code=2 ;;
+          Stop) code=0; err=$'\n⚠️  ALERT (Gemini response scanned; not hard-blocked to avoid retry loop) — '"$text"$'\n\n' ;;
         esac
       fi ;;
   esac
 
   [ -n "$out" ] && printf '%s' "$out"
-  [ -n "$fd3" ] && { printf '%s' "$fd3" >&3; } 2>/dev/null
   [ -n "$err" ] && printf '%s' "$err" >&2
   exit "$code"
 }
@@ -300,7 +307,12 @@ case "$IEVENT" in
     KIND="toolInput"
     case "$VENDOR" in
       cline)    TOOL_NAME="$(j '.preToolUse.toolName // empty')"; TI="$(jc '.preToolUse.parameters // {}')" ;;
-      cursor)   TOOL_NAME="$(norm_tool_name "$(j '.tool_name // empty')")"; TI="$(jc '.tool_input // {}')" ;;
+      cursor)
+        if [ "$RAW_EVENT" = "beforeShellExecution" ]; then
+          TOOL_NAME="Shell"; TI="$(jc '{command: (.command // "")}')"
+        else
+          TOOL_NAME="$(norm_tool_name "$(j '.tool_name // empty')")"; TI="$(jc '.tool_input // {}')"
+        fi ;;
       antigravity|gemini) TOOL_NAME="$(j '.tool_name // .toolCall.name // empty')"; TI="$(jc '.tool_input // .toolCall.args // {}')" ;;
       *)        TOOL_NAME="$(j '.tool_name // empty')"; TI="$(jc '.tool_input // {}')" ;;
     esac

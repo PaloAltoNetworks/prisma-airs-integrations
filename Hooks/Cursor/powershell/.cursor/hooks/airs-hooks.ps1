@@ -61,30 +61,16 @@ function Field($obj, [string]$name) { if ($null -eq $obj) { return $null } $p = 
 # ---- event mapping ----------------------------------------------------------
 $RawEvent = if ($EventName) { $EventName } else { [string](Field $In 'hook_event_name') }
 $IEvent = switch ($Vendor) {
-  'cursor' { switch ($RawEvent) { 'beforeSubmitPrompt'{'UserPromptSubmit'} 'beforeMCPExecution'{'PreToolUse'} 'postToolUse'{'PostToolUse'} 'afterAgentResponse'{'Stop'} default{''} } }
+  'cursor' { switch ($RawEvent) { 'beforeSubmitPrompt'{'UserPromptSubmit'} 'beforeShellExecution'{'PreToolUse'} 'beforeMCPExecution'{'PreToolUse'} 'postToolUse'{'PostToolUse'} 'afterAgentResponse'{'Stop'} default{''} } }
   'cline' { switch ($RawEvent) { 'UserPromptSubmit'{'UserPromptSubmit'} 'PreToolUse'{'PreToolUse'} 'PostToolUse'{'PostToolUse'} 'TaskComplete'{'Stop'} default{''} } }
   { $_ -in @('antigravity','gemini') } { switch ($RawEvent) { {$_ -in @('BeforeAgent','UserPromptSubmit','PreInvocation')}{'UserPromptSubmit'} {$_ -in @('BeforeTool','PreToolUse')}{'PreToolUse'} {$_ -in @('AfterTool','PostToolUse')}{'PostToolUse'} {$_ -in @('AfterAgent','Stop','SubagentStop','PostInvocation')}{'Stop'} default{''} } }
   default { switch ($RawEvent) { 'UserPromptSubmit'{'UserPromptSubmit'} 'PreToolUse'{'PreToolUse'} 'PostToolUse'{'PostToolUse'} {$_ -in @('Stop','SubagentStop')}{'Stop'} default{''} } }
 }
 $Side = if ($IEvent -in @('UserPromptSubmit','PreToolUse')) { 'input' } else { 'output' }
 
-# ---- fd 3 (Cursor) best-effort ----------------------------------------------
-function Write-Fd3([string]$s) {
-  $onWindows = ($PSVersionTable.PSVersion.Major -lt 6) -or ($IsWindows -eq $true)
-  try {
-    if ($onWindows) {
-      $h = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new([IntPtr]3, $false)
-      $fs = [System.IO.FileStream]::new($h, [System.IO.FileAccess]::Write)
-      $b = [System.Text.Encoding]::UTF8.GetBytes($s); $fs.Write($b, 0, $b.Length); $fs.Flush(); $fs.Dispose()
-    } else {
-      [System.IO.File]::WriteAllText('/dev/fd/3', $s)
-    }
-  } catch { Dbg "fd3 unavailable: $($_.Exception.Message)" }
-}
-
 # ---- render (vendor wire format) then EXIT ----------------------------------
 function Render([string]$kind, [string]$text) {
-  $out = ''; $fd3 = ''; $code = 0
+  $out = ''; $code = 0
   switch ($Vendor) {
     'claude' {
       if ($kind -eq 'block') {
@@ -106,18 +92,22 @@ function Render([string]$kind, [string]$text) {
       } elseif ($IEvent -eq 'Stop') { $out = '{"continue":true}' }
     }
     'cursor' {
+      # Cursor reads decisions from STDOUT. Pre-tool hard-blocks via permission=deny.
+      # postToolUse can't hard-block — MCP output is redacted (updated_mcp_tool_output)
+      # + warned (additional_context); non-MCP only warned. beforeSubmitPrompt advisory;
+      # afterAgentResponse can't block.
       if ($kind -eq 'block') {
         switch ($IEvent) {
-          'UserPromptSubmit' { $fd3 = @{ continue=$false; user_message=$text } | ConvertTo-Json -Compress -Depth 6 }
-          'PreToolUse'       { $fd3 = @{ permission='deny'; user_message=$text; agent_message=$text } | ConvertTo-Json -Compress -Depth 6 }
-          'PostToolUse'      { $fd3 = @{ updated_mcp_tool_output=("BLOCKED by Prisma AIRS: " + $text) } | ConvertTo-Json -Compress -Depth 6 }
-          'Stop'             { $code = 2 }
+          'UserPromptSubmit' { $out = @{ continue=$false; user_message=$text } | ConvertTo-Json -Compress -Depth 6 }
+          'PreToolUse'       { $out = @{ permission='deny'; user_message=$text; agent_message=$text } | ConvertTo-Json -Compress -Depth 6 }
+          'PostToolUse'      { $out = @{ updated_mcp_tool_output=("[Prisma AIRS blocked this tool output: " + $text + "]"); additional_context=("⚠️ Prisma AIRS flagged this tool output: " + $text) } | ConvertTo-Json -Compress -Depth 6 }
+          default            { $code = 0 }
         }
       } else {
         switch ($IEvent) {
-          'UserPromptSubmit' { $fd3 = '{"continue":true}' }
-          'PreToolUse'       { $fd3 = '{"permission":"allow"}' }
-          'PostToolUse'      { $fd3 = '{}' }
+          'UserPromptSubmit' { $out = '{"continue":true}' }
+          'PreToolUse'       { $out = '{"permission":"allow"}' }
+          'PostToolUse'      { $out = '{}' }
         }
       }
     }
@@ -140,20 +130,22 @@ function Render([string]$kind, [string]$text) {
       }
     }
     { $_ -in @('antigravity','gemini') } {
+      # Gemini CLI blocks via exit 2 on BeforeAgent/BeforeTool/AfterTool.
+      # AfterAgent(Stop) is advisory (exit 2 there triggers a retry loop).
       if ($kind -eq 'block') {
         switch ($IEvent) {
-          { $_ -in @('UserPromptSubmit','PreToolUse') } { $code = 2 }
-          'PostToolUse' { $out = @{ decision='block'; reason=$text; hookSpecificOutput=@{ hookEventName='AfterTool' } } | ConvertTo-Json -Compress -Depth 6 }
-          'Stop'        { $out = @{ continue=$false; stopReason=$text } | ConvertTo-Json -Compress -Depth 6 }
+          { $_ -in @('UserPromptSubmit','PreToolUse','PostToolUse') } { $code = 2 }
+          default { $code = 0 }
         }
       }
     }
   }
   if ($out) { [Console]::Out.Write($out) }
-  if ($fd3) { Write-Fd3 $fd3 }
   if ($kind -eq 'warn') { [Console]::Error.Write("[Prisma AIRS] $text`n") }
   elseif ($kind -eq 'block') {
     if ($Vendor -eq 'devin' -and $IEvent -in @('UserPromptSubmit','PostToolUse','Stop')) { [Console]::Error.Write("`n[ALERT] Devin $IEvent is advisory (not a hard block) - $text`n`n") }
+    elseif ($Vendor -eq 'cursor' -and $IEvent -eq 'Stop') { [Console]::Error.Write("`n[ALERT] Cursor cannot block the model answer - $text`n`n") }
+    elseif ($Vendor -in @('gemini','antigravity') -and $IEvent -eq 'Stop') { [Console]::Error.Write("`n[ALERT] Gemini response scanned; not hard-blocked (avoids retry loop) - $text`n`n") }
     else { [Console]::Error.Write("`n[BLOCKED] $text`n`n") }
   }
   exit $code
@@ -252,7 +244,10 @@ switch ($IEvent) {
     $Kind='toolInput'; $ti=$null
     switch ($Vendor) {
       'cline'    { $ToolName=[string](Field (Field $In 'preToolUse') 'toolName'); $ti=Field (Field $In 'preToolUse') 'parameters' }
-      'cursor'   { $ToolName=NormToolName([string](Field $In 'tool_name')); $ti=Field $In 'tool_input' }
+      'cursor'   {
+        if ($RawEvent -eq 'beforeShellExecution') { $ToolName='Shell'; $ti=[pscustomobject]@{ command=[string](Field $In 'command') } }
+        else { $ToolName=NormToolName([string](Field $In 'tool_name')); $ti=Field $In 'tool_input' }
+      }
       { $_ -in @('antigravity','gemini') } { $tn=Field $In 'tool_name'; if (-not $tn) { $tn=Field (Field $In 'toolCall') 'name' }; $ToolName=[string]$tn; $ti=Field $In 'tool_input'; if ($null -eq $ti) { $ti=Field (Field $In 'toolCall') 'args' } }
       default    { $ToolName=[string](Field $In 'tool_name'); $ti=Field $In 'tool_input' }
     }

@@ -1,29 +1,35 @@
 {
   "version": 1,
-  "//": "Cursor. Copy .cursor/ into your project root. Cursor reads decisions on fd 3 (handled by the engine).",
+  "//": "Cursor. Copy .cursor/ into your project root. Hooks return decisions on STDOUT (permission deny / continue false).",
   "hooks": {
     "beforeSubmitPrompt": [
       {
         "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/airs-hooks.ps1 -Vendor cursor -EventName beforeSubmitPrompt",
-        "timeout": 10000
+        "timeout": 15000
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/airs-hooks.ps1 -Vendor cursor -EventName beforeShellExecution",
+        "timeout": 15000
       }
     ],
     "beforeMCPExecution": [
       {
         "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/airs-hooks.ps1 -Vendor cursor -EventName beforeMCPExecution",
-        "timeout": 10000
+        "timeout": 15000
       }
     ],
     "postToolUse": [
       {
         "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/airs-hooks.ps1 -Vendor cursor -EventName postToolUse",
-        "timeout": 10000
+        "timeout": 15000
       }
     ],
     "afterAgentResponse": [
       {
         "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/airs-hooks.ps1 -Vendor cursor -EventName afterAgentResponse",
-        "timeout": 10000
+        "timeout": 15000
       }
     ]
   }

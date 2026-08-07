@@ -19,6 +19,6 @@ three runtimes.
 
 | Prompt | Response | Streaming | Pre-tool | Post-tool |
 |:---:|:---:|:---:|:---:|:---:|
-| ✅ | ✅ | ❌ | ✅ | ✅ |
+| ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
 
-Prompt scanned on input; the model's answer on Stop; tool input/output as `tool_event` (method `tools/call`) so tool results are checked for **indirect prompt injection**, not treated as a plain response.
+Cursor reads hook decisions from **stdout** (there is no fd 3). **Pre-tool** is the hard block: `beforeShellExecution` / `beforeMCPExecution` return `{"permission":"deny"}`. **Post-tool** (`postToolUse`) can't hard-block, but it scans the tool output and — for **MCP tools** — **redacts** the model-visible result (`updated_mcp_tool_output`) plus warns (`additional_context`); non-MCP output can only be warned (Cursor's redaction is MCP-only). `beforeSubmitPrompt` is **advisory** (record-only), and Cursor exposes **no way to block the model's answer** (`afterAgentResponse` doesn't fire in the CLI). Tool input/output is scanned as a `tool_event` (`tools/call`) for **indirect prompt injection**.

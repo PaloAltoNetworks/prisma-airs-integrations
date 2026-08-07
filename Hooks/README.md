@@ -18,10 +18,10 @@ agent's loop — prompt, tool input, tool output, and final answer — through
 |---|---|:---:|:---:|:---:|:---:|:---:|
 | [ClaudeCode](ClaudeCode/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Codex](Codex/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
-| [Cursor](Cursor/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Cursor](Cursor/) | AI Coding Assistant | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
 | [Cline](Cline/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Devin](Devin/) | AI Coding Assistant | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
-| [Antigravity](Antigravity/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [GeminiCLI](GeminiCLI/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ✅ |
 
 > Detection categories & use cases: <https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/>
 
