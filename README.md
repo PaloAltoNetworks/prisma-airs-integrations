@@ -23,7 +23,9 @@ This repository collects example configurations, sample code, and reference patt
 | [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [OpenAI (Codex Hooks)](./OpenAI/codex-hooks/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ✅ |
 | [Cline](./Cline/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
-| [Cursor](./Cursor/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
+| [Cursor (bash)](./Cursor/bash/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
+| [Cursor (PowerShell)](./Cursor/powershell/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
+| [Cursor (Node.js)](./Cursor/#runtimes) | AI Coding Assistant | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 |
 | [Windsurf](./Windsurf/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ⚠️ |
 | [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ✅ | ❌ | ✅ |
 | [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
@@ -38,7 +40,7 @@ This repository collects example configurations, sample code, and reference patt
 | [GitHub (Actions)](./GitHub/github-actions/) | CI/CD Pipeline | N/A | N/A | N/A | N/A | N/A |
 | [Jenkins (Pipeline)](./Jenkins/declarative-pipeline/) | CI/CD Pipeline | N/A | N/A | N/A | N/A | N/A |
 
-**Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
+**Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported | 🚧 Planned (not yet implemented)
 
 > **_NOTE_**
 > In order to scan streamed responses via gateway integrations, the LLM response must be buffered at the gateway (then scanned by AIRS) before being forwarded to the downstream application.
@@ -46,6 +48,8 @@ This repository collects example configurations, sample code, and reference patt
 **N/A** — [GitHub Actions](./GitHub/github-actions/) uses Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See the [integration README](./GitHub/github-actions/) for model scanning coverage.
 
 **N/A** — [Jenkins](./Jenkins/declarative-pipeline/) uses Prisma AIRS **Model Security** (pre-deployment model file scanning), not AI Runtime Security. See the [integration README](./Jenkins/declarative-pipeline/) for model scanning coverage.
+
+**🚧** — The Cursor [bash](./Cursor/bash/) and [PowerShell](./Cursor/powershell/) runtimes are available today; a shared Node.js engine runtime is planned. See the [Cursor runtimes](./Cursor/#runtimes) section.
 
 ---
 
