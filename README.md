@@ -22,9 +22,6 @@ This repository collects example configurations, sample code, and reference patt
 | [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [OpenAI (Codex Hooks)](./OpenAI/codex-hooks/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ✅ |
-| [Cline](./Cline/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
-| [Cursor](./Cursor/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
-| [Windsurf](./Windsurf/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ⚠️ |
 | [Hooks: Claude Code](./Hooks/ClaudeCode/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Hooks: Codex](./Hooks/Codex/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Hooks: Cursor](./Hooks/Cursor/) | AI Coding Assistant | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
