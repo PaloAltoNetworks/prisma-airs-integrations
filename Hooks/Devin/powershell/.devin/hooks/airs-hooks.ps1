@@ -12,7 +12,7 @@
 # NOT ported (nodejs only): DLP mask-in-place, multi-chunk scanning.
 #
 # NOTE: uses PowerShell-native flags (-Vendor / -EventName), since PowerShell
-# does not pass through POSIX-style "--vendor". Requires PowerShell 7+ (pwsh).
+# does not pass through POSIX-style "--vendor". Works on Windows PowerShell 5.1+ / PowerShell 7+.
 # =============================================================================
 param(
   [string]$Vendor = 'claude',
@@ -29,14 +29,18 @@ $ApiUrl      = "$BaseUrl/v1/scan/sync/request"
 $ApiKey      = $env:PRISMA_AIRS_API_KEY
 $ProfileId   = $env:PRISMA_AIRS_PROFILE_ID
 $ProfileName = $env:PRISMA_AIRS_PROFILE_NAME
-$LogFile     = if ($env:SECURITY_LOG_PATH) { $env:SECURITY_LOG_PATH } else { '.claude/hooks/prisma-airs.log' }
+$LogFile     = if ($env:SECURITY_LOG_PATH) { $env:SECURITY_LOG_PATH } else { '' }   # per-agent default set below
 $TimeoutMs   = if ($env:AIRS_TIMEOUT_MS) { [int]$env:AIRS_TIMEOUT_MS } else { 10000 }
 $Retries     = if ($env:AIRS_RETRIES) { [int]$env:AIRS_RETRIES } else { 1 }
-$FailMode    = if ($env:AIRS_FAIL_MODE) { $env:AIRS_FAIL_MODE } else { 'open' }
+$FailMode    = if ($env:AIRS_FAIL_MODE) { $env:AIRS_FAIL_MODE } else { 'closed' }   # default fail-CLOSED on input
 $Suffix      = if ($env:AIRS_APP_SUFFIX) { $env:AIRS_APP_SUFFIX } elseif ($env:CLAUDE_CODE_APP_SUFFIX) { $env:CLAUDE_CODE_APP_SUFFIX } else { '' }
 $Debug       = ($env:AIRS_DEBUG -in @('1','true','yes'))
 $CodeAware   = ($null -eq $env:AIRS_CODE_AWARE) -or ($env:AIRS_CODE_AWARE -in @('1','true','yes'))
 $TimeoutSec  = [int][math]::Ceiling($TimeoutMs / 1000.0); if ($TimeoutSec -lt 1) { $TimeoutSec = 1 }
+# PowerShell has no chunking: content past this budget can't be scanned -> fail-mode.
+$MaxChars    = if ($env:AIRS_MAX_CONTENT_CHARS) { [int]$env:AIRS_MAX_CONTENT_CHARS } else { 20000 }
+$MaxChunks   = if ($env:AIRS_MAX_CHUNKS) { [int]$env:AIRS_MAX_CHUNKS } else { 6 }
+$MaxBudget   = $MaxChars * $MaxChunks
 
 $AppName = switch ($Vendor) {
   'claude'      { 'Claude Code' }
@@ -48,7 +52,14 @@ $AppName = switch ($Vendor) {
   'gemini'      { 'Gemini CLI' }
   default       { 'Claude Code' }
 }
+$CfgDir = switch ($Vendor) {
+  'claude' { '.claude' } 'codex' { '.codex' } 'cursor' { '.cursor' } 'cline' { '.clinerules' }
+  'devin' { '.devin' } 'antigravity' { '.agents' } 'gemini' { '.gemini' } default { '.claude' }
+}
 if ($Suffix) { $AppName = "$AppName-$Suffix" }
+# app_user now reflects the actual agent (was hardcoded 'claude-code-user'); env-overridable.
+$AppUser = if ($env:AIRS_APP_USER) { $env:AIRS_APP_USER } else { "$Vendor-user" }
+if (-not $LogFile) { $LogFile = "$CfgDir/hooks/prisma-airs.log" }
 
 function Dbg($m) { if ($Debug) { [Console]::Error.WriteLine("[airs-hooks] $m") } }
 
@@ -149,6 +160,14 @@ function Render([string]$kind, [string]$text) {
     else { [Console]::Error.Write("`n[BLOCKED] $text`n`n") }
   }
   exit $code
+}
+
+# Top-level safety net: any unexpected terminating error honors the fail mode instead of
+# bubbling up as a bare exit 1 (which every client reads as non-blocking). Render calls exit.
+trap {
+  try { [Console]::Error.Write("[airs-hooks] internal error - $($_.Exception.Message)`n") } catch { }
+  if ($FailMode -eq 'closed' -and $Side -eq 'input') { Render 'block' "Prisma AIRS internal error - blocking (fail-closed)" }
+  Render 'allow' ''
 }
 
 function Log([string]$label, [string]$tag) {
@@ -281,8 +300,8 @@ switch ($IEvent) {
 
 if ($IEvent -eq 'Stop' -and $StopActive) { Dbg 'stop_hook_active set - allowing (loop guard)'; Render 'allow' '' }
 
-$Text = Flatten $Text
-$InText = Flatten $InText
+# Do NOT flatten newlines before scanning — ConvertTo-Json escapes them, and the verdict
+# must be made on the real multi-line text (what actually executes).
 
 # ---- config error -----------------------------------------------------------
 $CfgErr = ''
@@ -296,6 +315,14 @@ if ($CfgErr) {
 
 if ([string]::IsNullOrWhiteSpace($Text)) { Dbg "no scannable content for $Label - allowing"; Render 'allow' '' }
 
+# oversized content -> PowerShell can't chunk, so the tail is UNSCANNABLE. Block on input
+# (regardless of fail-mode), warn on output. Never silently allowed.
+if ($Text.Length -gt $MaxBudget) {
+  Log $Label "content_overflow ($($Text.Length) chars > $MaxBudget budget)"
+  if ($Side -eq 'input') { Render 'block' "Content exceeds the AIRS scan budget ($($Text.Length) chars) - blocking unscanned" }
+  else { Render 'warn' "Content exceeds the AIRS scan budget ($($Text.Length) chars) - NOT fully scanned" }
+}
+
 # ---- build AIRS request -----------------------------------------------------
 $AiProfile = if ($ProfileId) { @{ profile_id = $ProfileId } } else { @{ profile_name = $ProfileName } }
 $Session = ''
@@ -307,7 +334,9 @@ if (-not $Session) {
 }
 $Txn = ''
 foreach ($k in @('tool_use_id','prompt_id','turn_id')) { if (-not $Txn) { $v = Field $In $k; if ($v) { $Txn = [string]$v } } }
-if (-not $Txn) { $Txn = $Session }
+# per-event id: synthesize a GUID rather than reusing the session id, so AIRS can distinguish
+# turns even when the client gives no per-turn id.
+if (-not $Txn) { $Txn = [guid]::NewGuid().ToString() }
 
 $Content = switch ($Kind) {
   'prompt'   { $c = @{ prompt = $Text };   if ($CodeAware) { $c['code_prompt'] = $Text };   $c }
@@ -326,7 +355,7 @@ $Content = switch ($Kind) {
     $c
   }
 }
-$Meta = @{ app_user='claude-code-user'; app_name=$AppName; source=$IEvent }
+$Meta = @{ app_user=$AppUser; app_name=$AppName; source=$IEvent }
 if ($ToolName) { $Meta['tool_name'] = $ToolName }
 $Body = @{ transaction_id=$Txn; session_id=$Session; ai_profile=$AiProfile; metadata=$Meta; contents=,$Content }
 $BodyJson = $Body | ConvertTo-Json -Depth 12 -Compress
@@ -340,6 +369,10 @@ for ($attempt = 0; $attempt -le $Retries; $attempt++) {
     $ScanErr = ''; break
   } catch {
     $ScanErr = $_.Exception.Message; $Scan = $null
+    if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $ScanErr += ": " + $_.ErrorDetails.Message }   # response body (PS7)
+    $code = try { [int]$_.Exception.Response.StatusCode } catch { 0 }
+    # 4xx (except 429) won't change on retry — stop retrying a bad key/profile.
+    if ($code -ge 400 -and $code -lt 500 -and $code -ne 429) { break }
   }
 }
 
@@ -367,9 +400,14 @@ if ($Action -eq 'block') {
   $reason += " (scan_id: $ScanId)"
   Log $Label "BLOCK $reason"
   Render 'block' $reason
-} else {
+} elseif ($Action -eq 'allow') {
   $tag = if ($DetStr) { "allow [$DetStr]" } else { 'allow' }
   $tag += " [scan:$ScanId]"
   Log $Label $tag
   Render 'allow' ''
+} else {
+  # Unrecognized action (partial response / API contract drift) is NOT clean -> fail-mode.
+  Log $Label "unexpected action '$Action' - fail-mode ($FailMode)"
+  if ($FailMode -eq 'closed' -and $Side -eq 'input') { Render 'block' "Prisma AIRS returned an unexpected action ('$Action') - blocking (fail-closed)" }
+  else { Render 'warn' "Prisma AIRS returned an unexpected action ('$Action') - allowing (fail-open)" }
 }

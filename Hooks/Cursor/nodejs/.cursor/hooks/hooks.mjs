@@ -16,10 +16,14 @@ function loadConfig(env = process.env) {
     // Default base; the entrypoint overrides with the active adapter's appName.
     appName: suffix ? `Claude Code-${suffix}` : "Claude Code",
     appSuffix: suffix,
-    logPath: str(env.SECURITY_LOG_PATH) || ".claude/hooks/prisma-airs.log",
+    logPath: str(env.SECURITY_LOG_PATH),
+    // per-agent default set in the entrypoint
+    appUser: str(env.AIRS_APP_USER),
+    // per-agent default (<vendor>-user) set in the entrypoint
     timeoutMs: intEnv(env.AIRS_TIMEOUT_MS, 1e4),
     retries: intEnv(env.AIRS_RETRIES, 1),
-    failMode: env.AIRS_FAIL_MODE === "closed" ? "closed" : "open",
+    failMode: env.AIRS_FAIL_MODE === "open" ? "open" : "closed",
+    // default fail-CLOSED on input
     maxContentChars: Math.max(1, intEnv(env.AIRS_MAX_CONTENT_CHARS, 2e4)),
     maxChunks: Math.max(1, intEnv(env.AIRS_MAX_CHUNKS, 6)),
     enableMasking: bool(env.AIRS_ENABLE_MASKING),
@@ -82,7 +86,7 @@ function makeLogger(logPath, cwd, debug) {
 }
 
 // src/router.ts
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 // src/airs.ts
 var CHUNK_OVERLAP = 256;
@@ -166,7 +170,7 @@ async function scan(cfg, content, meta) {
     session_id: meta.sessionId,
     ai_profile: cfg.profile,
     metadata: {
-      app_user: "claude-code-user",
+      app_user: cfg.appUser || "claude-code-user",
       app_name: cfg.appName,
       ...meta.extra ?? {}
     },
@@ -190,6 +194,7 @@ async function scan(cfg, content, meta) {
       const text = await res.text();
       if (!res.ok) {
         lastError = `HTTP ${res.status}: ${text.slice(0, 200)}`;
+        if (res.status < 500 && res.status !== 429) break;
         continue;
       }
       return parseVerdict(text);
@@ -215,6 +220,9 @@ function parseVerdict(text) {
     category: asString(json.category, "unknown"),
     scanId: asString(json.scan_id, "unknown"),
     detections: collectDetections(json),
+    // An unrecognized action (partial response / API contract drift) is NOT clean — surface
+    // it as an error so the fail policy applies instead of falling through to allow.
+    error: action === "unknown" ? `unexpected AIRS action: ${JSON.stringify(json.action)}` : void 0,
     maskedPrompt: extractMasked(json.prompt_masked_data),
     maskedResponse: extractMasked(json.response_masked_data),
     raw: json
@@ -260,17 +268,17 @@ function asString(v, dflt) {
 
 // src/content.ts
 function promptContent(input) {
-  const text = flatten(str2(input.prompt));
+  const text = str2(input.prompt);
   return text.trim().length > 0 ? { kind: "prompt", text } : null;
 }
 function answerContent(input) {
-  const text = flatten(str2(input.last_assistant_message));
+  const text = str2(input.last_assistant_message);
   return text.trim().length > 0 ? { kind: "response", text } : null;
 }
 function preToolContent(input) {
   const toolName = str2(input.tool_name);
   const ti = asObject(input.tool_input);
-  const text = flatten(toolInputText(toolName, ti));
+  const text = toolInputText(toolName, ti);
   if (text.trim().length === 0) return null;
   const { server, tool } = toolIdentity(toolName, ti);
   return { kind: "toolInput", server, tool, text };
@@ -278,10 +286,10 @@ function preToolContent(input) {
 function postToolContent(input, maxInputChars) {
   const toolName = str2(input.tool_name);
   const ti = asObject(input.tool_input);
-  const text = flatten(toolOutputText(input.tool_response ?? input.tool_result));
+  const text = toolOutputText(input.tool_response ?? input.tool_result);
   if (text.trim().length === 0) return null;
   const { server, tool } = toolIdentity(toolName, ti);
-  const inputText = clip(flatten(toolInputText(toolName, ti)), maxInputChars);
+  const inputText = clip(toolInputText(toolName, ti), maxInputChars);
   return { kind: "toolOutput", server, tool, inputText, text };
 }
 function toolInputText(toolName, ti) {
@@ -389,9 +397,6 @@ function collectStrings(value, out = [], depth = 0) {
   }
   return out;
 }
-function flatten(s2) {
-  return s2.replace(/\r/g, "").replace(/\n/g, " ");
-}
 function clip(s2, maxChars) {
   return s2.length > maxChars ? s2.slice(0, maxChars) : s2;
 }
@@ -422,6 +427,9 @@ function decide(verdict, ctx) {
       return { kind: "block", reason: `Prisma AIRS not configured (${ctx.configError}) \u2014 blocking (fail-closed)` };
     }
     return { kind: "warn", message: `Prisma AIRS not configured (${ctx.configError}) \u2014 content NOT scanned` };
+  }
+  if (verdict.category === "content_overflow" && ctx.side === "input" && ctx.event !== "Stop") {
+    return { kind: "block", reason: "Content exceeds the AIRS scan budget \u2014 unscanned tail blocked" };
   }
   if (verdict.error) {
     if (ctx.event === "Stop") return { kind: "warn", message: `AIRS scan error at Stop (${verdict.error}) \u2014 allowing` };
@@ -516,7 +524,7 @@ function isPureDlpMask(v, masked, original) {
 }
 function buildMeta(input) {
   const sessionId = typeof input.session_id === "string" && input.session_id || sha256(String(input.cwd ?? process.cwd())).slice(0, 32);
-  const perEvent = typeof input.tool_use_id === "string" && input.tool_use_id || typeof input.prompt_id === "string" && input.prompt_id || sessionId;
+  const perEvent = typeof input.tool_use_id === "string" && input.tool_use_id || typeof input.prompt_id === "string" && input.prompt_id || randomUUID();
   return { sessionId, transactionId: perEvent };
 }
 function sha256(s2) {
@@ -993,19 +1001,46 @@ function parseArgs(argv) {
   }
   return out;
 }
+var CONFIG_DIRS = {
+  claude: ".claude",
+  codex: ".codex",
+  cursor: ".cursor",
+  cline: ".clinerules",
+  devin: ".devin",
+  antigravity: ".agents",
+  gemini: ".gemini"
+};
+var INPUT_EVENTS = /* @__PURE__ */ new Set([
+  "UserPromptSubmit",
+  "PreToolUse",
+  "beforeSubmitPrompt",
+  "beforeShellExecution",
+  "beforeMCPExecution",
+  "BeforeAgent",
+  "BeforeTool"
+]);
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const cfg = loadConfig();
+  const vendorKey = (args.vendor || "claude").toLowerCase();
+  const adapter = getAdapter(args.vendor);
+  cfg.appName = cfg.appSuffix ? `${adapter.appName}-${cfg.appSuffix}` : adapter.appName;
+  cfg.appUser = cfg.appUser || `${vendorKey}-user`;
+  cfg.logPath = cfg.logPath || `${CONFIG_DIRS[vendorKey] ?? ".claude"}/hooks/prisma-airs.log`;
   const raw = await readStdin();
   let parsed = {};
   try {
     parsed = raw.trim() ? JSON.parse(raw) : {};
   } catch {
-    process.stderr.write("[airs-hook] could not parse hook input JSON \u2014 allowing\n");
-    process.exit(0);
+    process.stderr.write("[airs-hook] could not parse hook input JSON\n");
+    if (cfg.failMode === "closed" && INPUT_EVENTS.has(String(args.event))) {
+      process.stderr.write("[airs-hook] unparseable input \u2014 blocking (fail-closed)\n");
+      process.exitCode = 2;
+    } else {
+      process.exitCode = 0;
+    }
+    return;
   }
-  const cfg = loadConfig();
-  const adapter = getAdapter(args.vendor);
-  cfg.appName = cfg.appSuffix ? `${adapter.appName}-${cfg.appSuffix}` : adapter.appName;
   const input = adapter.normalize(parsed, args.event);
   const cwd = String(input.cwd ?? parsed.cwd ?? process.cwd());
   const log = makeLogger(cfg.logPath, cwd, cfg.debug);
@@ -1013,18 +1048,19 @@ async function main() {
     const { event, decision } = await route(input, cfg, log, adapter.capabilities);
     const outcome = adapter.render(event, decision);
     if (outcome.stderr) process.stderr.write(outcome.stderr);
+    process.exitCode = outcome.exitCode ?? 0;
     if (outcome.stdout) process.stdout.write(outcome.stdout);
-    process.exit(outcome.exitCode ?? 0);
   } catch (err) {
     const event = String(input.hook_event_name ?? "");
     const isStop = event === "Stop";
     log.log(`internal error (${event || "?"}): ${String(err?.stack ?? err)}`);
     if (cfg.failMode === "closed" && !isStop) {
       process.stderr.write("[airs-hook] internal error \u2014 blocking (fail-closed)\n");
-      process.exit(2);
+      process.exitCode = 2;
+    } else {
+      process.stderr.write("[airs-hook] internal error \u2014 allowing (fail-open)\n");
+      process.exitCode = 0;
     }
-    process.stderr.write("[airs-hook] internal error \u2014 allowing (fail-open)\n");
-    process.exit(0);
   }
 }
 function readStdin() {

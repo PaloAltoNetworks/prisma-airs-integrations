@@ -40,29 +40,39 @@ API_URL="$BASE_URL/v1/scan/sync/request"
 API_KEY="${PRISMA_AIRS_API_KEY:-}"
 PROFILE_ID="${PRISMA_AIRS_PROFILE_ID:-}"
 PROFILE_NAME="${PRISMA_AIRS_PROFILE_NAME:-}"
-LOG_FILE="${SECURITY_LOG_PATH:-.claude/hooks/prisma-airs.log}"
+LOG_FILE="${SECURITY_LOG_PATH:-}"   # default set per-agent below (under this agent's config dir)
 TIMEOUT_MS="${AIRS_TIMEOUT_MS:-10000}"
 RETRIES="${AIRS_RETRIES:-1}"
-FAIL_MODE="${AIRS_FAIL_MODE:-open}"
+FAIL_MODE="${AIRS_FAIL_MODE:-closed}"   # default fail-CLOSED on the input side (block on scan failure)
 SUFFIX="${AIRS_APP_SUFFIX:-${CLAUDE_CODE_APP_SUFFIX:-}}"
 DEBUG="${AIRS_DEBUG:-0}"
+# bash has no chunking: content past this budget can't be scanned -> fail-mode (mirrors the
+# node engine's maxContentChars*maxChunks). Never silently allowed.
+MAX_CHARS="${AIRS_MAX_CONTENT_CHARS:-20000}"; MAX_CHUNKS="${AIRS_MAX_CHUNKS:-6}"
+case "$MAX_CHARS"  in ''|*[!0-9]*) MAX_CHARS=20000 ;; esac
+case "$MAX_CHUNKS" in ''|*[!0-9]*) MAX_CHUNKS=6 ;; esac
+MAX_BUDGET=$(( MAX_CHARS * MAX_CHUNKS ))
 case "${AIRS_CODE_AWARE:-1}" in 1|true|yes) CODE_AWARE=1 ;; *) CODE_AWARE=0 ;; esac
 case "$TIMEOUT_MS" in ''|*[!0-9]*) TIMEOUT_MS=10000 ;; esac
 TIMEOUT_S=$(( (TIMEOUT_MS + 999) / 1000 )); [ "$TIMEOUT_S" -lt 1 ] && TIMEOUT_S=1
 case "$RETRIES" in ''|*[!0-9]*) RETRIES=1 ;; esac
 
-# vendor -> app_name for AIRS metadata
+# vendor -> app_name + config dir for AIRS metadata / default log path
 case "$VENDOR" in
-  claude)      APP_NAME="Claude Code" ;;
-  codex)       APP_NAME="Codex CLI" ;;
-  cursor)      APP_NAME="Cursor" ;;
-  cline)       APP_NAME="Cline" ;;
-  devin)       APP_NAME="Devin CLI" ;;
-  antigravity) APP_NAME="Antigravity" ;;
-  gemini)      APP_NAME="Gemini CLI" ;;
-  *)           APP_NAME="Claude Code" ;;
+  claude)      APP_NAME="Claude Code"; CFGDIR=".claude" ;;
+  codex)       APP_NAME="Codex CLI";   CFGDIR=".codex" ;;
+  cursor)      APP_NAME="Cursor";      CFGDIR=".cursor" ;;
+  cline)       APP_NAME="Cline";       CFGDIR=".clinerules" ;;
+  devin)       APP_NAME="Devin CLI";   CFGDIR=".devin" ;;
+  antigravity) APP_NAME="Antigravity"; CFGDIR=".agents" ;;
+  gemini)      APP_NAME="Gemini CLI";  CFGDIR=".gemini" ;;
+  *)           APP_NAME="Claude Code"; CFGDIR=".claude" ;;
 esac
 [ -n "$SUFFIX" ] && APP_NAME="$APP_NAME-$SUFFIX"
+# app_user now reflects the actual agent (was hardcoded "claude-code-user"); env-overridable.
+APP_USER="${AIRS_APP_USER:-${VENDOR}-user}"
+# log defaults under THIS agent's config dir, not always .claude/
+[ -z "$LOG_FILE" ] && LOG_FILE="$CFGDIR/hooks/prisma-airs.log"
 
 dbg() { [ "$DEBUG" = "1" ] || [ "$DEBUG" = "true" ] && printf '[airs-hooks] %s\n' "$1" >&2; return 0; }
 
@@ -350,8 +360,8 @@ if [ "$IEVENT" = "Stop" ] && { [ "$STOP_ACTIVE" = "true" ] || [ "$STOP_ACTIVE" =
   dbg "stop_hook_active set — allowing (loop guard)"; render allow ""
 fi
 
-TEXT="$(flatten "$TEXT")"
-INTEXT="$(flatten "$INTEXT")"
+# Do NOT flatten newlines before scanning — jq --arg escapes them, and the verdict must be
+# made on the real multi-line text (what actually executes), not a space-collapsed version.
 
 # ----------------------------------------------------------------------------
 # config error -> fail-closed on input, warn on output
@@ -373,6 +383,17 @@ if [ -z "$(printf '%s' "$TEXT" | tr -d '[:space:]')" ]; then
   dbg "no scannable content for $LABEL — allowing"; render allow ""
 fi
 
+# oversized content -> bash can't chunk, so the tail is UNSCANNABLE. Treat as a coverage gap:
+# block on the input side (regardless of fail-mode), warn on output. Never silently allowed.
+if [ "${#TEXT}" -gt "$MAX_BUDGET" ]; then
+  log_line "$LABEL" "content_overflow (${#TEXT} chars > $MAX_BUDGET budget)"
+  if [ "$SIDE" = "input" ]; then
+    render block "Content exceeds the AIRS scan budget (${#TEXT} chars) — blocking unscanned"
+  else
+    render warn "Content exceeds the AIRS scan budget (${#TEXT} chars) — NOT fully scanned"
+  fi
+fi
+
 # ----------------------------------------------------------------------------
 # build AIRS request body (content type depends on KIND)
 # ----------------------------------------------------------------------------
@@ -385,7 +406,14 @@ if [ -z "$SESSION" ]; then
   CWD="$(j '.cwd // empty')"; [ -z "$CWD" ] && CWD="$PWD"
   SESSION="$(printf '%s' "$CWD" | { command -v sha256sum >/dev/null 2>&1 && sha256sum || shasum -a 256; } 2>/dev/null | cut -c1-32)"
 fi
-TXN="$(j '.tool_use_id // .prompt_id // .turn_id // empty')"; [ -z "$TXN" ] && TXN="$SESSION"
+TXN="$(j '.tool_use_id // .prompt_id // .turn_id // empty')"
+if [ -z "$TXN" ]; then
+  # per-event id: synthesize a UUID rather than reusing SESSION, so AIRS can distinguish
+  # turns even when the client (e.g. Cursor) gives no per-turn id.
+  TXN="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+  [ -z "$TXN" ] && TXN="$(cat /proc/sys/kernel/random/uuid 2>/dev/null)"
+  [ -z "$TXN" ] && TXN="${IEVENT}-$$-$(date +%s 2>/dev/null)-${RANDOM}"
+fi
 
 build_content() {
   case "$KIND" in
@@ -408,7 +436,7 @@ CONTENT="$(build_content)"
 
 BODY="$(jq -nc \
   --arg txn "$TXN" --arg sid "$SESSION" --argjson prof "$AI_PROFILE" \
-  --arg app_user "claude-code-user" --arg app_name "$APP_NAME" \
+  --arg app_user "$APP_USER" --arg app_name "$APP_NAME" \
   --arg tool_name "$TOOL_NAME" --arg source "$IEVENT" --argjson content "$CONTENT" \
   '{transaction_id:$txn, session_id:$sid, ai_profile:$prof,
     metadata:{app_user:$app_user, app_name:$app_name, source:$source}
@@ -421,13 +449,20 @@ BODY="$(jq -nc \
 SCAN=""; SCAN_ERR=""
 attempt=0
 while [ "$attempt" -le "$RETRIES" ]; do
-  RESP="$(curl -s -L --max-time "$TIMEOUT_S" \
+  # Body on STDIN (--data-binary @-) so a large tool output never hits ARG_MAX; the API key
+  # goes via a process-substitution fd (-H @<(...)) so it never appears in the process table
+  # (ps) or on disk. curl >= 7.55 (2017) supports -H @file.
+  RESP="$(printf '%s' "$BODY" | curl -s -L --max-time "$TIMEOUT_S" \
     -H "Content-Type: application/json" -H "Accept: application/json" \
-    -H "x-pan-token: $API_KEY" -w $'\n%{http_code}' -d "$BODY" "$API_URL" 2>/dev/null)"
+    -H @<(printf 'x-pan-token: %s\n' "$API_KEY") \
+    -w $'\n%{http_code}' --data-binary @- "$API_URL" 2>/dev/null)"
   CURL_RC=$?
   HTTP_CODE="${RESP##*$'\n'}"; BODY_TEXT="${RESP%$'\n'*}"
   if [ "$CURL_RC" -ne 0 ]; then SCAN_ERR="curl failed (rc=$CURL_RC, timeout ${TIMEOUT_S}s)";
-  elif [ "${HTTP_CODE:0:1}" != "2" ]; then SCAN_ERR="HTTP $HTTP_CODE: $(printf '%s' "$BODY_TEXT" | head -c 200)";
+  elif [ "${HTTP_CODE:0:1}" != "2" ]; then
+    SCAN_ERR="HTTP $HTTP_CODE: $(printf '%s' "$BODY_TEXT" | head -c 200)"
+    # 4xx (except 429) won't change on retry — don't waste a round-trip on a bad key/profile.
+    case "$HTTP_CODE" in 429|5??) : ;; 4??) break ;; esac
   else SCAN="$BODY_TEXT"; SCAN_ERR=""; break; fi
   attempt=$((attempt+1))
 done
@@ -463,8 +498,17 @@ if [ "$ACTION" = "block" ]; then
   REASON="$REASON (scan_id: $SCAN_ID)"
   log_line "$LABEL" "BLOCK $REASON"
   render block "$REASON"
-else
+elif [ "$ACTION" = "allow" ]; then
   TAG="allow"; [ -n "$DETS" ] && TAG="allow [$DETS]"; TAG="$TAG [scan:$SCAN_ID]"
   log_line "$LABEL" "$TAG"
   render allow ""
+else
+  # Unrecognized action (partial response / API contract drift) is NOT clean -> fail-mode
+  # instead of silently allowing.
+  log_line "$LABEL" "unexpected action '$ACTION' — fail-mode ($FAIL_MODE)"
+  if [ "$FAIL_MODE" = "closed" ] && [ "$SIDE" = "input" ]; then
+    render block "Prisma AIRS returned an unexpected action ('$ACTION') — blocking (fail-closed)"
+  else
+    render warn "Prisma AIRS returned an unexpected action ('$ACTION') — allowing (fail-open)"
+  fi
 fi
