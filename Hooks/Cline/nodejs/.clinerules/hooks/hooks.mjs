@@ -22,8 +22,8 @@ function loadConfig(env = process.env) {
     // per-agent default (<vendor>-user) set in the entrypoint
     timeoutMs: intEnv(env.AIRS_TIMEOUT_MS, 1e4),
     retries: intEnv(env.AIRS_RETRIES, 1),
-    failMode: env.AIRS_FAIL_MODE === "open" ? "open" : "closed",
-    // default fail-CLOSED on input
+    // Normalize case/whitespace: only a clean "open" opts out; everything else stays fail-CLOSED.
+    failMode: str(env.AIRS_FAIL_MODE).toLowerCase() === "open" ? "open" : "closed",
     maxContentChars: Math.max(1, intEnv(env.AIRS_MAX_CONTENT_CHARS, 2e4)),
     maxChunks: Math.max(1, intEnv(env.AIRS_MAX_CHUNKS, 6)),
     enableMasking: bool(env.AIRS_ENABLE_MASKING),
@@ -268,17 +268,19 @@ function asString(v, dflt) {
 
 // src/content.ts
 function promptContent(input) {
-  const text = str2(input.prompt);
+  const text = s(input.prompt);
   return text.trim().length > 0 ? { kind: "prompt", text } : null;
 }
 function answerContent(input) {
-  const text = str2(input.last_assistant_message);
+  const text = s(input.last_assistant_message);
   return text.trim().length > 0 ? { kind: "response", text } : null;
 }
 function preToolContent(input) {
   const toolName = str2(input.tool_name);
-  const ti = asObject(input.tool_input);
-  const text = toolInputText(toolName, ti);
+  const rawTi = input.tool_input;
+  const ti = asObject(rawTi);
+  const isPlainObject = rawTi != null && typeof rawTi === "object" && !Array.isArray(rawTi);
+  const text = isPlainObject ? toolInputText(toolName, ti) : s(rawTi);
   if (text.trim().length === 0) return null;
   const { server, tool } = toolIdentity(toolName, ti);
   return { kind: "toolInput", server, tool, text };
@@ -387,13 +389,16 @@ function names(toolName) {
   return { server: `claude-code/${toolName || "unknown"}`, tool: toolName || "unknown" };
 }
 function collectStrings(value, out = [], depth = 0) {
-  if (depth > 6) return out;
+  if (depth > 64) return out;
   if (typeof value === "string") {
     if (value.length > 0) out.push(value);
   } else if (Array.isArray(value)) {
     for (const v of value) collectStrings(v, out, depth + 1);
   } else if (value && typeof value === "object") {
-    for (const v of Object.values(value)) collectStrings(v, out, depth + 1);
+    for (const [k, v] of Object.entries(value)) {
+      if (k.length > 0) out.push(k);
+      collectStrings(v, out, depth + 1);
+    }
   }
   return out;
 }
@@ -507,6 +512,7 @@ async function tryMask(input, plan, cfg, scanMeta, event) {
       const updatedInput = { ...input.tool_input, [field.field]: masked };
       return { kind: "maskInput", updatedInput, note: `Prisma AIRS masked sensitive data in ${input.tool_name} ${field.field} (scan_id: ${v.scanId})` };
     }
+    if (v.action === "block") return { kind: "block", reason: reasonText(v) };
     return null;
   }
   if (event === "PostToolUse" && plan.kind === "toolOutput") {
@@ -515,6 +521,7 @@ async function tryMask(input, plan, cfg, scanMeta, event) {
     if (isPureDlpMask(v, masked, plan.text)) {
       return { kind: "maskOutput", updatedOutput: masked, note: `Prisma AIRS masked sensitive data in ${input.tool_name} output (scan_id: ${v.scanId})` };
     }
+    if (v.action === "block") return { kind: "block", reason: reasonText(v) };
     return null;
   }
   return null;
@@ -697,7 +704,7 @@ var cursorAdapter = {
     input.hook_event_name = mapEvent3(eventName);
     if (eventName === "beforeShellExecution") {
       input.tool_name = "Shell";
-      input.tool_input = { command: typeof raw.command === "string" ? raw.command : "" };
+      input.tool_input = { command: raw.command };
     } else if (raw.tool_name !== void 0) {
       input.tool_name = normalizeToolName(raw.tool_name);
     }
@@ -771,21 +778,21 @@ var clineAdapter = {
     switch (eventName) {
       case "UserPromptSubmit": {
         input.hook_event_name = "UserPromptSubmit";
-        input.prompt = str3(obj(raw.userPromptSubmit).prompt);
+        input.prompt = obj(raw.userPromptSubmit).prompt;
         break;
       }
       case "PreToolUse": {
         input.hook_event_name = "PreToolUse";
         const p = obj(raw.preToolUse);
         input.tool_name = str3(p.toolName);
-        input.tool_input = obj(p.parameters);
+        input.tool_input = p.parameters ?? {};
         break;
       }
       case "PostToolUse": {
         input.hook_event_name = "PostToolUse";
         const p = obj(raw.postToolUse);
         input.tool_name = str3(p.toolName);
-        input.tool_input = obj(p.parameters);
+        input.tool_input = p.parameters ?? {};
         input.tool_response = p.result;
         break;
       }
@@ -919,7 +926,7 @@ function makeGeminiAdapter(name, appName) {
       if (input.tool_name === void 0 && raw.toolCall && typeof raw.toolCall === "object") {
         const tc = raw.toolCall;
         if (typeof tc.name === "string") input.tool_name = tc.name;
-        if (tc.args && typeof tc.args === "object") input.tool_input = tc.args;
+        if (tc.args !== void 0) input.tool_input = tc.args;
       }
       if (input.session_id === void 0 && typeof raw.conversationId === "string") input.session_id = raw.conversationId;
       return input;
@@ -1017,7 +1024,10 @@ var INPUT_EVENTS = /* @__PURE__ */ new Set([
   "beforeShellExecution",
   "beforeMCPExecution",
   "BeforeAgent",
-  "BeforeTool"
+  "BeforeTool",
+  // Antigravity/Gemini turn-start alias — the adapter maps it to UserPromptSubmit (input),
+  // so an unparseable payload on this event must fail CLOSED like the others.
+  "PreInvocation"
 ]);
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -1027,34 +1037,66 @@ async function main() {
   cfg.appName = cfg.appSuffix ? `${adapter.appName}-${cfg.appSuffix}` : adapter.appName;
   cfg.appUser = cfg.appUser || `${vendorKey}-user`;
   cfg.logPath = cfg.logPath || `${CONFIG_DIRS[vendorKey] ?? ".claude"}/hooks/prisma-airs.log`;
+  const failClosed = (why) => {
+    process.stderr.write(`[airs-hook] ${why}
+`);
+    const ev = args.event ? String(args.event) : "";
+    if (cfg.failMode !== "closed" || ev !== "" && !INPUT_EVENTS.has(ev)) {
+      process.exitCode = 0;
+      return;
+    }
+    let internal;
+    try {
+      internal = adapter.normalize({}, args.event).hook_event_name;
+    } catch {
+      internal = void 0;
+    }
+    if (internal) {
+      try {
+        const outcome = adapter.render(internal, { kind: "block", reason: `Prisma AIRS: ${why} \u2014 blocking (fail-closed)` });
+        if (outcome.stderr) process.stderr.write(outcome.stderr);
+        if (outcome.stdout) {
+          process.stdout.write(outcome.stdout);
+          process.exitCode = outcome.exitCode ?? 0;
+          return;
+        }
+        if (outcome.exitCode) {
+          process.exitCode = outcome.exitCode;
+          return;
+        }
+      } catch {
+      }
+    }
+    process.exitCode = 2;
+  };
   const raw = await readStdin();
   let parsed = {};
   try {
     parsed = raw.trim() ? JSON.parse(raw) : {};
   } catch {
-    process.stderr.write("[airs-hook] could not parse hook input JSON\n");
-    if (cfg.failMode === "closed" && INPUT_EVENTS.has(String(args.event))) {
-      process.stderr.write("[airs-hook] unparseable input \u2014 blocking (fail-closed)\n");
-      process.exitCode = 2;
-    } else {
-      process.exitCode = 0;
-    }
+    failClosed("hook input is not valid JSON");
     return;
   }
-  const input = adapter.normalize(parsed, args.event);
-  const cwd = String(input.cwd ?? parsed.cwd ?? process.cwd());
-  const log = makeLogger(cfg.logPath, cwd, cfg.debug);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    failClosed("hook input is not a JSON object");
+    return;
+  }
+  const parsedObj = parsed;
+  let input;
   try {
+    input = adapter.normalize(parsedObj, args.event);
+    const cwd = String(input.cwd ?? parsedObj.cwd ?? process.cwd());
+    const log = makeLogger(cfg.logPath, cwd, cfg.debug);
     const { event, decision } = await route(input, cfg, log, adapter.capabilities);
     const outcome = adapter.render(event, decision);
     if (outcome.stderr) process.stderr.write(outcome.stderr);
     process.exitCode = outcome.exitCode ?? 0;
     if (outcome.stdout) process.stdout.write(outcome.stdout);
   } catch (err) {
-    const event = String(input.hook_event_name ?? "");
-    const isStop = event === "Stop";
-    log.log(`internal error (${event || "?"}): ${String(err?.stack ?? err)}`);
-    if (cfg.failMode === "closed" && !isStop) {
+    const evName = String(input?.hook_event_name ?? args.event ?? "");
+    process.stderr.write(`[airs-hook] internal error (${evName || "?"}): ${String(err?.stack ?? err)}
+`);
+    if (cfg.failMode === "closed" && INPUT_EVENTS.has(String(args.event))) {
       process.stderr.write("[airs-hook] internal error \u2014 blocking (fail-closed)\n");
       process.exitCode = 2;
     } else {

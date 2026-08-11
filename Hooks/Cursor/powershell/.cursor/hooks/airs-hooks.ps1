@@ -19,9 +19,17 @@ param(
   [string]$EventName = ''
 )
 $ErrorActionPreference = 'Stop'
+# Suppress the WARNING stream: ConvertTo-Json emits a depth-truncation warning that, on this host,
+# can surface on STDOUT and corrupt the deny-JSON decision channel (clients parse stdout as JSON).
+$WarningPreference = 'SilentlyContinue'
 $Vendor = $Vendor.ToLower()
 # Windows PowerShell 5.1 defaults to old TLS — force 1.2 so the AIRS HTTPS call works.
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+
+# Parse a non-negative integer env var WITHOUT throwing. A bad value (e.g. AIRS_TIMEOUT_MS=abc)
+# must never crash config parsing into a bare `exit 1` — which every client reads as a
+# non-blocking hook error (fail-OPEN). Mirrors the bash `case ''|*[!0-9]*` guard.
+function IntEnv([string]$v, [int]$d) { $n = 0; if ([int]::TryParse($v, [ref]$n) -and $n -ge 0) { $n } else { $d } }
 
 # ---- config -----------------------------------------------------------------
 $BaseUrl     = if ($env:PRISMA_AIRS_URL) { $env:PRISMA_AIRS_URL.TrimEnd('/') } else { 'https://service.api.aisecurity.paloaltonetworks.com' }
@@ -30,16 +38,18 @@ $ApiKey      = $env:PRISMA_AIRS_API_KEY
 $ProfileId   = $env:PRISMA_AIRS_PROFILE_ID
 $ProfileName = $env:PRISMA_AIRS_PROFILE_NAME
 $LogFile     = if ($env:SECURITY_LOG_PATH) { $env:SECURITY_LOG_PATH } else { '' }   # per-agent default set below
-$TimeoutMs   = if ($env:AIRS_TIMEOUT_MS) { [int]$env:AIRS_TIMEOUT_MS } else { 10000 }
-$Retries     = if ($env:AIRS_RETRIES) { [int]$env:AIRS_RETRIES } else { 1 }
-$FailMode    = if ($env:AIRS_FAIL_MODE) { $env:AIRS_FAIL_MODE } else { 'closed' }   # default fail-CLOSED on input
+$TimeoutMs   = IntEnv $env:AIRS_TIMEOUT_MS 10000
+$Retries     = IntEnv $env:AIRS_RETRIES 1
+# normalize case/whitespace so "CLOSED" / "Closed" / " closed " all mean closed; only a clean "open" opts out.
+$FailMode    = if ($env:AIRS_FAIL_MODE) { $env:AIRS_FAIL_MODE.Trim().ToLower() } else { 'closed' }
+if ($FailMode -ne 'open') { $FailMode = 'closed' }
 $Suffix      = if ($env:AIRS_APP_SUFFIX) { $env:AIRS_APP_SUFFIX } elseif ($env:CLAUDE_CODE_APP_SUFFIX) { $env:CLAUDE_CODE_APP_SUFFIX } else { '' }
 $Debug       = ($env:AIRS_DEBUG -in @('1','true','yes'))
 $CodeAware   = ($null -eq $env:AIRS_CODE_AWARE) -or ($env:AIRS_CODE_AWARE -in @('1','true','yes'))
 $TimeoutSec  = [int][math]::Ceiling($TimeoutMs / 1000.0); if ($TimeoutSec -lt 1) { $TimeoutSec = 1 }
 # PowerShell has no chunking: content past this budget can't be scanned -> fail-mode.
-$MaxChars    = if ($env:AIRS_MAX_CONTENT_CHARS) { [int]$env:AIRS_MAX_CONTENT_CHARS } else { 20000 }
-$MaxChunks   = if ($env:AIRS_MAX_CHUNKS) { [int]$env:AIRS_MAX_CHUNKS } else { 6 }
+$MaxChars    = IntEnv $env:AIRS_MAX_CONTENT_CHARS 20000; if ($MaxChars -lt 1) { $MaxChars = 20000 }
+$MaxChunks   = IntEnv $env:AIRS_MAX_CHUNKS 6; if ($MaxChunks -lt 1) { $MaxChunks = 6 }
 $MaxBudget   = $MaxChars * $MaxChunks
 
 $AppName = switch ($Vendor) {
@@ -64,7 +74,7 @@ if (-not $LogFile) { $LogFile = "$CfgDir/hooks/prisma-airs.log" }
 function Dbg($m) { if ($Debug) { [Console]::Error.WriteLine("[airs-hooks] $m") } }
 
 # ---- read stdin once --------------------------------------------------------
-$Raw = [Console]::In.ReadToEnd()
+$Raw = ''; try { $Raw = [Console]::In.ReadToEnd() } catch { $Raw = '' }
 $In  = $null
 if ($Raw -and $Raw.Trim().Length -gt 0) { try { $In = $Raw | ConvertFrom-Json } catch { $In = $null } }
 function Field($obj, [string]$name) { if ($null -eq $obj) { return $null } $p = $obj.PSObject.Properties[$name]; if ($p) { $p.Value } else { $null } }
@@ -166,7 +176,9 @@ function Render([string]$kind, [string]$text) {
 # bubbling up as a bare exit 1 (which every client reads as non-blocking). Render calls exit.
 trap {
   try { [Console]::Error.Write("[airs-hooks] internal error - $($_.Exception.Message)`n") } catch { }
-  if ($FailMode -eq 'closed' -and $Side -eq 'input') { Render 'block' "Prisma AIRS internal error - blocking (fail-closed)" }
+  # Fail-closed on the input side unless fail-open was explicitly requested — default to block
+  # even when $FailMode was never assigned (an error before config parsing).
+  if ($Side -eq 'input' -and $FailMode -ne 'open') { Render 'block' "Prisma AIRS internal error - blocking (fail-closed)" }
   Render 'allow' ''
 }
 
@@ -179,20 +191,38 @@ function Log([string]$label, [string]$tag) {
   } catch { }
 }
 
+# malformed / non-object stdin — non-empty raw that ConvertFrom-Json rejected, or a JSON
+# primitive/array/null (top-level hook input is always an object). Runs BEFORE the unhandled-event
+# allow so a malformed body with NO resolvable event fails CLOSED (as bash/node do). The leading-'['
+# check catches a single-element array [{...}] that `$Raw | ConvertFrom-Json` unwraps to an object.
+if ($Raw.Trim().Length -gt 0 -and ($Raw.Trim()[0] -eq '[' -or -not ($In -is [System.Management.Automation.PSCustomObject]))) {
+  Log 'input' "unscannable (hook input is not a JSON object)"
+  if (-not $IEvent) { [Console]::Error.Write("`n[BLOCKED] Prisma AIRS could not scan (hook input is not a JSON object) - fail-closed`n`n"); exit 2 }
+  if ($Side -eq 'input') { Render 'block' "Prisma AIRS could not scan (hook input is not a JSON object) - blocking (fail-closed)" }
+  else { Render 'warn' "Prisma AIRS could not scan (hook input is not a JSON object) - content NOT scanned" }
+}
+
 if (-not $IEvent) { Dbg "unhandled event '$RawEvent' for vendor '$Vendor'"; Render 'allow' '' }
 
 # ---- helpers ----------------------------------------------------------------
-function JStr($v) { if ($v -is [string]) { $v } elseif ($null -eq $v) { '' } else { $v | ConvertTo-Json -Compress -Depth 10 } }
-function JoinF([object[]]$parts) { ($parts | ForEach-Object { if ($null -eq $_) { } elseif ($_ -is [string]) { if ($_ -ne '') { $_ } } else { $_ | ConvertTo-Json -Compress -Depth 10 } }) -join "`n" }
+# For a non-string value, collect all strings/keys recursively (depth-gated via $script:OverDepth)
+# rather than ConvertTo-Json -Depth 10, which truncated a deep structured field value to a lossy
+# stub and dropped the injection -> input-side fail-open. Get-AllStrings is defined below.
+function JStr($v) { if ($v -is [string]) { $v } elseif ($null -eq $v) { '' } else { (Get-AllStrings $v) -join "`n" } }
+function JoinF([object[]]$parts) { ($parts | ForEach-Object { if ($null -eq $_) { } elseif ($_ -is [string]) { if ($_ -ne '') { $_ } } else { (Get-AllStrings $_) -join "`n" } }) -join "`n" }
 function Flatten([string]$s) { if ($null -eq $s) { '' } else { $s -replace "[\r\n]", ' ' } }
 
 function Get-AllStrings($o) {
+  # Collect every string VALUE and every object KEY, recursively. Depth cap is 64 (well beyond
+  # any real MCP/tool payload) — content nested deeper is flagged via $script:OverDepth so the
+  # caller can fail-closed on the input side instead of silently dropping an unscanned payload.
   $acc = New-Object System.Collections.Generic.List[string]
   function _walk($x, $d) {
-    if ($d -gt 6 -or $null -eq $x) { return }
+    if ($null -eq $x) { return }
+    if ($d -gt 199) { $script:OverDepth = $true; return }   # align with bash's <200 depth gate; avoid over-blocking realistic deep-but-benign input
     if ($x -is [string]) { if ($x.Length -gt 0) { $acc.Add($x) } }
     elseif ($x -is [System.Collections.IEnumerable] -and -not ($x -is [string])) { foreach ($e in $x) { _walk $e ($d+1) } }
-    elseif ($x -is [System.Management.Automation.PSCustomObject]) { foreach ($p in $x.PSObject.Properties) { _walk $p.Value ($d+1) } }
+    elseif ($x -is [System.Management.Automation.PSCustomObject]) { foreach ($p in $x.PSObject.Properties) { if ($p.Name) { $acc.Add([string]$p.Name) }; _walk $p.Value ($d+1) } }
   }
   _walk $o 0
   $acc
@@ -229,34 +259,41 @@ function ToolIdentity([string]$name, $ti) {
 }
 
 function ToolInputText([string]$name, $ti) {
+  # non-object tool_input (array/primitive) can't be field-indexed; collect it wholesale so a
+  # primitive/array injection for a KNOWN built-in tool isn't dropped to empty (input-side fail-open).
+  if ($null -ne $ti -and -not ($ti -is [System.Management.Automation.PSCustomObject])) { return (Get-AllStrings $ti) -join "`n" }
   switch ($name) {
     'Bash'         { JoinF @((Field $ti 'command'), (Field $ti 'description')) }
     'WebFetch'     { JoinF @((Field $ti 'url'), (Field $ti 'prompt')) }
-    'WebSearch'    { [string](Field $ti 'query') }
+    'WebSearch'    { JStr (Field $ti 'query') }
     'Write'        { JoinF @((Field $ti 'file_path'), (Field $ti 'content')) }
     'Edit'         { JoinF @((Field $ti 'file_path'), (Field $ti 'old_string'), (Field $ti 'new_string')) }
-    'Read'         { [string](Field $ti 'file_path') }
+    'Read'         { JStr (Field $ti 'file_path') }
     'Glob'         { JoinF @((Field $ti 'pattern'), (Field $ti 'path')) }
     'Grep'         { JoinF @((Field $ti 'pattern'), (Field $ti 'path')) }
     'Task'         { JoinF @((Field $ti 'description'), (Field $ti 'subagent_type'), (Field $ti 'prompt')) }
     'NotebookEdit' { JoinF @((Field $ti 'notebook_path'), (Field $ti 'new_source')) }
-    'TodoWrite'    { JStr (Field $ti 'todos') }
-    'ExitPlanMode' { [string](Field $ti 'plan') }
+    'TodoWrite'    { (Get-AllStrings (Field $ti 'todos')) -join "`n" }
+    'ExitPlanMode' { JStr (Field $ti 'plan') }
     { $_ -in @('ReadMcpResourceTool','ReadMcpResourceDirTool') } { JoinF @((Field $ti 'server'), (Field $ti 'uri'), (Field $ti 'path')) }
-    'ListMcpResourcesTool' { [string](Field $ti 'server') }
-    default { if ($null -eq $ti) { '' } else { $ti | ConvertTo-Json -Compress -Depth 10 } }
+    'ListMcpResourcesTool' { JStr (Field $ti 'server') }
+    default { if ($null -eq $ti) { '' } else { (Get-AllStrings $ti) -join "`n" } }  # recurse (no Depth-10 truncation); over-depth is flagged for fail-closed
   }
 }
 function NormToolName([string]$n) { if ($n -like 'MCP:*') { 'mcp__' + (($n.Substring(4)) -replace ':', '__') } else { $n } }
 
 # ---- normalize + ScanPlan ---------------------------------------------------
 $Kind=''; $Text=''; $Server=''; $Tool=''; $InText=''; $ToolName=''; $StopActive=$false; $Label=''
+$script:OverDepth = $false   # set by Get-AllStrings when content nests past the scan-depth cap
 switch ($IEvent) {
   'UserPromptSubmit' {
     $Label='user prompt'; $Kind='prompt'
+    # Get-AllStrings (not JStr): a non-string prompt (array/object) is collected recursively — depth
+    # gated by $script:OverDepth — instead of JStr's ConvertTo-Json -Depth 10, which would truncate a
+    # deep injection to a lossy stub and fail open. For a plain string it returns the string as-is.
     $Text = switch ($Vendor) {
-      'cline'    { [string](Field (Field $In 'userPromptSubmit') 'prompt') }
-      default    { [string](Field $In 'prompt') }
+      'cline'    { (Get-AllStrings (Field (Field $In 'userPromptSubmit') 'prompt')) -join "`n" }
+      default    { (Get-AllStrings (Field $In 'prompt')) -join "`n" }
     }
   }
   'PreToolUse' {
@@ -264,7 +301,7 @@ switch ($IEvent) {
     switch ($Vendor) {
       'cline'    { $ToolName=[string](Field (Field $In 'preToolUse') 'toolName'); $ti=Field (Field $In 'preToolUse') 'parameters' }
       'cursor'   {
-        if ($RawEvent -eq 'beforeShellExecution') { $ToolName='Shell'; $ti=[pscustomobject]@{ command=[string](Field $In 'command') } }
+        if ($RawEvent -eq 'beforeShellExecution') { $ToolName='Shell'; $ti=[pscustomobject]@{ command=(Field $In 'command') } }  # keep raw (no [string] cast) so a non-string command is collected, not collapsed to a lossy stub
         else { $ToolName=NormToolName([string](Field $In 'tool_name')); $ti=Field $In 'tool_input' }
       }
       { $_ -in @('antigravity','gemini') } { $tn=Field $In 'tool_name'; if (-not $tn) { $tn=Field (Field $In 'toolCall') 'name' }; $ToolName=[string]$tn; $ti=Field $In 'tool_input'; if ($null -eq $ti) { $ti=Field (Field $In 'toolCall') 'args' } }
@@ -313,6 +350,14 @@ if ($CfgErr) {
   else { Render 'warn' "Prisma AIRS not configured ($CfgErr) - content NOT scanned" }
 }
 
+# over-depth is checked BEFORE the empty-content allow: a payload nested past the depth cap
+# (e.g. a pure deep ARRAY with no collectable keys/strings) collects to empty $Text, which would
+# otherwise hit the empty-content allow and fail OPEN. Block on input, warn on output.
+if ($script:OverDepth) {
+  Log $Label "content_over_depth (nesting exceeds scan depth)"
+  if ($Side -eq 'input') { Render 'block' "Content nesting exceeds the AIRS scan depth - blocking unscanned (fail-closed)" }
+  else { Render 'warn' "Content nesting exceeds the AIRS scan depth - NOT fully scanned" }
+}
 if ([string]::IsNullOrWhiteSpace($Text)) { Dbg "no scannable content for $Label - allowing"; Render 'allow' '' }
 
 # oversized content -> PowerShell can't chunk, so the tail is UNSCANNABLE. Block on input

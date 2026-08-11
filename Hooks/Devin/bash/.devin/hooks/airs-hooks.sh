@@ -44,6 +44,10 @@ LOG_FILE="${SECURITY_LOG_PATH:-}"   # default set per-agent below (under this ag
 TIMEOUT_MS="${AIRS_TIMEOUT_MS:-10000}"
 RETRIES="${AIRS_RETRIES:-1}"
 FAIL_MODE="${AIRS_FAIL_MODE:-closed}"   # default fail-CLOSED on the input side (block on scan failure)
+# normalize case/whitespace so "CLOSED", "Closed", " closed " all mean closed (an operator who
+# intends fail-closed must never get fail-open from a stray capital/space); only a clean "open" opts out.
+FAIL_MODE="$(printf '%s' "$FAIL_MODE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+[ "$FAIL_MODE" = "open" ] || FAIL_MODE="closed"
 SUFFIX="${AIRS_APP_SUFFIX:-${CLAUDE_CODE_APP_SUFFIX:-}}"
 DEBUG="${AIRS_DEBUG:-0}"
 # bash has no chunking: content past this budget can't be scanned -> fail-mode (mirrors the
@@ -88,6 +92,14 @@ jc() { jq -c  "$1" <<<"$INPUT" 2>/dev/null; }   # compact JSON
 # ----------------------------------------------------------------------------
 RAW_EVENT="$EVENT"
 [ -z "$RAW_EVENT" ] && RAW_EVENT="$(j '.hook_event_name // empty')"
+# jq-free fallback: when jq is missing, `j` returns empty, so derive the event name from the raw
+# JSON by hand (grep + bash parameter expansion — no sed, to avoid adding a dependency). Without
+# this, a jq-missing + no-`--event` invocation can't resolve the event and the dep-gate falls to a
+# bare `exit 2` (no stdout deny) — which Cursor/Cline read as allow.
+if [ -z "$RAW_EVENT" ]; then
+  _hev="$(printf '%s' "$INPUT" | grep -oE '"hook_event_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1)"
+  _hev="${_hev%\"}"; RAW_EVENT="${_hev##*\"}"
+fi
 
 case "$VENDOR" in
   cursor)
@@ -226,16 +238,86 @@ render() {
   exit "$code"
 }
 
+# Emit an INPUT-side block WITHOUT jq — used only when jq itself is the missing dependency,
+# so render()'s jq-built deny JSON is unavailable and stdout would otherwise be empty (which
+# every client reads as allow). The message is a fixed, quote/newline-free string, so it is
+# safe to interpolate straight into the JSON via printf.
+emit_nojq_block() {
+  local msg="Prisma AIRS dependency jq missing - blocking (fail-closed)"
+  case "$VENDOR" in
+    claude)
+      case "$IEVENT" in
+        PreToolUse)       printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$msg" ;;
+        UserPromptSubmit) printf '{"decision":"block","reason":"%s","hookSpecificOutput":{"hookEventName":"UserPromptSubmit"}}' "$msg" ;;
+      esac
+      printf '\n🚫 %s\n\n' "$msg" >&2; exit 0 ;;
+    cursor)
+      case "$IEVENT" in
+        PreToolUse)       printf '{"permission":"deny","user_message":"%s","agent_message":"%s"}' "$msg" "$msg" ;;
+        UserPromptSubmit) printf '{"continue":false,"user_message":"%s"}' "$msg" ;;
+      esac
+      exit 0 ;;
+    cline)
+      printf '{"cancel":true,"errorMessage":"%s"}' "$msg"; exit 0 ;;
+    *) # codex / devin / gemini / antigravity block input via exit 2 (no stdout needed)
+      printf '\n🚫 %s\n\n' "$msg" >&2; exit 2 ;;
+  esac
+}
+
 # ----------------------------------------------------------------------------
 # logging
 # ----------------------------------------------------------------------------
 log_line() {
   local label="$1" tag="$2" ts
+  # strip CR/LF so an attacker-influenced tool_name / session_id can't forge extra log records
+  label="$(printf '%s' "$label" | tr -d '\r\n')"; tag="$(printf '%s' "$tag" | tr -d '\r\n')"
   ts="$(date -u +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null)"
   mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
   printf '[%s] %s %s: %s\n' "$ts" "$IEVENT" "$label" "$tag" >>"$LOG_FILE" 2>/dev/null
   return 0
 }
+
+# ----------------------------------------------------------------------------
+# dependency + input-integrity gate — fail-CLOSED on input, warn on output.
+# jq/curl are hard requirements; without jq every extractor silently yields ""
+# (indistinguishable from "nothing to scan"), and malformed / truncated / over-nested
+# stdin makes jq fail the exact same way. Either is a COVERAGE gap that must NEVER
+# become a silent allow on the input side. (Runs before the unknown-event allow below.)
+# ----------------------------------------------------------------------------
+DEP_ERR=""
+command -v jq   >/dev/null 2>&1 || DEP_ERR="required dependency 'jq' is not installed"
+command -v curl >/dev/null 2>&1 || DEP_ERR="${DEP_ERR:+$DEP_ERR; }required dependency 'curl' is not installed"
+if [ -z "$DEP_ERR" ] && [ -n "$(printf '%s' "$INPUT" | tr -d '[:space:]')" ]; then
+  if printf '%s' "$INPUT" | jq -e . >/dev/null 2>&1; then
+    # valid JSON, but a hook payload is always a top-level object; a bare string/number/array/bool
+    # would extract to empty and fail open, so treat a non-object as unscannable.
+    if ! printf '%s' "$INPUT" | jq -e 'type=="object"' >/dev/null 2>&1; then
+      DEP_ERR="hook input is not a JSON object (primitive/array)"
+    elif ! printf '%s' "$INPUT" | jq -e 'def d: if (type=="object" or type=="array") then ([.[]|d]|max // -1)+1 else 0 end; d < 200' >/dev/null 2>&1; then
+      # jq's ENCODER truncates its OUTPUT past ~256 nesting depth (while its parser tolerates ~5000).
+      # A value nested that deep re-serializes (jc '.tool_input') to INVALID JSON at rc=0, then the
+      # extractor errors to empty and falls through to a silent allow. Reject past a generous bound
+      # (200, safely below the 256 encoder limit) as unscannable — closes the ~257..4999 band without
+      # over-blocking realistic deep-but-benign input (aligns with the pwsh collector cap).
+      DEP_ERR="hook input nesting exceeds scan depth (>=200)"
+    fi
+  else
+    DEP_ERR="hook input is not valid JSON (truncated / malformed / over-nested)"
+  fi
+fi
+if [ -n "$DEP_ERR" ]; then
+  log_line "${LABEL:-input}" "unscannable ($DEP_ERR)"
+  case "$IEVENT" in
+    PostToolUse|Stop)            render warn  "Prisma AIRS could not scan ($DEP_ERR) — content NOT scanned" ;;
+    UserPromptSubmit|PreToolUse)
+      if command -v jq >/dev/null 2>&1; then
+        render block "Prisma AIRS could not scan ($DEP_ERR) — blocking (fail-closed)"
+      else
+        emit_nojq_block   # render() needs jq to build the deny JSON; emit it statically without jq
+      fi ;;
+    *) printf '\n🚫 Prisma AIRS could not scan (%s) — blocking (fail-closed)\n\n' "$DEP_ERR" >&2; exit 2 ;;
+  esac
+fi
 
 # ----------------------------------------------------------------------------
 # unknown / unhandled event -> allow silently
@@ -271,6 +353,10 @@ tool_identity() {
 # what to scan on the INPUT side, per built-in tool (mirrors content.ts)
 tool_input_text() {
   local name="$1" ti="$2"
+  # non-object tool_input (array/primitive) can't be field-indexed; the per-tool jq extractors would
+  # error to empty and fail open. Scan it wholesale so a primitive/array injection for a KNOWN
+  # built-in tool is still captured.
+  [ "$(jq -r 'type' <<<"$ti" 2>/dev/null)" = "object" ] || { jq -rc '.' <<<"$ti" 2>/dev/null; return; }
   case "$name" in
     Bash)         jq -r "$JQ_JOIN"' [.command, .description]|joinf' <<<"$ti" 2>/dev/null ;;
     WebFetch)     jq -r "$JQ_JOIN"' [.url, .prompt]|joinf' <<<"$ti" 2>/dev/null ;;
@@ -290,8 +376,9 @@ tool_input_text() {
   esac
 }
 
-# extract EVERY string from a tool result, recursively (mirrors collectStrings)
-tool_output_text() { jq -r '[.. | strings] | join("\n")' <<<"$1" 2>/dev/null; }
+# extract EVERY string from a tool result, recursively (mirrors collectStrings) — string
+# VALUES plus object KEYS, so an injection hidden in a key (not a value) is still scanned.
+tool_output_text() { jq -r '([.. | strings] + [.. | objects | keys_unsorted[]]) | join("\n")' <<<"$1" 2>/dev/null; }
 
 # ----------------------------------------------------------------------------
 # normalize per vendor + build the ScanPlan (KIND, TEXT, SERVER, TOOL, INTEXT)
@@ -439,8 +526,8 @@ BODY="$(jq -nc \
   --arg app_user "$APP_USER" --arg app_name "$APP_NAME" \
   --arg tool_name "$TOOL_NAME" --arg source "$IEVENT" --argjson content "$CONTENT" \
   '{transaction_id:$txn, session_id:$sid, ai_profile:$prof,
-    metadata:{app_user:$app_user, app_name:$app_name, source:$source}
-      + (if $tool_name!="" then {tool_name:$tool_name} else {} end),
+    metadata:({app_user:$app_user, app_name:$app_name, source:$source}
+      + (if $tool_name!="" then {tool_name:$tool_name} else {} end)),
     contents:[$content]}')"
 
 # ----------------------------------------------------------------------------
