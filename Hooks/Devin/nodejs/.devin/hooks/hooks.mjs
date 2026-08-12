@@ -24,6 +24,7 @@ function loadConfig(env = process.env) {
     retries: intEnv(env.AIRS_RETRIES, 1),
     // Normalize case/whitespace: only a clean "open" opts out; everything else stays fail-CLOSED.
     failMode: str(env.AIRS_FAIL_MODE).toLowerCase() === "open" ? "open" : "closed",
+    requireConfig: bool(env.AIRS_REQUIRE_CONFIG),
     maxContentChars: Math.max(1, intEnv(env.AIRS_MAX_CONTENT_CHARS, 2e4)),
     maxChunks: Math.max(1, intEnv(env.AIRS_MAX_CHUNKS, 6)),
     enableMasking: bool(env.AIRS_ENABLE_MASKING),
@@ -428,8 +429,14 @@ function safeJson(v) {
 // src/decide.ts
 function decide(verdict, ctx) {
   if (ctx.configError) {
+    if (ctx.unconfigured && !ctx.cfg.requireConfig) {
+      return {
+        kind: "warn",
+        message: "\u26A0\uFE0F Prisma AIRS NOT CONFIGURED \u2014 traffic passing UNSCANNED. Set PRISMA_AIRS_API_KEY (+ profile) to enable protection; set AIRS_REQUIRE_CONFIG=1 to block instead."
+      };
+    }
     if (ctx.side === "input") {
-      return { kind: "block", reason: `Prisma AIRS not configured (${ctx.configError}) \u2014 blocking (fail-closed)` };
+      return { kind: "block", reason: `Prisma AIRS not configured (${ctx.configError}) \u2014 set PRISMA_AIRS_API_KEY (+ profile), then reload \u2014 blocking (fail-closed)` };
     }
     return { kind: "warn", message: `Prisma AIRS not configured (${ctx.configError}) \u2014 content NOT scanned` };
   }
@@ -478,7 +485,7 @@ async function route(input, cfg, log, caps) {
   }
 }
 async function handle(input, cfg, log, caps, event, side, cfgErr, plan, label) {
-  const ctx = { event, side, cfg, configError: cfgErr };
+  const ctx = { event, side, cfg, configError: cfgErr, unconfigured: !cfg.apiKey };
   if (cfgErr) {
     log.log(`${event} ${label}: config_error (${cfgErr})`);
     return decide({ action: "unknown", category: "config_error", scanId: "unknown", detections: [] }, ctx);
@@ -1031,6 +1038,19 @@ var INPUT_EVENTS = /* @__PURE__ */ new Set([
 ]);
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const rawVendor = args.vendor;
+  if (rawVendor === void 0 || rawVendor === "") {
+    process.stderr.write("[airs-hook] no --vendor given; defaulting to claude\n");
+  } else if (!adapterNames.includes(rawVendor.toLowerCase())) {
+    process.stderr.write(
+      `
+\u{1F6AB} Prisma AIRS: unknown --vendor '${rawVendor}' \u2014 blocking (fail-closed). Known: ${adapterNames.join(", ")}.
+
+`
+    );
+    process.exitCode = 2;
+    return;
+  }
   const cfg = loadConfig();
   const vendorKey = (args.vendor || "claude").toLowerCase();
   const adapter = getAdapter(args.vendor);

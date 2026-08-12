@@ -19,7 +19,8 @@ set -o pipefail
 # ----------------------------------------------------------------------------
 # args
 # ----------------------------------------------------------------------------
-VENDOR="claude"; EVENT=""
+# VENDOR starts EMPTY (not "claude") so an OMITTED --vendor is distinguishable from an explicit one.
+VENDOR=""; EVENT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --vendor)   VENDOR="${2:-}"; shift 2 ;;
@@ -48,6 +49,15 @@ FAIL_MODE="${AIRS_FAIL_MODE:-closed}"   # default fail-CLOSED on the input side 
 # intends fail-closed must never get fail-open from a stray capital/space); only a clean "open" opts out.
 FAIL_MODE="$(printf '%s' "$FAIL_MODE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 [ "$FAIL_MODE" = "open" ] || FAIL_MODE="closed"
+# A brand-new install with NO API key is "unconfigured" (first run), NOT an attack: by default pass
+# such traffic through with a loud warning rather than brick the agent the moment the folder is copied
+# in. AIRS_REQUIRE_CONFIG=1 restores hard fail-closed. Distinct from FAIL_MODE (which governs SCAN
+# failures, where a key IS set). Only someone who can write the install's env/.env can drop the key —
+# the content-plane (prompt/tool-output) attacker this control defends against cannot.
+REQUIRE_CONFIG=0
+case "$(printf '%s' "${AIRS_REQUIRE_CONFIG:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+  1|true|yes) REQUIRE_CONFIG=1 ;;
+esac
 SUFFIX="${AIRS_APP_SUFFIX:-${CLAUDE_CODE_APP_SUFFIX:-}}"
 DEBUG="${AIRS_DEBUG:-0}"
 # bash has no chunking: content past this budget can't be scanned -> fail-mode (mirrors the
@@ -70,7 +80,15 @@ case "$VENDOR" in
   devin)       APP_NAME="Devin CLI";   CFGDIR=".devin" ;;
   antigravity) APP_NAME="Antigravity"; CFGDIR=".agents" ;;
   gemini)      APP_NAME="Gemini CLI";  CFGDIR=".gemini" ;;
-  *)           APP_NAME="Claude Code"; CFGDIR=".claude" ;;
+  "")          # no --vendor given: keep the historical Claude default, but SAY so (a broken
+               # wiring that dropped --vendor is then visible, not silent).
+               printf '[airs-hooks] no --vendor given; defaulting to claude\n' >&2
+               VENDOR="claude"; APP_NAME="Claude Code"; CFGDIR=".claude" ;;
+  *)           # UNKNOWN vendor: do NOT silently alias to Claude. On a stdout-reading client
+               # (Cursor/Cline) a Claude-shaped exit-2 block renders in the wrong channel and fails
+               # OPEN — so fail closed loudly here. (Vendor is config-time, not attacker-controlled.)
+               printf '\n🚫 Prisma AIRS: unknown --vendor %s — blocking (fail-closed). Known: claude, codex, cursor, cline, devin, gemini, antigravity.\n\n' "$VENDOR" >&2
+               exit 2 ;;
 esac
 [ -n "$SUFFIX" ] && APP_NAME="$APP_NAME-$SUFFIX"
 # app_user now reflects the actual agent (was hardcoded "claude-code-user"); env-overridable.
@@ -453,13 +471,20 @@ fi
 # ----------------------------------------------------------------------------
 # config error -> fail-closed on input, warn on output
 # ----------------------------------------------------------------------------
-CFG_ERR=""
-[ -z "$API_KEY" ] && CFG_ERR="PRISMA_AIRS_API_KEY not set"
+CFG_ERR=""; UNCONFIGURED=0
+[ -z "$API_KEY" ] && { CFG_ERR="PRISMA_AIRS_API_KEY not set"; UNCONFIGURED=1; }
 [ -z "$CFG_ERR" ] && [ -z "$PROFILE_ID" ] && [ -z "$PROFILE_NAME" ] && CFG_ERR="PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set"
 if [ -n "$CFG_ERR" ]; then
   log_line "$LABEL" "config_error ($CFG_ERR)"
+  # Genuinely UNCONFIGURED (no key at all) + not strict -> pass through with a LOUD per-call warning,
+  # so a copy-the-folder install before .env exists doesn't brick the agent. A key that IS set but
+  # half-configured (no profile) is a real misconfig -> fall through to fail-closed on input.
+  if [ "$UNCONFIGURED" = "1" ] && [ "$REQUIRE_CONFIG" != "1" ]; then
+    printf '\n⚠️  Prisma AIRS NOT CONFIGURED — traffic passing UNSCANNED. Set PRISMA_AIRS_API_KEY (+ profile) in %s/hooks/.env, then reload. (AIRS_REQUIRE_CONFIG=1 to block instead.)\n\n' "$CFGDIR" >&2
+    render allow ""
+  fi
   if [ "$SIDE" = "input" ]; then
-    render block "Prisma AIRS not configured ($CFG_ERR) — blocking (fail-closed)"
+    render block "Prisma AIRS not configured ($CFG_ERR) — set it in $CFGDIR/hooks/.env — blocking (fail-closed)"
   else
     render warn "Prisma AIRS not configured ($CFG_ERR) — content NOT scanned"
   fi

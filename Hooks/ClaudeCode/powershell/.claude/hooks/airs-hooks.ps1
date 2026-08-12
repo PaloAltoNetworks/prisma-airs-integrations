@@ -15,7 +15,8 @@
 # does not pass through POSIX-style "--vendor". Works on Windows PowerShell 5.1+ / PowerShell 7+.
 # =============================================================================
 param(
-  [string]$Vendor = 'claude',
+  # $Vendor starts EMPTY (not 'claude') so an OMITTED -Vendor is distinguishable from an explicit one.
+  [string]$Vendor = '',
   [string]$EventName = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -23,6 +24,17 @@ $ErrorActionPreference = 'Stop'
 # can surface on STDOUT and corrupt the deny-JSON decision channel (clients parse stdout as JSON).
 $WarningPreference = 'SilentlyContinue'
 $Vendor = $Vendor.ToLower()
+# Vendor dispatch is a config-time contract (in the install's wiring), not attacker-controlled. But an
+# UNKNOWN -Vendor must never silently alias to Claude: on a stdout-reading client (Cursor/Cline) a
+# Claude-shaped block renders in the wrong channel and fails OPEN. Fail closed loudly on unknown; on an
+# OMITTED vendor keep the historical Claude default but say so. (ASCII only — PS 5.1 console safety.)
+$KnownVendors = @('claude','codex','cursor','cline','devin','antigravity','gemini')
+if ($Vendor -eq '') {
+  [Console]::Error.Write("[airs-hooks] no -Vendor given; defaulting to claude`n"); $Vendor = 'claude'
+} elseif ($Vendor -notin $KnownVendors) {
+  [Console]::Error.Write("`n[BLOCK] Prisma AIRS: unknown -Vendor '$Vendor' - blocking (fail-closed). Known: $($KnownVendors -join ', ').`n`n")
+  exit 2
+}
 # Windows PowerShell 5.1 defaults to old TLS — force 1.2 so the AIRS HTTPS call works.
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
 
@@ -43,6 +55,10 @@ $Retries     = IntEnv $env:AIRS_RETRIES 1
 # normalize case/whitespace so "CLOSED" / "Closed" / " closed " all mean closed; only a clean "open" opts out.
 $FailMode    = if ($env:AIRS_FAIL_MODE) { $env:AIRS_FAIL_MODE.Trim().ToLower() } else { 'closed' }
 if ($FailMode -ne 'open') { $FailMode = 'closed' }
+# A brand-new install with NO API key is "unconfigured" (first run), NOT an attack: by default pass
+# such traffic through with a loud warning rather than brick the agent. AIRS_REQUIRE_CONFIG=1 restores
+# hard fail-closed. Separate from FailMode (which governs SCAN failures, where a key IS set).
+$RequireConfig = ($env:AIRS_REQUIRE_CONFIG -in @('1','true','yes'))
 $Suffix      = if ($env:AIRS_APP_SUFFIX) { $env:AIRS_APP_SUFFIX } elseif ($env:CLAUDE_CODE_APP_SUFFIX) { $env:CLAUDE_CODE_APP_SUFFIX } else { '' }
 $Debug       = ($env:AIRS_DEBUG -in @('1','true','yes'))
 $CodeAware   = ($null -eq $env:AIRS_CODE_AWARE) -or ($env:AIRS_CODE_AWARE -in @('1','true','yes'))
@@ -341,12 +357,19 @@ if ($IEvent -eq 'Stop' -and $StopActive) { Dbg 'stop_hook_active set - allowing 
 # must be made on the real multi-line text (what actually executes).
 
 # ---- config error -----------------------------------------------------------
-$CfgErr = ''
-if (-not $ApiKey) { $CfgErr = 'PRISMA_AIRS_API_KEY not set' }
+$CfgErr = ''; $Unconfigured = $false
+if (-not $ApiKey) { $CfgErr = 'PRISMA_AIRS_API_KEY not set'; $Unconfigured = $true }
 elseif (-not $ProfileId -and -not $ProfileName) { $CfgErr = 'PRISMA_AIRS_PROFILE_NAME or PRISMA_AIRS_PROFILE_ID not set' }
 if ($CfgErr) {
   Log $Label "config_error ($CfgErr)"
-  if ($Side -eq 'input') { Render 'block' "Prisma AIRS not configured ($CfgErr) - blocking (fail-closed)" }
+  # Genuinely UNCONFIGURED (no key) + not strict -> pass through with a LOUD per-call warning so a
+  # copy-the-folder install before .env exists doesn't brick the agent. A key set but half-configured
+  # (no profile) is a real misconfig -> fall through to fail-closed on input.
+  if ($Unconfigured -and -not $RequireConfig) {
+    [Console]::Error.Write("`n[WARN] Prisma AIRS NOT CONFIGURED - traffic passing UNSCANNED. Set PRISMA_AIRS_API_KEY (+ profile) in $CfgDir\hooks\.env, then reload. (AIRS_REQUIRE_CONFIG=1 to block instead.)`n`n")
+    Render 'allow' ''
+  }
+  if ($Side -eq 'input') { Render 'block' "Prisma AIRS not configured ($CfgErr) - set it in $CfgDir\hooks\.env - blocking (fail-closed)" }
   else { Render 'warn' "Prisma AIRS not configured ($CfgErr) - content NOT scanned" }
 }
 
