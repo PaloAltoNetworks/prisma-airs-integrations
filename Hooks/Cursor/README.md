@@ -23,7 +23,10 @@ export PRISMA_AIRS_PROFILE_NAME="your-profile"
 ```
 
 > [!IMPORTANT]
-> **Configure before you rely on it.** With **no `PRISMA_AIRS_API_KEY`** set, a fresh install **passes traffic through unscanned** and prints a loud `NOT CONFIGURED` warning on every call — so copying the folder in won't brick Cursor, but you are **not protected** until credentials land. Prefer to **fail shut** while unconfigured? Set `AIRS_REQUIRE_CONFIG=1` and the input gates block until a key is present. Once a key **is** set, any AIRS error (or a half-config with a key but no profile) fails **closed** on the input side.
+> **Configure before you rely on it.** With **no `PRISMA_AIRS_API_KEY`** set, a fresh install **passes traffic through unscanned** and prints a loud `NOT CONFIGURED` warning on every call — so copying the folder in won't brick Cursor, but you are **not protected** until credentials land. Once a key **is** set, any AIRS error (or a half-config with a key but no profile) fails **closed** on the input side.
+
+> [!WARNING]
+> **In production, set `AIRS_REQUIRE_CONFIG=1`.** Cursor is an env-writer (it has file/shell tools), so an injected instruction could delete this install's `.env` — a benign-looking file op AIRS won't flag — to *force* the unconfigured state and silently bypass scanning. `AIRS_REQUIRE_CONFIG=1` makes that fail **closed** (a loud DoS, not a bypass). Also deny the agent write access to the hooks dir. See [SECURITY.md](../SECURITY.md).
 
 **3 · Start Cursor — done.** Every checkpoint below is now scanned.
 
@@ -44,6 +47,7 @@ Each folder is self-contained (engine + wiring + `.cursor/`). Shared `example.en
 | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
 
 <div align="center"><sub>✅ hard-block &nbsp;·&nbsp; ⚠️ scan + alert / redact &nbsp;·&nbsp; ❌ no usable surface in the hook contract</sub></div>
+
 
 ```mermaid
 flowchart LR

@@ -23,7 +23,10 @@ export PRISMA_AIRS_PROFILE_NAME="your-profile"
 ```
 
 > [!IMPORTANT]
-> **Configure before you rely on it.** With **no `PRISMA_AIRS_API_KEY`** set, a fresh install **passes traffic through unscanned** and prints a loud `NOT CONFIGURED` warning on every call — so copying the folder in won't brick Codex, but you are **not protected** until credentials land. Prefer to **fail shut** while unconfigured? Set `AIRS_REQUIRE_CONFIG=1` and the input gates block until a key is present. Once a key **is** set, any AIRS error (or a half-config with a key but no profile) fails **closed** on the input side.
+> **Configure before you rely on it.** With **no `PRISMA_AIRS_API_KEY`** set, a fresh install **passes traffic through unscanned** and prints a loud `NOT CONFIGURED` warning on every call — so copying the folder in won't brick Codex, but you are **not protected** until credentials land. Once a key **is** set, any AIRS error (or a half-config with a key but no profile) fails **closed** on the input side.
+
+> [!WARNING]
+> **In production, set `AIRS_REQUIRE_CONFIG=1`.** Codex is an env-writer (it has file/shell tools), so an injected instruction could delete this install's `.env` — a benign-looking file op AIRS won't flag — to *force* the unconfigured state and silently bypass scanning. `AIRS_REQUIRE_CONFIG=1` makes that fail **closed** (a loud DoS, not a bypass). Also deny the agent write access to the hooks dir. See [SECURITY.md](../SECURITY.md).
 
 **3 · Start Codex — done.** Every checkpoint below is now scanned.
 
@@ -45,6 +48,8 @@ Each folder is self-contained (engine + wiring + `.codex/`). Shared `example.env
 
 <div align="center"><sub>✅ hard-block &nbsp;·&nbsp; ⚠️ scan + alert / redact &nbsp;·&nbsp; ❌ no usable surface in the hook contract</sub></div>
 
+> [!WARNING]
+> **Codex enforcement is contract-derived — not yet validated on a live Codex CLI.** The ✅ marks reflect the engine emitting Codex's documented block wire format (exit 2 via `.codex/hooks.json`), but the hard-block has **not** been confirmed end-to-end against a real Codex client, and Codex's docs on its deny mechanism are ambiguous (several Claude-style fields are documented as accepted-but-fail-open). Treat **pre-tool hard-block as pending live validation**; confirm with `tests/run-tests.sh live` against a real Codex session before relying on it.
 ```mermaid
 flowchart LR
     P["Prompt<br/>🛡️ block"] --> T["Tool call<br/>🛡️ block"]
@@ -57,7 +62,7 @@ flowchart LR
 
 <br>
 
-Prompt scanned on input; the model's answer on Stop; tool input/output as `tool_event` (method `tools/call`) so tool results are checked for **indirect prompt injection**, not treated as a plain response.
+Codex CLI reads hooks from `.codex/hooks.json` on the Claude-compatible contract: the engine scans the prompt on input, the model's answer on `Stop`, and tool input/output as a `tool_event` (`tools/call`) for **indirect prompt injection**, and renders a block as **exit code 2** on `PreToolUse`. **Caveat — pending live validation:** this hard-block is **contract-derived, not yet verified against a live Codex CLI**, and Codex's own docs on which deny fields it honors are ambiguous (some Claude-style fields are documented as accepted-but-fail-open). Until a live Codex block is confirmed (`tests/run-tests.sh live`), treat pre-tool enforcement as unproven.
 </details>
 
 <div align="center">

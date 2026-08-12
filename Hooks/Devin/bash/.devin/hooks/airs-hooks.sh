@@ -52,8 +52,10 @@ FAIL_MODE="$(printf '%s' "$FAIL_MODE" | tr '[:upper:]' '[:lower:]' | tr -d '[:sp
 # A brand-new install with NO API key is "unconfigured" (first run), NOT an attack: by default pass
 # such traffic through with a loud warning rather than brick the agent the moment the folder is copied
 # in. AIRS_REQUIRE_CONFIG=1 restores hard fail-closed. Distinct from FAIL_MODE (which governs SCAN
-# failures, where a key IS set). Only someone who can write the install's env/.env can drop the key —
-# the content-plane (prompt/tool-output) attacker this control defends against cannot.
+# failures, where a key IS set). ACCEPTED RISK: a coding agent HAS file/shell tools, so an injected
+# instruction could delete this install's .env (a benign-looking file op AIRS has no reason to flag) to
+# FORCE the unconfigured state — turning self-tamper from a loud DoS into a silent bypass. Use
+# AIRS_REQUIRE_CONFIG=1 in production and deny the agent write access to the hooks dir (see SECURITY.md).
 REQUIRE_CONFIG=0
 case "$(printf '%s' "${AIRS_REQUIRE_CONFIG:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
   1|true|yes) REQUIRE_CONFIG=1 ;;

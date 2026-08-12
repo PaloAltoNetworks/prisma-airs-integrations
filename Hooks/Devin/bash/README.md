@@ -19,7 +19,8 @@
 > The wiring in `.devin/hooks.v1.json` calls the engine with a **relative** path (`.devin/hooks/airs-hooks.sh`), so it works as-is when the agent runs hooks from your project root — otherwise swap in an absolute path.
 
 > [!IMPORTANT]
-> **Until a key is set, the hook passes traffic through unscanned** (loud `NOT CONFIGURED` warning on every call) so it can't brick Devin on first run — you're **unprotected** until step 2 lands. Set `AIRS_REQUIRE_CONFIG=1` to block instead while unconfigured. With a key set, any scan error fails **closed** on the input side.
+> **Until a key is set, the hook passes traffic through unscanned** (loud `NOT CONFIGURED` warning on every call) so it can't brick Devin on first run — you're **unprotected** until step 2 lands. With a key set, any scan error fails **closed** on the input side.
+> **In production set `AIRS_REQUIRE_CONFIG=1`** — an injected instruction could delete `.env` to force the pass-through (a silent bypass); `=1` keeps it fail-closed. Protect the hooks dir too. See [SECURITY.md](../../SECURITY.md).
 
 ## Verify — no agent needed
 

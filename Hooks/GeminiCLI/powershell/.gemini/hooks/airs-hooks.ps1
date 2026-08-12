@@ -55,9 +55,12 @@ $Retries     = IntEnv $env:AIRS_RETRIES 1
 # normalize case/whitespace so "CLOSED" / "Closed" / " closed " all mean closed; only a clean "open" opts out.
 $FailMode    = if ($env:AIRS_FAIL_MODE) { $env:AIRS_FAIL_MODE.Trim().ToLower() } else { 'closed' }
 if ($FailMode -ne 'open') { $FailMode = 'closed' }
-# A brand-new install with NO API key is "unconfigured" (first run), NOT an attack: by default pass
-# such traffic through with a loud warning rather than brick the agent. AIRS_REQUIRE_CONFIG=1 restores
-# hard fail-closed. Separate from FailMode (which governs SCAN failures, where a key IS set).
+# A brand-new install with NO API key is "unconfigured" (first run): by default pass such traffic
+# through with a loud warning rather than brick the agent. ACCEPTED RISK: a coding agent HAS file/shell
+# tools, so an injected instruction could delete this install's .env (a benign-looking file op AIRS has
+# no reason to flag) to FORCE the unconfigured state — turning self-tamper from a loud DoS into a silent
+# bypass. Use AIRS_REQUIRE_CONFIG=1 in production and deny the agent write access to the hooks dir (see
+# SECURITY.md). Separate from FailMode (which governs SCAN failures, where a key IS set).
 $RequireConfig = ($env:AIRS_REQUIRE_CONFIG -in @('1','true','yes'))
 $Suffix      = if ($env:AIRS_APP_SUFFIX) { $env:AIRS_APP_SUFFIX } elseif ($env:CLAUDE_CODE_APP_SUFFIX) { $env:CLAUDE_CODE_APP_SUFFIX } else { '' }
 $Debug       = ($env:AIRS_DEBUG -in @('1','true','yes'))
