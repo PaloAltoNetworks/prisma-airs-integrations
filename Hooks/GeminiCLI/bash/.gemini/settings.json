@@ -1,0 +1,55 @@
+{
+  "_comment": "Gemini CLI hooks \u2014 merge this 'hooks' block into .gemini/settings.json. Blocks BeforeAgent/BeforeTool/AfterTool via exit code 2 (stderr = reason).",
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "bash .gemini/hooks/airs-hooks.sh --vendor gemini --event BeforeAgent",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "bash .gemini/hooks/airs-hooks.sh --vendor gemini --event BeforeTool",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "bash .gemini/hooks/airs-hooks.sh --vendor gemini --event AfterTool",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "bash .gemini/hooks/airs-hooks.sh --vendor gemini --event AfterAgent",
+            "timeout": 15000
+          }
+        ]
+      }
+    ]
+  }
+}

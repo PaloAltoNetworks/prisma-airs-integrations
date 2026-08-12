@@ -1,0 +1,3 @@
+#!/bin/sh
+# Cline hook shim — Prisma AIRS. Auto-discovered from .clinerules/hooks/.
+exec node "$(dirname "$0")/hooks.mjs" --vendor cline --event PreToolUse

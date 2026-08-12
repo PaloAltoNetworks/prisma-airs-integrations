@@ -67,7 +67,9 @@ Every integration README must include a Coverage section after the title/descrip
 
 All integrations MUST:
 1. Set `app_name` field in AIRS requests (format: `<VENDOR>-<CUSTOMER_APP>`)
-2. Use `tr_id` to pass unique identifiers from the platform when available
+2. Send `session_id` (per conversation) + `transaction_id` (per event) for correlation.
+   `tr_id` is a **legacy alias of the session slot** — it does NOT feed `transaction_id`.
+   See `Hooks/docs/airs-correlation-id-findings.md` for the live-tested behaviour.
 3. Never include real credentials - use placeholders like `YOUR_API_KEY_HERE`
 
 ### Commit Convention

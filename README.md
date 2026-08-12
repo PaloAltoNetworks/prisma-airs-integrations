@@ -22,9 +22,12 @@ This repository collects example configurations, sample code, and reference patt
 | [Anthropic (MCP)](./Anthropic/claude-code-mcp/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Anthropic (Skill)](./Anthropic/claude-code-skill/) | AI Coding Assistant | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [OpenAI (Codex Hooks)](./OpenAI/codex-hooks/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ✅ |
-| [Cline](./Cline/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
-| [Cursor](./Cursor/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ✅ |
-| [Windsurf](./Windsurf/) | AI Coding Assistant | ✅ | ❌ | ❌ | ✅ | ⚠️ |
+| [Hooks: Claude Code](./Hooks/ClaudeCode/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Hooks: Codex](./Hooks/Codex/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Hooks: Cursor](./Hooks/Cursor/) | AI Coding Assistant | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
+| [Hooks: Cline](./Hooks/Cline/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
+| [Hooks: Devin](./Hooks/Devin/) | AI Coding Assistant | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
+| [Hooks: Gemini CLI](./Hooks/GeminiCLI/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ✅ |
 | [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ✅ | ❌ | ✅ |
 | [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Google (Apigee SharedFlow)](./Google/apigee/sharedflow/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |

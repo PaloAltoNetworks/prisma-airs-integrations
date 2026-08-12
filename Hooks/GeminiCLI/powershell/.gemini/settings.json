@@ -1,0 +1,55 @@
+{
+  "_comment": "Gemini CLI hooks \u2014 merge this 'hooks' block into .gemini/settings.json. Blocks BeforeAgent/BeforeTool/AfterTool via exit code 2 (stderr = reason).",
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor gemini -EventName BeforeAgent",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor gemini -EventName BeforeTool",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor gemini -EventName AfterTool",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "prisma-airs",
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .gemini/hooks/airs-hooks.ps1 -Vendor gemini -EventName AfterAgent",
+            "timeout": 15000
+          }
+        ]
+      }
+    ]
+  }
+}
