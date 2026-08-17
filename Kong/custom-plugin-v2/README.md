@@ -12,7 +12,7 @@ v2 extends [v1](../custom-plugin/) with MCP JSON-RPC inspection: `tools/call` re
 
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
-| Prompt | ✅ | Access phase scans user prompts (OpenAI `messages[]` and Bedrock Converse `content[].text`) |
+| Prompt | ✅ | Access phase scans user prompts (OpenAI `messages[]` and Bedrock Converse `content[].text`) and OpenAI assistant `tool_calls[].function.arguments` |
 | Response | ✅ | Response phase scans LLM completions (OpenAI `choices[].message.content` and Bedrock `output.message.content`) |
 | Streaming | ✅ | `text/event-stream` responses are detected, the streamed text + tool-call args reconstructed from the **fully buffered** body, and scanned before return. The client receives the full response **after completion, not token-by-token**. Covers OpenAI chat, OpenAI Responses, and Anthropic Messages SSE. |
 | Pre-tool call | ✅ | MCP `tools/call` requests scanned as `tool_event` (`input` = arguments JSON) |
