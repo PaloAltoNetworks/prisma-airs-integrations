@@ -1,0 +1,5 @@
+script:pre-request {
+  // Generate a unique session ID for every request — used as tr_id in AIRS scan logs
+  const crypto = require('crypto');
+  bru.setVar('sessionId', crypto.randomUUID());
+}

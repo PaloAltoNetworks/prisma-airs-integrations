@@ -1,0 +1,39 @@
+meta {
+  name: DLP — SSN + Credit Card in prompt
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}{{basePath}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  X-Session-ID: {{sessionId}}
+}
+
+body:json {
+  {
+    "contents": [
+      {
+        "role": "user",
+        "parts": [{"text": "What is my SSN 123-45-6789 and credit card 4111111111111111 doing in this system?"}]
+      }
+    ]
+  }
+}
+
+tests {
+  test("HTTP 403 — blocked", function() {
+    expect(res.status).to.equal(403);
+  });
+  test("AIRS blocked DLP", function() {
+    expect(res.body.error).to.be.ok;
+  });
+  test("Category is malicious", function() {
+    expect(res.body.category).to.equal("malicious");
+  });
+}
