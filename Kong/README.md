@@ -14,6 +14,17 @@ The contents of this repository are community examples and reference implementat
 | [Custom Plugin (v2 — MCP-aware)](custom-plugin-v2/) | ✅ | ✅ | ✅ | ⚠️ (OpenAI + Bedrock Converse native) | LLM + MCP `tools/call` inspection |
 | [Request Callout](request-callout/) | ✅ | ❌ | ❌ | ❌ | Kong Konnect SaaS, OpenAI only |
 | [Custom Plugin (v3)](custom-plugin-v3/) | ✅ | ✅ | ✅ | ✅ (native, 9 shapes) | Full MCP method coverage, buffered SSE, DLP, and a test suite |
+| [AI Gateway 2.x Policies](ai-gateway/) | ✅ | ✅ (buffered) | ⚠️ (MCP `tools/call`, request leg) | ✅ (any AI Model) | Kong **AI Gateway 2.x**, configuration only — no plugin to install |
+
+### Which Kong product each one targets
+
+The first four rows are for **Kong Gateway 3.x** (including Konnect-managed 3.x control planes):
+you create Services, Routes and Plugins. The last row is for **Kong AI Gateway 2.x**, which Kong
+shipped in September 2026 as a separate runtime with its own control plane and its own entity
+model — AI Models, AI MCP Servers and AI Policies, with no Services or Routes to attach a plugin
+to. The two config formats are not interchangeable in either direction, so pick the row that
+matches the product you run. Note that AI Gateway 2.x is a different thing from the *AI Gateway
+capability* of Kong Gateway 3.x referred to under Multi-Provider Support below.
 
 ### Multi-Provider Support
 
@@ -43,6 +54,13 @@ the tool-poisoning surface: a malicious tool description in a `tools/list` reply
 content-free control messages (`ping`, `notifications/*`) are bypassed. See
 [custom-plugin-v3 README](custom-plugin-v3/README.md#mcp-method-coverage) for the measured matrix.
 
+On **AI Gateway 2.x** the reachable surface is narrower and the limit is the platform's, not
+AIRS's: no Kong guardrail can be scoped to an AI MCP Server at all, so scanning is done with a
+`request-callout` policy, and every hook that policy offers runs before the upstream call. MCP
+requests are therefore scanned and MCP *responses* are not, which leaves tool-catalogue poisoning
+out of reach there. See [ai-gateway README](ai-gateway/README.md#limitations) for the measured
+evidence, including the control plane's own refusal to bind a guardrail at that scope.
+
 ## Quick Start
 
 **Custom Plugin** - Full dual-phase scanning:
@@ -62,7 +80,7 @@ curl -X POST http://localhost:8001/services/{service}/plugins \
 
 ## Prerequisites
 
-- Kong Gateway 3.4+ or Kong Konnect account
+- Kong Gateway 3.4+ or Kong Konnect account — or Kong AI Gateway 2.x for the `ai-gateway/` integration
 - Prisma AIRS API key from Strata Cloud Manager
 - Security Profile configured in Strata Cloud Manager
 

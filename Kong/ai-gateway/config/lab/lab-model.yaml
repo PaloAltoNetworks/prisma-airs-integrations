@@ -1,0 +1,106 @@
+# =============================================================================
+# LAB FIXTURE -- not part of the integration.
+#
+# An AI Model backed by scripts/lab-echo-server.py, so that docs/DESIGN.md can be
+# worked through without an LLM contract, without spend, and without a model
+# that may or may not comply when a gate needs the assistant to say an exact
+# string.
+#
+# Replace this with a real provider before drawing any conclusion about
+# latency, token accounting, or streaming behaviour with a real model.
+#
+#   python3 scripts/lab-echo-server.py --host 0.0.0.0 --port 9100
+#
+#   This fixture serves prompt-injection payloads on request. --host 0.0.0.0 is
+#   shown because the data plane reaches it across a container bridge; bind the
+#   bridge address rather than every interface if the host is not isolated.
+#   kongctl apply -f config/lab/lab-model.yaml
+#
+# UPSTREAM ADDRESS. 172.17.0.1 is the docker0 bridge address -- the host as seen
+# from inside the data plane container. 127.0.0.1 would resolve to the container
+# itself and fail. On Kubernetes or a non-Docker data plane this address is
+# different; it is the one value in this file that is deployment-specific.
+# =============================================================================
+
+ai_gateway_model_providers:
+
+  - ref: lab-echo-provider
+    ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+    name: lab-echo-provider
+    display_name: "Lab echo upstream"
+    # The provider is a discriminated union and `type` is its selector. Note it
+    # is NOT listed by `kongctl explain ai_gateway.model_providers --extended`;
+    # only `kongctl scaffold` shows it. Omitting it fails with
+    #   missing required union selector type
+    type: openai
+    config:
+      # The lab upstream ignores credentials entirely. A value is still sent so
+      # that the model path exercises the same auth machinery a real provider
+      # would, rather than a special no-auth case that hides a defect.
+      #
+      # kongctl REFUSES an inline literal here: the field is write-only and the
+      # loader fails with "requires !secret with a deferred source". Credentials
+      # therefore cannot be committed to a declarative config by accident, which
+      # is a property worth relying on rather than working around.
+      auth:
+        type: basic
+        headers:
+          - name: Authorization
+            value: !secret {parts: ["Bearer ", !env LAB_UPSTREAM_KEY]}
+
+ai_gateway_models:
+
+  - ref: lab-echo
+    ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+    name: lab-echo
+    display_name: "Lab echo (deterministic, no cost)"
+    enabled: true
+
+    # Union selector, same trap as the provider: not shown by `explain
+    # --extended`, only by `scaffold`. The other option is `type: api`.
+    type: model
+
+    capabilities:
+      - generate
+
+    # Bind the AIRS guardrail to THIS model only. A policy with `global: true`
+    # would cover every model, MCP server and agent on the gateway; naming it
+    # here keeps the blast radius to the fixture while the integration is being
+    # proven. The value is the policy's `name`, not its ref.
+    policies:
+      - airs-scan
+
+    formats:
+      - type: openai
+
+    targets:
+      - name: lab-echo-target
+        provider: lab-echo-provider
+        config:
+          type: openai
+          # FULL endpoint URL, not a base. Kong does not append the format's
+          # path here -- with a bare host:port the upstream receives `POST /`.
+          upstream_url: http://172.17.0.1:9100/v1/chat/completions
+
+    config:
+      route:
+        # BASE path only. Kong appends the format's own suffix, so `/v1` is what
+        # exposes POST /v1/chat/completions. Setting the full path here produces
+        # a route at /v1/chat/completions/chat/completions and every sane request
+        # gets "no Route matched with those values" with no other clue.
+        paths:
+          - /v1
+        # How the gateway decides a request is for THIS model: the `model` field
+        # of the request body must be one of `values`.
+        model:
+          body_param: model
+          values:
+            - lab-echo
+
+      # MEASURED 2026-09-12: `response_streaming` is a field on the AI MODEL,
+      # not on a policy. That matters for the guardrail: Kong documents that a
+      # policy which acts in the response phase cannot run when streaming is in
+      # play, so the fix -- `deny` -- is applied HERE, on the model, not
+      # alongside the guardrail config. Left at `allow` in the lab so that the
+      # streaming bypass can be demonstrated before it is closed.
+      response_streaming: allow
