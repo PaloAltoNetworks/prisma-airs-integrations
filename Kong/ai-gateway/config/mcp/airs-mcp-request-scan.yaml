@@ -158,6 +158,19 @@ ai_gateway_policies:
         profile: !env PRISMA_AIRS_PROFILE_NAME
         app_name: "kong-ai-gateway"
         server_name: !env AIRS_MCP_SERVER_NAME
+        # What to do with a message the request hook could not classify: a
+        # JSON-RPC batch, a body that is not JSON-RPC, or a body that does not
+        # decode at all. Any of the three can carry a tools/call, and none of
+        # them was inspected.
+        #
+        #   refuse  (default) -- 403, JSON-RPC -32001, upstream never reached.
+        #   allow             -- forwarded uninspected. Opt-in, and a
+        #                        transport-compatibility choice rather than a
+        #                        security one: it reopens GAP 4.
+        #
+        # Anything other than the exact string "allow" refuses, so a typo or an
+        # empty value fails closed rather than silently opening the gap.
+        unclassified_action: "refuse"
 
 # =============================================================================
 # Attaching it.

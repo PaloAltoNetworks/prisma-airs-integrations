@@ -306,9 +306,9 @@ classification, method, id and scanned flag in `kong.ctx.shared`. The rules, in
 | `tools/list` | `bypass` | nothing — the catalogue is in the reply, which this policy cannot see |
 | `ping`, `initialize`, `notifications/*`, `logging/setLevel`, or any content-bearing method with no `params` table | `bypass` | nothing |
 | any other content-bearing method (`resources/read`, `prompts/get`, `completion/complete`, `sampling/createMessage`, `elicitation/create`, vendor extensions) | `prompt` | a `contents[].prompt` holding the encoded `params` |
-| a body that does not decode to a JSON object | `unparseable` | nothing, and it is **not** treated as scanned |
-| a top-level JSON array (JSON-RPC batch) | `batch` | nothing, and it is **not** treated as scanned |
-| anything without `jsonrpc: "2.0"` and a string `method` | `not-jsonrpc` | nothing, and it is not treated as scanned |
+| a body that does not decode to a JSON object | `unparseable` | nothing — not scanned, so **refused** by default |
+| a top-level JSON array (JSON-RPC batch) | `batch` | nothing — not scanned, so **refused** by default |
+| anything without `jsonrpc: "2.0"` and a string `method` | `not-jsonrpc` | nothing — not scanned, so **refused** by default |
 | classification or encoding threw | `error`, `fatal` | nothing, and the message is refused |
 
 Three rows are load-bearing.
@@ -325,11 +325,16 @@ Three rows are load-bearing.
   `upstream.by_lua` ignores its verdict — at the cost of one AIRS call per control message and an SCM
   record that is a clean scan of a single dot (7.5).
 - **A batch refuses classification rather than inspecting element one**, since inspecting the first and
-  waving the rest through is an evasion primitive. But refusing to classify is not refusing the message:
-  a batch, like any body that is not a well-formed JSON-RPC envelope and like a body that does not decode
-  at all, is marked not scanned and reaches the upstream uninspected. To refuse them outright, treat
-  `batch`, `not-jsonrpc` and `unparseable` the way `upstream.by_lua` treats `fatal`. UNVERIFIED: Kong's
-  behaviour on receiving a batch at an MCP route.
+  waving the rest through is an evasion primitive. Refusing to classify is not by itself refusing the
+  message, so `upstream.by_lua` closes that distinction: `batch`, `not-jsonrpc` and `unparseable` take
+  the same path as `fatal` — HTTP 403, JSON-RPC `-32001`, upstream never reached. A `tools/call` can be
+  inside any of the three and none of them was inspected, so the control does not default open on it.
+  The deliberate bypasses above are unaffected: they carry no caller content, so there is nothing to
+  refuse. Pass-through remains available as `params.unclassified_action: "allow"`, because UNVERIFIED:
+  Kong's behaviour on receiving a batch at an MCP route, and a legitimate client may yet trip this. The
+  comparison is an exact match on `"allow"`, so an empty value, a typo or an unsubstituted placeholder
+  all refuse — the default and the accident give the same safe answer. Choosing `allow` is a
+  transport-compatibility decision rather than a security one.
 
 The hook also unescapes cjson's forward-slash escaping, since handing a path detector `\/etc\/shadow` lowers
 the detection rate on exactly the arguments that matter, and attaches correlation from Kong rather than the
@@ -605,7 +610,7 @@ what it could not reach.
 | MCP other content-bearing methods | Yes, as a prompt | DOCUMENTED in source, 4.3 |
 | MCP tool **results** and the `tools/list` catalogue (tool poisoning) | **No** | MEASURED, 8.3. No response-phase hook exists |
 | MCP `initialize` / `ping` / notifications | Bypassed by design | MEASURED as bypassed; they carry no caller content |
-| JSON-RPC batches and non-JSON-RPC bodies | **No** — not scanned, passed through | DOCUMENTED in source, 4.3 |
+| JSON-RPC batches, non-JSON-RPC and undecodable bodies | **Refused** — not scanned, so not forwarded | Fail-closed by default, 4.3; opt out with `params.unclassified_action: "allow"` |
 | Kong-answered MCP requests (its own `tools/list`, ACL denials) | **UNVERIFIED** | Plugin priority interaction, 4.7 |
 | Block reason in Kong telemetry | **No** | **DEFECT** — MEASURED, metric dropped, 8.4 |
 | Per-caller and per-model attribution on the LLM path | **No** | MEASURED: `model_name: None`, `user_id: None`, 7.1 |

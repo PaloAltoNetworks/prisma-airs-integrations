@@ -42,6 +42,7 @@ PARAM_FOR = {
     "AIRS_PROFILE_NAME": "profile",
     "AIRS_APP_NAME": "app_name",
     "AIRS_SERVER_NAME": "server_name",
+    "AIRS_UNCLASSIFIED_ACTION": "unclassified_action",
 }
 
 

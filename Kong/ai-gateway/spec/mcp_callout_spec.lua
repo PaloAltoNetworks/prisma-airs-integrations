@@ -17,16 +17,22 @@ local UP  = "lua/callout/upstream_by_lua.lua"
 
 -- The build substitutes these; the spec pins them the same way so it exercises
 -- the shipped shape rather than a placeholder.
-local function prepared(path)
+local function prepared(path, unclassified)
     local src = assert(io.open(path)):read("*a")
     src = src:gsub("__AIRS_PROFILE_NAME__", "lab-profile")
              :gsub("__AIRS_APP_NAME__", "kong-ai-gateway")
              :gsub("__AIRS_SERVER_NAME__", "lab-mcp")
+             :gsub("__AIRS_UNCLASSIFIED_ACTION__", unclassified or "refuse")
     local tmp = os.tmpname() .. ".lua"
     local f = assert(io.open(tmp, "w")); f:write(src); f:close()
     return tmp
 end
 local REQP = prepared(REQ)
+-- Three builds of the enforcement hook: the shipped default, the documented
+-- opt-out, and a value nobody defined -- which must behave like the default.
+local UPP       = prepared(UP)
+local UPP_ALLOW = prepared(UP, "allow")
+local UPP_TYPO  = prepared(UP, "Allow")
 
 local function scan_of(body, opts)
     opts = opts or {}
@@ -124,11 +130,11 @@ check("session_id is omitted rather than invented", s4.session_id == nil)
 -- ---------------------------------------------------------------------------
 section("enforcement: the in-protocol denial")
 
-local function enforce(mcp_state, verdict)
+local function enforce(mcp_state, verdict, hook)
     local k = H.new{}
     k.ctx.shared.airs_mcp = mcp_state
     k.ctx.shared.airs_verdict = verdict
-    H.run(UP, k)
+    H.run(hook or UPP, k)
     return k.exits[1]
 end
 
@@ -183,6 +189,56 @@ check("a classification failure fails closed", e and e.status == 403 and e.body.
 
 e = enforce({ classification = "bypass", scanned = false, id = 11 }, { block = true, reason = "x" })
 check("a bypassed control message is not blocked by a verdict nobody asked for", e == nil)
+
+section("GAP 4: a body nobody could classify is refused, not forwarded")
+
+-- Review of PR #67: "A security control should not default open on an
+-- unscanned tools/call." These three classifications mean the request hook
+-- REFUSED to classify -- a tools/call can be inside any of them, and none was
+-- inspected. They now take the same path as a classification failure.
+for _, how in ipairs({ "batch", "not-jsonrpc", "unparseable" }) do
+    e = enforce({ classification = how, scanned = false, id = 30 }, nil)
+    check("'" .. how .. "' is refused by default", e ~= nil and e.status == 403,
+          "an unscanned tools/call must not reach the MCP server")
+    check("'" .. how .. "' refuses as a block, not as a scanner outage",
+          e ~= nil and e.body.error.code == -32001,
+          "nothing was wrong with AIRS -- the message was rejected")
+    check("'" .. how .. "' echoes the caller's id", e ~= nil and e.body.id == 30)
+    check("'" .. how .. "' tells the client nothing about why",
+          e ~= nil and not tostring(e.body.error.message):find(how, 1, true))
+end
+
+-- The deliberate bypasses must NOT be caught by the same net: they carry no
+-- caller content on the request leg, so there is nothing to refuse.
+e = enforce({ classification = "bypass", scanned = false, id = 31 }, nil)
+check("a deliberate bypass still passes under the new default", e == nil,
+      "ping / notifications / initialize / tools/list carry no caller text")
+
+-- The opt-out exists, is exact, and reopens the gap knowingly.
+for _, how in ipairs({ "batch", "not-jsonrpc", "unparseable" }) do
+    e = enforce({ classification = how, scanned = false, id = 32 }, nil, UPP_ALLOW)
+    check("'" .. how .. "' passes through when unclassified_action=allow", e == nil)
+end
+
+-- Fail closed on anything that is not exactly "allow". A typo must not open
+-- the gap silently, which is the only reason the test is an equality check.
+for _, how in ipairs({ "batch", "not-jsonrpc", "unparseable" }) do
+    e = enforce({ classification = how, scanned = false, id = 33 }, nil, UPP_TYPO)
+    check("'" .. how .. "' still refuses when the opt-out is misspelled",
+          e ~= nil and e.status == 403,
+          "only the exact string \"allow\" opens it")
+end
+
+-- A classification failure was already refused and must stay refused whatever
+-- the new setting says -- the opt-out covers unclassified bodies, not errors.
+e = enforce({ classification = "error", scanned = false, fatal = true, id = 34 }, nil, UPP_ALLOW)
+check("a fatal classification error is refused even with allow set",
+      e ~= nil and e.status == 403 and e.body.error.code == -32001)
+
+-- And a message that WAS scanned is untouched by any of this.
+e = enforce({ classification = "tool_event", scanned = true, id = 35 },
+            { block = false }, UPP)
+check("a scanned, allowed tool call is unaffected by the unclassified policy", e == nil)
 
 e = enforce({ classification = "tool_event", scanned = true, id = 12 },
             { block = false, reason = "allow" })

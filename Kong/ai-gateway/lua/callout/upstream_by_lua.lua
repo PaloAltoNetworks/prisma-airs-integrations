@@ -18,6 +18,24 @@
 -- block, -32003 for the scanner being unavailable -- so a client that has
 -- learned one Prisma AIRS integration has learned both.
 
+-- Classifications that mean the body was NEVER INSPECTED because the hook
+-- refused to classify it: a JSON-RPC batch (a top-level array), a body without
+-- `jsonrpc: "2.0"` and a string method, and a body that does not decode to a
+-- JSON object at all. A `tools/call` can be sitting inside any of the three.
+--
+-- A deliberate bypass is NOT one of these. ping, notifications/*, initialize
+-- and tools/list carry no caller content on the request leg, so there is
+-- nothing to scan and nothing to refuse; they are named in docs/DESIGN.md 4.3.
+local UNCLASSIFIED = { batch = true, ["not-jsonrpc"] = true, unparseable = true }
+
+-- FAIL CLOSED. An unscanned tools/call is refused, and pass-through is an
+-- opt-in an operator has to write down. The test is an exact match on "allow",
+-- so an empty value, a typo, or an unsubstituted placeholder all refuse --
+-- the safe answer is the one you get by default AND the one you get by
+-- accident. Set params.unclassified_action to "allow" to pass them through,
+-- which is a transport-compatibility choice, not a security one.
+local UNCLASSIFIED_ACTION = "__AIRS_UNCLASSIFIED_ACTION__"
+
 local ok, err = pcall(function()
     local shared  = kong.ctx.shared
     local mcp     = shared.airs_mcp
@@ -26,6 +44,22 @@ local ok, err = pcall(function()
     -- A message that was never scanned is not a message that passed. If
     -- classification itself failed, refuse: the content was not inspected.
     if type(mcp) == "table" and mcp.fatal == true then
+        return kong.response.exit(403, {
+            jsonrpc = "2.0",
+            id = mcp.id ~= nil and mcp.id or require("cjson.safe").null,
+            error = { code = -32001, message = "Blocked by Prisma AIRS" },
+        })
+    end
+
+    -- A body the hook could not classify was not inspected, so it is refused
+    -- on the same path as a classification failure. -32001 rather than -32003:
+    -- nothing was wrong with the scanner, the message was rejected. Kong's
+    -- behaviour on receiving a batch at an MCP route is UNVERIFIED, so an
+    -- operator who finds a legitimate client tripping this can opt out.
+    if type(mcp) == "table" and UNCLASSIFIED[mcp.classification] == true
+       and UNCLASSIFIED_ACTION ~= "allow" then
+        kong.log.warn("[prisma-airs-mcp] refusing unclassified message: ",
+                      tostring(mcp.classification))
         return kong.response.exit(403, {
             jsonrpc = "2.0",
             id = mcp.id ~= nil and mcp.id or require("cjson.safe").null,

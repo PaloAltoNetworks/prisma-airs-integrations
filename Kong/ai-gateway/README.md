@@ -19,11 +19,13 @@ unit-tested offline, and is inlined into the applied YAML by `scripts/build-conf
 | Streaming | ❌ | GAP 1. A streamed reply bypasses the response leg entirely. Close it with `response_streaming: deny` on the AI Model, which refuses streaming rather than scanning it. |
 | Pre-tool call | ⚠️ | MCP only, and requests only. The `request-callout` policy scans `tools/call` arguments before the MCP server sees them. LLM `tool_calls[].function.arguments` are unreachable — GAP 2. |
 | Post-tool call | ❌ | GAP 3. All three `request-callout` hooks run before the upstream call, so no tool result and no tool catalogue can be inspected. |
+| Unclassifiable MCP body | ✅ | GAP 4, **closed by default**. A JSON-RPC batch, a non-JSON-RPC body or an undecodable body cannot be inspected, so it is refused rather than forwarded. `params.unclassified_action: allow` opts back into pass-through. |
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
 
 Every ❌ and ⚠️ above is a measured platform limit with the evidence in
-[Limitations](#limitations), not an omission.
+[Limitations](#limitations), not an omission. GAP 4 is the one entry that is a
+choice rather than a limit, which is why it is the one that defaults closed.
 
 ## Why this exists
 
@@ -75,7 +77,7 @@ SCM scan log, reachable by `scan_id`.
 
 ## Limitations
 
-Read this before deploying: four coverage gaps and one defect.
+Read this before deploying: three open coverage gaps, one closed by default, and one defect.
 
 ### GAP 1 — streaming bypasses response scanning (MEASURED)
 
@@ -155,19 +157,34 @@ policies: policy "<name>" of type "ai-custom-guardrail" is not supported for sco
 That confirms from the API what Kong documents in the `ai-mcp-proxy` support table
 ("AI Guardrails ... Not supported").
 
-### GAP 4 — a malformed MCP envelope is forwarded unscanned (DOCUMENTED IN SOURCE)
+### GAP 4 — an unclassifiable MCP body (CLOSED BY DEFAULT)
 
-The callout classifies the request body before scanning it. Three shapes refuse classification
-and are marked *not scanned*, which means `upstream.by_lua` lets them through: a JSON-RPC batch
-(a top-level array), a body without `jsonrpc: "2.0"` and a string `method`, and a body that does
-not decode to a JSON object at all. A batch is refused classification deliberately — inspecting
-element one and waving the rest through is an evasion primitive — but refusing to classify is
-not refusing the message.
+The callout classifies the request body before scanning it, and three shapes refuse
+classification: a JSON-RPC batch (a top-level array), a body without `jsonrpc: "2.0"` and a
+string `method`, and a body that does not decode to a JSON object at all. A batch is refused
+deliberately — inspecting element one and waving the rest through is an evasion primitive.
 
-To close this, treat `batch`, `not-jsonrpc` and `unparseable` the way `upstream.by_lua` already
-treats `fatal`, which refuses the message. That is a one-line change in `lua/callout/upstream_by_lua.lua`
-and it is left out of the default because it changes a transport-level behaviour; whether Kong's
-MCP proxy even forwards a batch to the callout is UNVERIFIED. See
+A `tools/call` can be sitting inside any of the three, and none of them was inspected, so
+**`upstream.by_lua` refuses them on the same path as a classification failure**: HTTP 403,
+JSON-RPC `-32001`, the upstream never reached. A security control should not default open on an
+unscanned tool call.
+
+Deliberate bypasses are not caught by this. `ping`, `notifications/*`, `initialize` and
+`tools/list` carry no caller content on the request leg, so there is nothing to refuse and they
+still pass.
+
+Pass-through is available as an opt-in, because Kong's behaviour on receiving a batch at an MCP
+route is UNVERIFIED and a legitimate client may yet trip this:
+
+```yaml
+params:
+  unclassified_action: "allow"   # default is "refuse"
+```
+
+The test is an exact match on `allow`, so an empty value, a typo or an unsubstituted placeholder
+all refuse — the safe answer is both the default and the accident. Choosing `allow` is a
+transport-compatibility decision, not a security one, and it reopens this gap. Covered by 21
+assertions in `spec/mcp_callout_spec.lua`, including that a misspelled opt-out still refuses. See
 [docs/DESIGN.md](docs/DESIGN.md) section 4.3.
 
 ### Other measured notes
