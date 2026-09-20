@@ -39,8 +39,9 @@ end
 -- A guardrail function reaches the PDK from its own BODY rather than through an
 -- injected argument, so these specs have to supply the globals `kong` and `ngx`
 -- rather than pass a table in. What matters as much as the happy path is the
--- ABSENT path: MEASURED on AI Gateway 2.0.3, on the OUTPUT leg of a streamed
--- response there is no request context and these calls RAISE. An unguarded
+-- ABSENT path: MEASURED (2026-09-14, AI Gateway 2.0.3 / Kong Gateway 3.14.0.3;
+-- attribution in docs/CREDITS.md), on the OUTPUT leg of a streamed response
+-- there is no request context and these calls RAISE. An unguarded
 -- raise there silently skips the scan for that segment, so every accessor below
 -- raises when its value was not supplied -- that is what makes a removed pcall
 -- show up as a failing assertion instead of a passing one.

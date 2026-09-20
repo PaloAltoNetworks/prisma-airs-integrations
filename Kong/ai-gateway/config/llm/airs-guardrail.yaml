@@ -120,9 +120,12 @@ ai_gateway_policies:
       # characters; at 2048, ZERO calls -- the stream ended before the
       # threshold was ever reached. Non-streamed replies are always ONE call
       # carrying the whole body, at every value tried. A large value therefore
-      # buys nothing on the buffered path and, on the streamed path, is why an
-      # earlier revision of this file believed the response leg never runs on
-      # a stream at all -- see GAP 1 in the README, and `config/lab/lab-model.yaml`
+      # buys nothing on the buffered path and, on the streamed path, is
+      # INFERRED (not re-measured) to be why an earlier revision of this file
+      # believed the response leg never runs on a stream at all -- the
+      # zero-calls-at-a-large-buffer result above is measured, that it explains
+      # the earlier reading is an inference.
+      # See GAP 1 in the README, and `config/lab/lab-model.yaml`
       # for how to reproduce the segment behaviour. NEVER set a large value
       # here "to scan a whole streamed answer at once": it scans nothing. Left
       # at the schema default (100) by not setting the key.
@@ -137,7 +140,10 @@ ai_gateway_policies:
         # MEASURED (2026-09-14, AI Gateway 2.0.3): a guardrail function body
         # reaches the Kong PDK, so the model name, the caller's address and the
         # authenticated consumer are all available to airs_metadata and no
-        # longer have to be pinned per policy. app_user and ai_model remain
+        # longer have to be pinned per policy. The consumer lookup is reachable
+        # but was never exercised with an authenticated consumer -- the lab
+        # model carried no auth -- so what has actually been measured end to
+        # end is the header label below. app_user and ai_model remain
         # accepted here as the LAST fallback, for an operator who prefers a
         # fixed label on a policy attached to one consumer group:
         #   app_user: "team-a"
@@ -247,23 +253,28 @@ ai_gateway_policies:
         block: "$(airs_verdict.block)"
         block_message: "$(airs_verdict.block_message)"
 
-      # MEASURED (2026-09-12, AI Gateway 2.0.3): with block_detail wired to a
-      # STRING expression, both metrics were DROPPED at runtime, on every
-      # single request, allowed or blocked. The data plane logged
+      # MEASURED (2026-09-14, AI Gateway 2.0.3): with block_detail wired to a
+      # STRING expression, that metric is DROPPED at runtime, on every single
+      # request, allowed or blocked. The data plane logged
       #   [ai-custom-guardrail] metric input_block_detail has unexpected type
       #   string, expected table
-      # and no value was exported.
+      # and no value was exported. block_reason as a string logs no warning.
       #
       # FIXED, MEASURED (2026-09-14, AI Gateway 2.0.3): the runtime wants a
-      # Lua TABLE, not a string -- Kong's own policy reference types this
-      # field as `string`, which is what the warning above disagrees with.
-      # airs_verdict's `detail` is now `{ reason, category, detections }` on
-      # every path, including allow (an empty table). With a table the
-      # warning disappears and the metric is exported: a `file-log` policy
-      # attached to the same model shows `ai.proxy.custom-guardrail.
-      # input_block_detail` populated with `{category, reason, detections}`.
-      # The category and detector names still never reach the client -- they
-      # are only in this table and in the SCM scan log, correlated by scan_id.
+      # Lua TABLE. Kong's policy reference types this field as `string`, which
+      # is the type of the config VALUE -- the expression template below -- and
+      # says nothing about what that template must render to; the runtime
+      # type-checks the RENDERED value. An undocumented rendering requirement,
+      # not a contradiction. airs_verdict's `detail` is now
+      # `{ reason, category, detections }` on every path, including allow (an
+      # empty table). With a table the warning disappears and both metrics are
+      # exported: a `file-log` policy attached to the same model shows
+      # `ai.proxy.custom-guardrail.input_block_detail` populated with
+      # `{category, reason, detections}`. Whether block_reason was still
+      # exported while block_detail was a string was never measured, so it is
+      # not claimed here. The category and detector names still never reach the
+      # client -- they are only in this table and in the SCM scan log,
+      # correlated by scan_id.
       metrics:
         block_reason: "$(airs_verdict.block_message)"
         block_detail: "$(airs_verdict.detail)"
@@ -285,22 +296,30 @@ ai_gateway_policies:
 # is no config that gives both full streaming AND full response coverage.
 #
 # SIMPLE MODE (leave response_streaming: allow, the schema default). MEASURED
-# (2026-09-14, AI Gateway 2.0.3): the OUTPUT phase DOES run on a stream, once
-# per response_buffer_size segment. Coverage is real but partial and
-# best-effort: roughly the first 100 bytes of a short answer are never scanned
-# at all (most chat-UI answers are short), the final partial segment when the
-# stream ends is never scanned, and a block always lands AFTER the flagged
-# segment has already reached the client (HTTP 200 already sent) — leak before
-# a cut is roughly output rate x AIRS scan latency. Good enough for a
-# streaming UX where "eventually blocked, mostly" is an acceptable bar.
+# (2026-09-14, AI Gateway 2.0.3 / Kong Gateway 3.14.0.3; attribution in
+# docs/CREDITS.md): the OUTPUT phase DOES run on a stream, once per
+# response_buffer_size segment. Coverage is real but partial and best-effort.
+# Roughly 100 bytes must accumulate before the phase runs at all, so an answer
+# SHORTER than that is never scanned in its entirety (most chat-UI answers are
+# short) -- on a longer answer those first ~100 bytes are the first segment
+# scanned. Whatever is still below the threshold when the stream ends is never
+# scanned either, and a block always lands AFTER the flagged segment has
+# already reached the client (HTTP 200 already sent) — leak before a cut is
+# roughly output rate x AIRS scan latency. Good enough for a streaming UX
+# where "eventually blocked, mostly" is an acceptable bar.
 #
-# STRICT MODE (response_streaming: deny on the AI Model, below). DOCUMENTED by
-# Kong: "You can't add AI Policies that use the Response Transformer Policy or
-# otherwise trigger in the response phase when streaming is configured."
-# MEASURED (2026-09-12): with deny, a stream:true request is refused at HTTP
-# 400 before any scan runs; buffered traffic is unaffected. Full response
-# coverage, no streaming. This is the only way to guarantee the whole answer
-# is scanned before the client sees any of it.
+# STRICT MODE (response_streaming: deny on the AI Model, below). Two statements
+# to hold side by side rather than reconcile. DOCUMENTED by Kong: "You can't
+# add AI Policies that use the Response Transformer Policy or otherwise trigger
+# in the response phase when streaming is configured" -- Kong documents the
+# combination as UNSUPPORTED and says nothing about how it behaves. MEASURED
+# (2026-09-14, above): the phase does run, per segment. The measurement
+# contradicts the documentation, both are recorded, and the practical reading
+# is that simple mode relies on behaviour Kong does not commit to. MEASURED
+# (2026-09-12): with deny, a stream:true request is refused at HTTP 400 before
+# any scan runs; buffered traffic is unaffected. Full response coverage, no
+# streaming. This is the only way to guarantee the whole answer is scanned
+# before the client sees any of it.
 #
 # If some models must stream and also need STRICT coverage, attach to those
 # models a second copy of this policy with guarding_mode: INPUT, and state

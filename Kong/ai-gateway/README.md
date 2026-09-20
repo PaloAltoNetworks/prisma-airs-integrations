@@ -46,7 +46,7 @@ MEASURED 2026-09-12 on a live gateway: Kong AI Gateway 2.0.3, Konnect control pl
 | `guarding_mode: BOTH` | Both legs genuinely run — two separate transactions in Strata Cloud Manager, one Prompt, one Response |
 | Correlation | The `scan_id` in the client's error matches the `scan_id` in SCM exactly |
 | Correlation, prompt to response | Both legs of one buffered exchange carry the same `transaction_id`, and consecutive exchanges carrying the same conversation header share one `session_id` (MEASURED 2026-09-14 by the prior art — [docs/CREDITS.md](docs/CREDITS.md)) |
-| Attribution | The scan record carries the model, the caller's address and the authenticated consumer, and the scanned text names who said each turn |
+| Attribution | The scan record carries the model and the caller's address, and the scanned text names who said each turn. The caller arrives as a label from the header named in `params.user_header`; `kong.client.get_consumer()` is reachable but has never been exercised with an authenticated consumer, so that branch is unmeasured (MEASURED 2026-09-14 by the prior art — [docs/CREDITS.md](docs/CREDITS.md)) |
 | MCP `tools/call`, clean arguments | HTTP 200, allowed |
 | MCP `tools/call`, injection in arguments | HTTP 403, JSON-RPC error below |
 | AIRS refuses the scan — profile misconfigured, callout answered HTTP 400 | Every `tools/call` refused with `-32003`, upstream never reached |
@@ -81,21 +81,28 @@ SCM scan log, reachable by `scan_id`.
 
 Read this before deploying: three open coverage gaps and one closed by default.
 
-### GAP 1 — streaming leaves gaps in response scanning (MEASURED, corrected)
+### GAP 1 — streaming leaves gaps in response scanning (MEASURED 2026-09-14 by the prior art, corrected)
+
+Except where a line names 2026-09-12, every measurement in this section is the prior-art project's,
+made on 2026-09-14 on its own AI Gateway 2.0.3 / Kong Gateway 3.14.0.3 data plane — not on the
+2026-09-12 gateway the rest of this README reports on. See [docs/CREDITS.md](docs/CREDITS.md).
 
 An earlier revision of this section said a streamed reply bypasses the response leg entirely.
-That reading was itself an artefact of `response_buffer_size: 65536` in the shipped config: a
-buffer that large keeps a typical stream below the threshold at which the OUTPUT phase ever
-fires, so nothing was scanned and it looked identical to a total bypass. See the comment on
+INFERRED, not measured here: that reading was an artefact of `response_buffer_size: 65536` in the
+shipped config, a buffer large enough to keep a typical stream below the threshold at which the
+OUTPUT phase ever fires, so nothing was scanned and it looked identical to a total bypass. The
+zero-call-at-a-large-buffer result below was measured on the prior art's gateway; that it is also
+what produced the apparent bypass here has not been re-run on this one. See the comment on
 `response_buffer_size` in `config/llm/airs-guardrail.yaml`.
 
-MEASURED (2026-09-14, AI Gateway 2.0.3), against a guardrail service that counted every call it
-received: the OUTPUT phase **does** run on a stream, once per `response_buffer_size` segment
+MEASURED (2026-09-14, AI Gateway 2.0.3, prior art), against a guardrail service that counted every
+call it received: the OUTPUT phase **does** run on a stream, once per `response_buffer_size` segment
 (schema default 100 bytes). A 309-character streamed answer produced 3 OUTPUT calls of
 101/104/103 characters; at buffer 512, 2 calls for 1148 characters; at 2048, zero calls. A
 non-streamed reply is always ONE call carrying the whole body, whatever the buffer.
 
-So response scanning on a stream is real, but partial and best-effort, in three specific ways:
+So response scanning on a stream is real, but partial and best-effort, in three specific ways —
+every measurement in the three bullets below is from that same 2026-09-14 prior-art run:
 
 - **A floor.** Roughly 100 bytes must accumulate before the OUTPUT phase runs at all, and
   lowering `response_buffer_size` below that does not lower the floor — MEASURED: buffers of
@@ -112,9 +119,11 @@ So response scanning on a stream is real, but partial and best-effort, in three 
   0.5 s latency, roughly 320 characters leaked before the cut; at 0.05 s, roughly 120. Rough rule:
   leak before a cut ≈ output rate × scan latency.
 
-The termination itself is driver-dependent (MEASURED): on the `openai` driver a block ends the
-stream with a final chunk carrying `finish_reason: "blocked_by_guard"` followed by
+The termination itself is driver-dependent (MEASURED 2026-09-14, prior art): on the `openai` driver
+a block ends the stream with a final chunk carrying `finish_reason: "blocked_by_guard"` followed by
 `data: [DONE]`; on the `ollama` driver the stream is simply cut, with no terminal chunk at all.
+That was measured on a `type: openai` provider pointed at a local model, not against a real OpenAI
+endpoint, so it is the driver that is pinned, not the vendor.
 
 Two honest postures, not one fix:
 
@@ -217,22 +226,32 @@ assertions in `spec/mcp_callout_spec.lua`, including that a misspelled opt-out s
 
 ### Other measured notes
 
-- **The block-metrics defect from an earlier revision is fixed.** `metrics.block_reason` and
-  `metrics.block_detail` wired to a *string* expression were dropped at runtime on every request
-  — `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table` —
-  contradicting Kong's own policy reference, which types `block_detail` as a string. MEASURED
-  (2026-09-14): the runtime wants a Lua **table**. `lua/guardrail/airs_verdict.lua`'s `detail` is
-  now `{ reason, category, detections }` on every path, including allow (an empty table), and the
-  warning is gone: a `file-log` policy on the same model shows
-  `ai.proxy.custom-guardrail.input_block_detail` populated. The client-facing `block_message`
-  contract is unchanged — the category and detector names go only into `detail` and the SCM scan
-  log, never to the caller.
+A note dated **2026-09-14** below was measured by the prior-art project on its own AI Gateway 2.0.3 /
+Kong Gateway 3.14.0.3 data plane and a live AIRS tenant ([docs/CREDITS.md](docs/CREDITS.md)); anything
+undated is 2026-09-12 on the gateway named at the top of this file.
+
+- **The block-metrics defect from an earlier revision is fixed.** MEASURED 2026-09-14 (prior art
+  — [docs/CREDITS.md](docs/CREDITS.md)): `metrics.block_detail` wired to a *string* expression logs
+  `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table` on
+  every request, allowed or blocked, and that metric is dropped at runtime. Kong's policy reference
+  types `block_detail` as a string, which is the type of the expression template you write; it says
+  nothing about what the template must render to, and the runtime type-checks the rendered value and
+  wants a Lua **table**. An undocumented rendering requirement rather than a contradiction.
+  `lua/guardrail/airs_verdict.lua`'s `detail` is now `{ reason, category, detections }` on every
+  path, including allow (an empty table), the warning is gone and the metric is exported: a
+  `file-log` policy on the same model shows `ai.proxy.custom-guardrail.input_block_detail`
+  populated. `metrics.block_reason` as a string logs no warning, and it is exported once
+  `block_detail` renders a table; whether it was exported while `block_detail` was still a string
+  was not measured. The client-facing `block_message` contract is unchanged — the category and
+  detector names go only into `detail` and the SCM scan log, never to the caller.
 - **Corrected.** This section used to record that SCM shows `model_name: None` and
   `user_id: None` on every LLM scan, because a guardrail function can be handed only
   `source`, `content`, `conf` and `resp`. The argument allowlist is real; the conclusion was
   not. MEASURED 2026-09-14 on AI Gateway 2.0.3: a guardrail function *body* reaches the Kong
-  PDK, so `airs_metadata` now sends the model name, the caller's address and the
-  authenticated consumer, and `airs_correlation` sends a per-round and a per-conversation
+  PDK, so `airs_metadata` now sends the model name, the caller's address and a caller label —
+  Kong's authenticated consumer where there is one, otherwise the header named in
+  `params.user_header`; the consumer branch is reachable but was never exercised with an
+  authenticated consumer — and `airs_correlation` sends a per-round and a per-conversation
   identifier. Every PDK call in one must be `pcall`-wrapped — on a streamed response leg an
   unguarded raise silently skips the scan instead of failing the request, which is a
   fail-open. Method error, measurements and the streaming constraint are in

@@ -18,9 +18,12 @@
 -- blocked, and a string value there logs
 --   [ai-custom-guardrail] metric input_block_detail has unexpected type
 --   string, expected table
--- and drops the metric -- silently, on every single request. Kong's own
--- policy reference types this field as a string, which is what this repo
--- shipped until this fix; the runtime disagrees with its own docs. The shape
+-- and drops the metric -- silently, on every single request. Kong's policy
+-- reference types this field as a string, which is the type of the config
+-- value -- the expression template -- and is silent on what that template
+-- must render to; the runtime type-checks the RENDERED value. An undocumented
+-- rendering requirement rather than a contradiction, and a string is what
+-- this repo shipped until this fix. The shape
 -- is `{ reason, category, detections }`: `reason` is a short fixed phrase for
 -- why this call ended in a block (or nil on allow), `category` mirrors AIRS's
 -- own `category` field when one was returned, and `detections` is an array of

@@ -60,9 +60,11 @@ return function(conf)
         app_name = params.app_name,
 
         -- The AI Model entity first, because that is the name an operator
-        -- configured and reads back in Konnect. MEASURED: on the INPUT leg
-        -- body.model is the model the CALLER asked for and on the OUTPUT leg
-        -- it is the resolved target, so it is the fallback and not the source.
+        -- configured and reads back in Konnect. MEASURED (2026-09-14, AI
+        -- Gateway 2.0.3 / Kong Gateway 3.14.0.3; attribution in
+        -- docs/CREDITS.md): on the INPUT leg body.model is the model the
+        -- CALLER asked for and on the OUTPUT leg it is the resolved target,
+        -- so it is the fallback and not the source.
         -- params.ai_model remains the last resort for an operator who prefers
         -- a fixed label.
         ai_model = first(function() return ngx.ctx.ai_model.name end,

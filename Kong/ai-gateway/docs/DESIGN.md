@@ -218,10 +218,11 @@ A value that cannot be built is therefore returned as `nil`, never as `""`.
 `airs_contents` raising is deliberate: a fallback such as `content or ""` would JSON-encode whatever arrived
 — potentially the whole `conf` table — into `contents[].prompt` and ship it to AIRS and the SCM scan log,
 and AIRS returns `allow` on an empty string, so a silent extraction gap would become a recorded clean scan
-of nothing. MEASURED 2026-09-08: a raising guardrail function fails the request closed at HTTP
-500 (UNVERIFIED whether the raised text reaches the client, so no message carries a config value or
-credential). `airs_metadata` invents nothing — a field nothing could build is absent, because a fabricated
-user in a security log is worse than none.
+of nothing. MEASURED 2026-09-08 (prior art, `docs/CREDITS.md`): a raising guardrail function fails the
+request closed at HTTP 500, and the raised text reaches the client verbatim — function name and line
+included — which is why no message here carries a config value or a credential. `airs_metadata` invents
+nothing — a field nothing could build is absent, because a fabricated user in a security log is worse than
+none.
 
 Note the asymmetry between the three: `airs_contents` raises, `airs_metadata` and `airs_correlation` never
 do. It is deliberate. A content function that cannot build the text to scan must stop the request, because
@@ -592,7 +593,7 @@ difference, turning the block into a detector-mapping oracle. The detail goes to
 
 | Channel | Carries | Status |
 | --- | --- | --- |
-| `detail` → `metrics.block_detail` | a table `{ reason, category, detections }` | **Works** — MEASURED, fixed from a string to a table (8.4) |
+| `detail` → `metrics.block_detail` | a table `{ reason, category, detections }` | **Works** — MEASURED 2026-09-14 (prior art), fixed from a string to a table (8.4) |
 | The gateway error log | on the MCP path `[prisma-airs-mcp] blocked: <category> [<detector>,<detector>]`; on both paths `kong.log.err` for hook failures. A log line, not a metric: not aggregated, not exported | Works |
 | Strata Cloud Manager scan log | the complete record — verdict, category, threats, detectors, and on tool events the `tool_invoked` name | Works, and is the authoritative record today |
 
@@ -624,10 +625,14 @@ MEASURED 2026-09-14, `lua/guardrail/airs_metadata.lua` now sends:
 | `user_ip` | `kong.client.get_forwarded_ip()` | `kong.client.get_ip()` |
 | `app_user` | `kong.client.get_consumer()` — `username`, else `id` | the header named by `params.user_header`, then `params.app_user` |
 
-Two things to be exact about. **`app_user` from a header is a label, not an identity.** It is used only when
-Kong has authenticated no consumer, it is caller-supplied, and it must never be read as authentication;
-the consumer always outranks it, and `spec/verdict_spec.lua` asserts that ordering. **`get_forwarded_ip()`
-returns the `X-Forwarded-For` address only when the immediate peer is in the data plane's `trusted_ips`**,
+Three things to be exact about. **`app_user` from a header is a label, not an identity.** It is used only
+when Kong has authenticated no consumer, it is caller-supplied, and it must never be read as authentication;
+the consumer always outranks it, and `spec/verdict_spec.lua` asserts that ordering. **The consumer branch is
+reachable but unexercised.** `kong.client.get_consumer()` returned `nil` in the lab that measured this,
+because the model there carried no auth policy, so every `app_user` value observed in a scan record came
+from the header — the API is proved, a populated consumer is not, and the ordering above is asserted
+offline rather than measured on a gateway. **`get_forwarded_ip()` returns the `X-Forwarded-For` address
+only when the immediate peer is in the data plane's `trusted_ips`**,
 and otherwise returns the peer's own address — behind a load balancer, the load balancer. That is correct
 Kong behaviour, it is visible in the scan log, and it is a data-plane setting rather than something this
 policy can fix.
@@ -694,9 +699,11 @@ The LLM path follows the same rule with one deliberate difference, set out in 7.
 there too, while the *conversation* is read from a client header because nothing else can know it. The
 round is what an investigation joins on; the conversation is a grouping label.
 
-UNVERIFIED: whether SCM stores and displays `transaction_id` and `session_id`, and under which column — the
-fields are sent, their rendering is unmeasured, so do not build a workflow on reading them back until you
-have confirmed it in your own tenant.
+MEASURED 2026-09-14 (prior art, `docs/CREDITS.md`): Strata Cloud Manager stores and displays both — a
+conversation appears as one AI Session, and each round within it as one transaction carrying its prompt
+scan and its response scan. That was confirmed in their tenant's SCM views, not here, and which column
+renders what is a tenant-side surface, so confirm the view in your own tenant before building a workflow
+on reading them back.
 
 ### 7.4 `scan_id` is the join key
 
@@ -739,8 +746,8 @@ it could not reach.
 | MCP `initialize` / `ping` / notifications | Bypassed by design | MEASURED as bypassed; they carry no caller content |
 | JSON-RPC batches, non-JSON-RPC and undecodable bodies | **Refused** — not scanned, so not forwarded | Fail-closed by default, 4.3; opt out with `params.unclassified_action: "allow"` |
 | Kong-answered MCP requests (its own `tools/list`, ACL denials) | **UNVERIFIED** | Plugin priority interaction, 4.7 |
-| Block reason in Kong telemetry | Yes | **Fixed** — MEASURED, `block_detail` is now a table, 8.4 |
-| Per-caller and per-model attribution on the LLM path | Yes | MEASURED 2026-09-14, 7.1. Corrects an earlier **No** in this table |
+| Block reason in Kong telemetry | Yes | **Fixed** — MEASURED 2026-09-14 (prior art), `block_detail` is now a table, 8.4 |
+| Per-model attribution, and a caller label, on the LLM path | Yes | MEASURED 2026-09-14 (prior art), 7.1. Corrects an earlier **No** in this table. The caller label is the header named in `params.user_header` or the client address; `kong.client.get_consumer()` is reachable but has never been exercised with an authenticated consumer, so "per-consumer" is not claimed |
 | Prompt-to-response correlation of one buffered exchange | Yes | MEASURED 2026-09-14, 7.2 — one `transaction_id` on both legs |
 | Prompt-to-response correlation of a *streamed* exchange | **No** | 7.2 — no request context on that leg, both slots server-minted |
 | Turn attribution in the scanned text | Yes | MEASURED 2026-09-14, 3.2.1 — and its absence was itself a false positive |
@@ -751,10 +758,12 @@ it could not reach.
 
 The previous revision of this section, credited to the prior art (`docs/CREDITS.md`), said `stream: true`
 skips the OUTPUT phase entirely — the guardrail receives no call, no error, no warning. That reading held on
-the config this repository shipped, but the *cause* was the config, not the platform:
-`response_buffer_size: 65536` in `config/llm/airs-guardrail.yaml` kept a typical streamed answer below the
-threshold at which the OUTPUT phase ever fires, so every measurement of it looked like a total bypass because
-none of them ever crossed the threshold.
+the config this repository shipped. INFERRED, not re-measured on the 2026-09-12 runtime: the *cause* was the
+config, not the platform — `response_buffer_size: 65536` in `config/llm/airs-guardrail.yaml` kept a typical
+streamed answer below the threshold at which the OUTPUT phase ever fires, so every measurement of it looked
+like a total bypass because none of them ever crossed the threshold. The zero-calls-at-a-large-buffer result
+below is measured, on the prior art's gateway; that it is also what produced the reading here is the
+inference.
 
 MEASURED 2026-09-14, AI Gateway 2.0.3, against a guardrail service that counted every call it received, buffer
 value varied on purpose: the OUTPUT phase **runs** on a stream, once per `response_buffer_size` segment
@@ -763,7 +772,8 @@ calls for 1148 characters; at 2048 — closer to the 65536 this repository shipp
 replies are always ONE call carrying the whole body, at every buffer value tried.
 
 So "the response leg is not scanned on a stream" is wrong as a blanket claim. What is true, and matters more
-because it is subtler than a total bypass:
+because it is subtler than a total bypass — every bullet below MEASURED 2026-09-14 by the prior-art project
+on AI Gateway 2.0.3 / Kong Gateway 3.14.0.3, not repeated here:
 
 - **Floor.** MEASURED: a 32-character streamed answer records zero OUTPUT calls at buffer 100, 20 **and** 1 —
   lowering the setting does not lower the roughly-100-byte floor before the phase runs at all. Most streamed
@@ -779,13 +789,20 @@ because it is subtler than a total bypass:
   latency.
 - **Termination is driver-dependent.** MEASURED: on the `openai` driver a block ends the stream with a final
   chunk carrying `finish_reason: "blocked_by_guard"` then `data: [DONE]`; on the `ollama` driver the stream is
-  simply cut, no terminal chunk. (The earlier revision flagged this as UNVERIFIED, quoting the `rejection_mode`
-  schema description; it is now measured, with the driver caveat the description omits.)
+  simply cut, no terminal chunk. Measured on a `type: openai` provider pointed at a **local** model, not
+  against a real OpenAI endpoint, so what is pinned is the driver, not the vendor. (The earlier revision
+  flagged this as UNVERIFIED, quoting the `rejection_mode` schema description; it is now measured, with the
+  driver caveat the description omits.)
 
-DOCUMENTED by Kong, unchanged: "You can't add AI Policies that use the Response Transformer Policy or
-otherwise trigger in the response phase when streaming is configured" — that sentence describes the
-mechanism (segmented buffering) that produces all four points above, not a total skip. The remedy this
-repository ships, `response_streaming: deny` on the AI Model, is unaffected by this correction. MEASURED
+Two statements to record side by side rather than reconcile. DOCUMENTED by Kong, unchanged: "You can't add
+AI Policies that use the Response Transformer Policy or otherwise trigger in the response phase when
+streaming is configured" — Kong documents the combination as **unsupported**, and says nothing about
+segmented buffering or any other mechanism. MEASURED 2026-09-14 (prior art), on 2.0.3: the response phase
+does run on a stream, per segment, with the floor, tail and delay above. The measurement contradicts the
+documentation; both are recorded here and neither is read as describing the other. The practical reading is
+that simple mode depends on behaviour Kong does not commit to and could change in a release, which is a
+further reason to ship strict mode where full response coverage is required. The remedy this repository
+ships, `response_streaming: deny` on the AI Model, is unaffected by this correction. MEASURED
 2026-09-12: with `deny` a `stream: true` request is refused at the gateway before any scan runs, buffered
 traffic unaffected:
 
@@ -857,26 +874,30 @@ detection. For MCP response-side enforcement today the answer is PANW's v3 Lua p
 Gateway control plane (UNVERIFIED: whether a `post-function` policy could rewrite an MCP reply on 2.x — and
 even then that is detection, not enforcement).
 
-### 8.4 Block metrics — fixed (MEASURED 2026-09-14, was a DEFECT as of 2026-09-12)
+### 8.4 Block metrics — fixed (MEASURED 2026-09-14 by the prior art, was a DEFECT as of 2026-09-12)
 
-`metrics.block_reason` and `metrics.block_detail` wired to a **string** expression produce, on every
-request — allowed or blocked, not only on a block:
+`metrics.block_detail` wired to a **string** expression produces, on every request — allowed or blocked,
+not only on a block:
 
 ```text
 [ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table
 ```
 
-and **the metric is dropped**. Blocking is unaffected — traffic is still refused correctly — but the
-operator-facing reason never reaches Kong telemetry. Kong's own policy reference documents these fields as
-`type: string`, contradicting the runtime.
+and **that metric is dropped**. Blocking is unaffected — traffic is still refused correctly — but the
+operator-facing detail never reaches Kong telemetry. Kong's policy reference types these fields as
+`type: string`, which is the type of the config value, the expression template; it says nothing about what
+the template must render to, and the runtime type-checks the **rendered** value. An undocumented rendering
+requirement rather than a contradiction.
 
-MEASURED 2026-09-14: the runtime wants a Lua **table**, not the string the schema page describes. Rendered
-as a table, the warning disappears and the metric is exported. `lua/guardrail/airs_verdict.lua`'s `detail`
-return value is now `{ reason, category, detections }` on every path, including the allow path (an empty
+MEASURED 2026-09-14: the runtime wants the rendered value to be a Lua **table**. Rendered as a table, the
+warning disappears and the metric is exported. `lua/guardrail/airs_verdict.lua`'s `detail` return value is
+now `{ reason, category, detections }` on every path, including the allow path (an empty
 table `{}` — the metric is evaluated on every request, so it must be a table there too, not only on a
 block). `reason` is a short fixed phrase for why the call ended the way it did, `category` mirrors AIRS's own
-`category` field, and `detections` is an array of the detector names that fired. `block_reason` was never
-part of the defect — it stays wired to the fixed, generic `block_message` string and is correct as a string.
+`category` field, and `detections` is an array of the detector names that fired. `block_reason` as a string
+logs no warning, and it is exported once `block_detail` renders a table; whether it was exported while
+`block_detail` was still a string was never measured, so no claim is made about it. It stays wired to the
+fixed, generic `block_message` string.
 
 Confirmed downstream: a `file-log` policy attached to the same model produces a serializer record whose
 `ai.proxy.custom-guardrail` object carries `input_block_detail: {category, reason, detections}` (and the

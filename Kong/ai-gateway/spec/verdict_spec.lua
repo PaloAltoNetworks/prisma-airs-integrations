@@ -278,7 +278,7 @@ check("exactly one contents element", #c == 1,
 check("the assistant turn is attributed", has(c[1].prompt, "assistant: The capital of France is Paris."),
       "an unattributed model answer reads as an assertion planted in the prompt")
 
--- The one label that must never be written. MEASURED: "system:" in front of
+-- The one label that must never be written. MEASURED (2026-09-14): "system:" in front of
 -- otherwise labelled turns is blocked 3/3 as agent + injection, because a
 -- prompt claiming to carry a system message is the shape of a spoof.
 check("no 'system:' label is ever emitted", not has(c[1].prompt, "system:"))
