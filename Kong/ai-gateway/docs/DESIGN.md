@@ -191,7 +191,7 @@ section 7.
 | `airs_profile(conf)` | every scan, both legs | `{ profile_name = conf.params.profile }` | — |
 | `airs_metadata(conf)` | every scan, both legs | `{ app_name = … }`, plus `app_user` / `ai_model` only if an operator set them | — |
 | `airs_contents(source, content)` | every scan, both legs | `{{ prompt = content }}` on INPUT, `{{ response = content }}` on OUTPUT | `content` is not a string; `content` is empty; `source` is neither `INPUT` nor `OUTPUT` |
-| `airs_verdict(resp)` | after the AIRS reply, both legs | `{ block, block_message, detail }` | section 5.1 |
+| `airs_verdict(resp)` | after the AIRS reply, both legs | `{ block, block_message, detail }`, `detail` a table `{ reason, category, detections }` on every path (MEASURED 2026-09-14: `metrics.block_detail` rejects a string, 8.4) | section 5.1 |
 
 `airs_contents` raising is deliberate: a fallback such as `content or ""` would JSON-encode whatever arrived
 — potentially the whole `conf` table — into `contents[].prompt` and ship it to AIRS and the SCM scan log,
@@ -442,14 +442,19 @@ message that was never scanned is not a message that passed.
 
 Read in order; the first match wins.
 
-| # | Condition | `detail` recorded |
+`detail` is a Lua table, `{ reason, category, detections }`, on every row below and on the allow path too
+(MEASURED 2026-09-14, 8.4: `metrics.block_detail` silently drops the metric on every request if it is a
+string instead). `category` mirrors `resp.category` where one exists; `detections` is the sorted array of
+detector names that fired, when there are any.
+
+| # | Condition | `detail.reason` |
 | --- | --- | --- |
 | 1 | `resp` is not a table, or `resp.action` is not a string | `verdict unavailable (fail-closed)` |
 | 2 | `resp.error` is set (anything but `nil`/`false`) | `partial scan failure (fail-closed)` |
 | 3 | `resp.timeout` is set | `partial scan failure (fail-closed)` |
-| 4 | `resp.errors` is a non-empty table | `detector degraded (fail-closed): <feature>/<status>, …` |
+| 4 | `resp.errors` is a non-empty table | `detector degraded (fail-closed)`, with `detail.detections` = `{ "<feature>/<status>", … }` |
 | 5 | `resp.category` is `error` or `timeout` | `scan <category> (fail-closed)` |
-| 6 | `resp.action` is anything other than exactly lowercase `allow` | the category when the action is `block`, otherwise `unrecognised action (fail-closed)`, plus the names of the detectors that fired |
+| 6 | `resp.action` is anything other than exactly lowercase `allow` | the category when the action is `block`, otherwise `unrecognised action (fail-closed)`, with `detail.detections` = the names of the detectors that fired |
 
 Conditions 2 to 4 matter most and are the ones most integrations omit. The AIRS `ScanResponse` carries
 `error` and `timeout` on every 200 body, plus an `errors[]` array naming the degraded detector
@@ -519,7 +524,7 @@ difference, turning the block into a detector-mapping oracle. The detail goes to
 
 | Channel | Carries | Status |
 | --- | --- | --- |
-| `detail` → `metrics.block_detail` | category plus the names of the detectors that fired | **Broken** — MEASURED, the metric is dropped with a type error (8.4) |
+| `detail` → `metrics.block_detail` | a table `{ reason, category, detections }` | **Works** — MEASURED, fixed from a string to a table (8.4) |
 | The gateway error log | on the MCP path `[prisma-airs-mcp] blocked: <category> [<detector>,<detector>]`; on both paths `kong.log.err` for hook failures. A log line, not a metric: not aggregated, not exported | Works |
 | Strata Cloud Manager scan log | the complete record — verdict, category, threats, detectors, and on tool events the `tool_invoked` name | Works, and is the authoritative record today |
 
@@ -612,7 +617,7 @@ what it could not reach.
 | MCP `initialize` / `ping` / notifications | Bypassed by design | MEASURED as bypassed; they carry no caller content |
 | JSON-RPC batches, non-JSON-RPC and undecodable bodies | **Refused** — not scanned, so not forwarded | Fail-closed by default, 4.3; opt out with `params.unclassified_action: "allow"` |
 | Kong-answered MCP requests (its own `tools/list`, ACL denials) | **UNVERIFIED** | Plugin priority interaction, 4.7 |
-| Block reason in Kong telemetry | **No** | **DEFECT** — MEASURED, metric dropped, 8.4 |
+| Block reason in Kong telemetry | Yes | **Fixed** — MEASURED, `block_detail` is now a table, 8.4 |
 | Per-caller and per-model attribution on the LLM path | **No** | MEASURED: `model_name: None`, `user_id: None`, 7.1 |
 | Correlation from a client error to the detection record | Yes | MEASURED: `scan_id` matches SCM exactly |
 | Scanner failure the gateway can see (measured case: a misconfigured profile, callout answering HTTP 400) | Fails closed | MEASURED on the MCP path: every `tools/call` refused `-32003`, upstream never reached. A network failure of the callout is UNVERIFIED; `stop_on_error: true` on the LLM path is DOCUMENTED, UNVERIFIED here |
@@ -673,9 +678,10 @@ detection. For MCP response-side enforcement today the answer is PANW's v3 Lua p
 Gateway control plane (UNVERIFIED: whether a `post-function` policy could rewrite an MCP reply on 2.x — and
 even then that is detection, not enforcement).
 
-### 8.4 DEFECT — block metrics are dropped (MEASURED 2026-09-12)
+### 8.4 Block metrics — fixed (MEASURED 2026-09-14, was a DEFECT as of 2026-09-12)
 
-`metrics.block_reason` and `metrics.block_detail` wired to a string expression produce, on every block:
+`metrics.block_reason` and `metrics.block_detail` wired to a **string** expression produce, on every
+request — allowed or blocked, not only on a block:
 
 ```text
 [ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table
@@ -683,10 +689,24 @@ even then that is detection, not enforcement).
 
 and **the metric is dropped**. Blocking is unaffected — traffic is still refused correctly — but the
 operator-facing reason never reaches Kong telemetry. Kong's own policy reference documents these fields as
-`type: string`, contradicting the runtime; the shape it wants is undocumented and the defect is unresolved.
-So there is no Kong-side reason code for a block: telemetry can say a request was refused, not why. **SCM is
-the complete record** — category, detectors, threats and the scanned text live there and nowhere else on the
-LLM path, reachable by `scan_id`.
+`type: string`, contradicting the runtime.
+
+MEASURED 2026-09-14: the runtime wants a Lua **table**, not the string the schema page describes. Rendered
+as a table, the warning disappears and the metric is exported. `lua/guardrail/airs_verdict.lua`'s `detail`
+return value is now `{ reason, category, detections }` on every path, including the allow path (an empty
+table `{}` — the metric is evaluated on every request, so it must be a table there too, not only on a
+block). `reason` is a short fixed phrase for why the call ended the way it did, `category` mirrors AIRS's own
+`category` field, and `detections` is an array of the detector names that fired. `block_reason` was never
+part of the defect — it stays wired to the fixed, generic `block_message` string and is correct as a string.
+
+Confirmed downstream: a `file-log` policy attached to the same model produces a serializer record whose
+`ai.proxy.custom-guardrail` object carries `input_block_detail: {category, reason, detections}` (and the
+`output_*` equivalents), populated rather than dropped. So there is now a Kong-side reason code for a block,
+not only "a request was refused". **What does not change**: none of `reason`, `category` or `detections`
+ever reaches the client — `response.block_message` stays wired to `airs_verdict.block_message`, the fixed
+generic text, on every path including fail-closed, so a block still cannot be used to map which detector
+fired. SCM remains the fuller record — the scanned text and the full threat detail live there and nowhere
+else on the LLM path, reachable by `scan_id` — but Kong's own telemetry is no longer silent about why.
 
 ### 8.5 AIRS false positives on delimiter-dense machine syntax (MEASURED 2026-09-12)
 

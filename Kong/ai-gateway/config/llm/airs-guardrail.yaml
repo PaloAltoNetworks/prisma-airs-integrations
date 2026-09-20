@@ -173,14 +173,23 @@ ai_gateway_policies:
         block: "$(airs_verdict.block)"
         block_message: "$(airs_verdict.block_message)"
 
-      # MEASURED (2026-09-12, AI Gateway 2.0.3): both of these are DROPPED at
-      # runtime. The data plane logs
+      # MEASURED (2026-09-12, AI Gateway 2.0.3): with block_detail wired to a
+      # STRING expression, both metrics were DROPPED at runtime, on every
+      # single request, allowed or blocked. The data plane logged
       #   [ai-custom-guardrail] metric input_block_detail has unexpected type
       #   string, expected table
-      # and no value is exported. The intent was to keep the category and the
-      # detector names out of the client response and in the gateway's own
-      # telemetry; on this runtime that does not happen. Until it does, Strata
-      # Cloud Manager, correlated by scan_id, is the record.
+      # and no value was exported.
+      #
+      # FIXED, MEASURED (2026-09-14, AI Gateway 2.0.3): the runtime wants a
+      # Lua TABLE, not a string -- Kong's own policy reference types this
+      # field as `string`, which is what the warning above disagrees with.
+      # airs_verdict's `detail` is now `{ reason, category, detections }` on
+      # every path, including allow (an empty table). With a table the
+      # warning disappears and the metric is exported: a `file-log` policy
+      # attached to the same model shows `ai.proxy.custom-guardrail.
+      # input_block_detail` populated with `{category, reason, detections}`.
+      # The category and detector names still never reach the client -- they
+      # are only in this table and in the SCM scan log, correlated by scan_id.
       metrics:
         block_reason: "$(airs_verdict.block_message)"
         block_detail: "$(airs_verdict.detail)"

@@ -77,7 +77,7 @@ SCM scan log, reachable by `scan_id`.
 
 ## Limitations
 
-Read this before deploying: three open coverage gaps, one closed by default, and one defect.
+Read this before deploying: three open coverage gaps and one closed by default.
 
 ### GAP 1 — streaming bypasses response scanning (MEASURED)
 
@@ -111,20 +111,6 @@ arguments, so AIRS never receives them, under any value of `text_source`; tool d
 (`tools[].function.description`) are likewise not message content. **This is not fixable in
 configuration** — the Kong Gateway 3.x custom plugin can read `tool_calls` directly, this
 config-only policy cannot.
-
-### DEFECT — block metrics are dropped (MEASURED)
-
-`metrics.block_reason` and `metrics.block_detail` wired to a string expression produce, on
-every block:
-
-```text
-[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table
-```
-
-and the metric is dropped. Blocking is unaffected; the operator-facing reason does not reach Kong
-telemetry. Kong's own policy reference documents these fields as `type: string`, which contradicts
-the runtime. Unresolved — the shape the runtime wants is not documented. **Strata Cloud Manager,
-correlated by `scan_id`, is therefore the complete record of what was blocked and why.**
 
 ### GAP 3 — the MCP response leg cannot be inspected (MEASURED)
 
@@ -189,6 +175,16 @@ assertions in `spec/mcp_callout_spec.lua`, including that a misspelled opt-out s
 
 ### Other measured notes
 
+- **The block-metrics defect from an earlier revision is fixed.** `metrics.block_reason` and
+  `metrics.block_detail` wired to a *string* expression were dropped at runtime on every request
+  — `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table` —
+  contradicting Kong's own policy reference, which types `block_detail` as a string. MEASURED
+  (2026-09-14): the runtime wants a Lua **table**. `lua/guardrail/airs_verdict.lua`'s `detail` is
+  now `{ reason, category, detections }` on every path, including allow (an empty table), and the
+  warning is gone: a `file-log` policy on the same model shows
+  `ai.proxy.custom-guardrail.input_block_detail` populated. The client-facing `block_message`
+  contract is unchanged — the category and detector names go only into `detail` and the SCM scan
+  log, never to the caller.
 - SCM shows `model_name: None` and `user_id: None` on every LLM scan. A guardrail function
   can be handed only `source`, `content`, `conf` and `resp`; the calling consumer and the
   model name are unreachable from that phase. See [docs/DESIGN.md](docs/DESIGN.md).
@@ -274,14 +270,14 @@ the `url` in the policy to the endpoint your AIRS onboarding gives you; the path
 | `lua/guardrail/` | The four guardrail functions: `airs_profile`, `airs_metadata`, `airs_contents`, `airs_verdict`. |
 | `lua/callout/` | The three `request-callout` hooks: `request_by_lua`, `response_by_lua`, `upstream_by_lua`. |
 | `scripts/` | `build-config.py` (inline Lua into config, emit `dist/`), `check-policy-schema.py`, `kongctl_yaml.py`, `test-airs.sh` (live traffic through a gateway), the two lab servers, `run-lua-tests.sh`. |
-| `spec/` | Offline Lua assertions — 40 in `verdict_spec.lua`, 66 in `mcp_callout_spec.lua`. |
+| `spec/` | Offline Lua assertions — 52 in `verdict_spec.lua`, 66 in `mcp_callout_spec.lua`. |
 | `dist/` | **Generated, and deliberately not committed.** The build inlines the Lua and, for the MCP callout, also the AIRS profile name and MCP server name, which are tenant-specific. Build before applying, then validate the result with `scripts/check-policy-schema.py`. |
 
 ## Checking it works
 
 ```bash
 # Offline: needs no gateway, no Konnect and no AIRS credential.
-bash scripts/run-lua-tests.sh          # 106 assertions over the verdict and callout logic
+bash scripts/run-lua-tests.sh          # 118 assertions over the verdict and callout logic
 
 # The build bakes these two into the Lua, so it needs them set even offline.
 # They are names, not secrets — any placeholder builds a config you can validate.

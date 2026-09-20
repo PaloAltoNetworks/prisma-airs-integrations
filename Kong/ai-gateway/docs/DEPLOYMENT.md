@@ -10,8 +10,8 @@ tenant value appears below: replace `<AI_GATEWAY_ID>`, `<REGION>`, `my-profile`,
 `my-mcp` with your own.
 
 **Read [section 7, Limitations](#7-limitations), before you deploy.** There are two measured
-coverage gaps, one structural MCP limit and one defect; a reader who skips them will believe this
-covers traffic it does not.
+coverage gaps and one structural MCP limit; a reader who skips them will believe this covers
+traffic it does not.
 
 ---
 
@@ -529,20 +529,26 @@ limitation is Kong's: `request-callout` cannot see the response leg to feed them
 MCP client that receives a bare 403 sees a dead transport, while a JSON-RPC error carrying its own
 id is a tool failure the session survives.
 
-### Defect — block reason metrics are dropped (MEASURED)
+### Block reason metrics — fixed (MEASURED 2026-09-14, was a defect)
 
-`metrics.block_reason` and `metrics.block_detail` wired to a string expression produce, on every
-block:
+An earlier revision of this guide flagged `metrics.block_reason` and `metrics.block_detail` as an
+unresolved defect: with `block_detail` wired to a **string** expression, every request — allowed
+or blocked — logged
 
 ```
 [ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table
 ```
 
-and the metric is **dropped**. Blocking itself is unaffected; the operator-facing reason does not
-reach Kong telemetry. Kong's own policy reference documents these fields as `type: string`, which
-contradicts the runtime, and the shape the runtime wants is not documented. Unresolved: do not build
-a dashboard or an alert on these metrics. Strata Cloud Manager, correlated by `scan_id`, remains the
-complete record.
+and the metric was dropped. Kong's own policy reference documents this field as `type: string`,
+which contradicts the runtime: MEASURED (2026-09-14), the runtime wants a Lua **table**. Fixed:
+`lua/guardrail/airs_verdict.lua`'s `detail` is now `{ reason, category, detections }` on every
+path, including allow (an empty table `{}`). The warning is gone and the metric is exported — a
+`file-log` policy on the same model shows `ai.proxy.custom-guardrail.input_block_detail`
+populated. `metrics.block_reason` was never affected; it stays a string, wired to the fixed,
+generic `block_message`. The client-facing contract is unchanged: neither field ever reaches the
+caller, only Kong's own telemetry and the SCM scan log (correlated by `scan_id`), which remains
+the fuller record — the scanned text and the full threat detail live there and nowhere else on
+the LLM path.
 
 ---
 
@@ -563,5 +569,5 @@ complete record.
 | Piping `kongctl plan` into `jq` fails to parse. | MEASURED: with deferred `!env` values present, plan prints a warning line **before** the JSON. | Strip the leading non-JSON line, or read the plan by eye. |
 | AIRS answers `415` to the scan POST. | The request carries no content type. | `Content-Type: application/json` on the callout. Both shipped configs already set it; check any variant you wrote yourself. |
 | Build fails saying a placeholder is needed and the variable is not set. | `scripts/build-config.py` resolves `!env` values for anything it bakes into Lua, because `!env` is resolved by kongctl at apply time — too late for inlined code. | `export PRISMA_AIRS_PROFILE_NAME=my-profile` and `export AIRS_MCP_SERVER_NAME=my-mcp` before building. |
-| Every block logs `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table`. | Known defect, unresolved. See [Defect](#defect--block-reason-metrics-are-dropped-measured). | Blocking is unaffected. Use SCM, correlated by `scan_id`, as the record of why. |
+| Every request logs `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table`. | `block_detail` is wired to a string instead of a table. Fixed in the shipped Lua — see [Block reason metrics](#block-reason-metrics--fixed-measured-2026-09-14-was-a-defect). | Rebuild from the current `lua/guardrail/airs_verdict.lua`; if you hand-wrote your own verdict function, return a table. |
 

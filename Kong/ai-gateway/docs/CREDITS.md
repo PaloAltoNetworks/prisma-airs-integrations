@@ -103,9 +103,13 @@ local function is_set(v) return v ~= nil and v ~= false end
 
 if is_set(resp.error) or is_set(resp.timeout) then
     return { block = true, block_message = msg,
-             detail = "partial scan failure (fail-closed)" }
+             detail = { reason = "partial scan failure (fail-closed)",
+                        category = resp.category } }
 end
 ```
+
+(`detail` is a table, `{ reason, category, detections }`, on every path this function returns — see
+"Measurements made in this repository" below for why a string there is not an option.)
 
 The same function deliberately does **not** block on `category` alone on the
 allow path: an AIRS profile in alert-only mode returns `allow` together with a
@@ -145,15 +149,21 @@ art.
   exactly, so an operator can go from a user complaint to the detection record.
 - SCM records `model_name: None` and `user_id: None` on every scan — the direct
   consequence of credited finding 2.
-- **Defect, unresolved (MEASURED).** `metrics.block_reason` and
-  `metrics.block_detail` wired to a string expression produce, on every block,
+- **Fixed, MEASURED (2026-09-14, AI Gateway 2.0.3), was an unresolved defect.**
+  `metrics.block_reason` and `metrics.block_detail` wired to a **string**
+  expression produce, on every request — allowed or blocked —
   `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table`,
   and the metric is dropped at runtime. Blocking itself is unaffected; the
-  operator-facing reason does not reach Kong telemetry. Kong's policy reference
-  documents these fields as `type: string`, which contradicts the runtime, and the
-  shape the runtime wants is not documented. Do not build a dashboard or an alert
-  on these metrics: Strata Cloud Manager, correlated by `scan_id`, remains the
-  complete record.
+  operator-facing reason did not reach Kong telemetry. Kong's policy reference
+  documents these fields as `type: string`, which contradicts the runtime — the
+  runtime wants a Lua **table**. With `airs_verdict`'s `detail` changed to
+  `{ reason, category, detections }` on every path, including allow (an empty
+  table), the warning disappears and the metric is exported: a `file-log`
+  policy on the same model shows `ai.proxy.custom-guardrail.input_block_detail`
+  populated with the table. `block_reason` was never affected — a string is
+  correct there and stays a string. Strata Cloud Manager, correlated by
+  `scan_id`, remains the fuller record (threats, the scanned text), but Kong
+  telemetry now carries a reason code too.
 - The AIRS scan API's tool-event contract: `tool_event` is a member of a
   `contents[]` element, not a top-level sibling of `contents`; `input` and
   `output` are strings containing JSON; `tool_invoked` is accepted and echoed

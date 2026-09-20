@@ -16,6 +16,13 @@ local function check(name, cond, why)
     end
 end
 local function section(s) print("\n" .. s) end
+local function list_has(list, value)
+    if type(list) ~= "table" then return false end
+    for _, v in ipairs(list) do
+        if v == value then return true end
+    end
+    return false
+end
 
 local verdict   = assert(loadfile("lua/guardrail/airs_verdict.lua"))()
 local contents  = assert(loadfile("lua/guardrail/airs_contents.lua"))()
@@ -28,6 +35,8 @@ section("the ordinary verdicts")
 local v = verdict{ action = "allow", category = "benign", scan_id = "s-1" }
 check("a clean allow passes", v.block == false)
 check("an allow carries no message", v.block_message == "")
+check("detail is a table on allow too", type(v.detail) == "table",
+      "metrics.block_detail is evaluated on every request; a string here warns and is dropped on EVERY call, not only blocks")
 
 v = verdict{ action = "block", category = "malicious", scan_id = "s-2",
              prompt_detected = { injection = true, url_cats = false } }
@@ -35,9 +44,10 @@ check("a block blocks", v.block == true)
 check("the block message is generic", v.block_message == "Blocked by Prisma AIRS [scan_id=s-2]")
 check("the category never reaches the client", not v.block_message:find("malicious"))
 check("the detector never reaches the client", not v.block_message:find("injection"))
-check("the category reaches telemetry", v.detail:find("malicious") ~= nil)
-check("the detector reaches telemetry", v.detail:find("injection") ~= nil)
-check("a detector that did NOT fire is not reported", v.detail:find("url_cats") == nil)
+check("detail is a table", type(v.detail) == "table")
+check("the category reaches telemetry", v.detail.category == "malicious")
+check("the detector reaches telemetry", list_has(v.detail.detections, "injection"))
+check("a detector that did NOT fire is not reported", not list_has(v.detail.detections, "url_cats"))
 
 -- ---------------------------------------------------------------------------
 section("partial scan failure")
@@ -54,7 +64,7 @@ check("allow + timeout=true BLOCKS", v.block == true)
 v = verdict{ action = "allow", category = "benign", scan_id = "s-5",
              errors = { { content_type = "prompt", feature = "dlp", status = "timeout" } } }
 check("allow + a populated errors[] BLOCKS", v.block == true)
-check("the degraded detector is named in telemetry", v.detail:find("dlp/timeout") ~= nil)
+check("the degraded detector is named in telemetry", list_has(v.detail.detections, "dlp/timeout"))
 check("the degraded detector is NOT named to the client", not v.block_message:find("dlp"))
 
 v = verdict{ action = "allow", category = "benign", error = false, timeout = false, errors = {} }
@@ -79,7 +89,7 @@ check("a wrongly-cased ALLOW blocks",     verdict{ action = "ALLOW" }.block == t
       "an action this function does not know is not a pass")
 check("an unknown action blocks",         verdict{ action = "quarantine" }.block == true)
 check("an unknown action says so in telemetry",
-      verdict{ action = "quarantine" }.detail:find("unrecognised") ~= nil)
+      verdict{ action = "quarantine" }.detail.reason:find("unrecognised") ~= nil)
 
 -- ---------------------------------------------------------------------------
 section("the profile owner's choice is respected")
@@ -97,8 +107,27 @@ section("detectors we have never heard of")
 v = verdict{ action = "block", category = "malicious",
              tool_detected = { tool_definition_poisoning = true },
              response_detected = { some_future_detector = true } }
-check("tool_detected is read",   v.detail:find("tool_definition_poisoning") ~= nil)
-check("an unknown detector is reported, not filtered", v.detail:find("some_future_detector") ~= nil)
+check("tool_detected is read",   list_has(v.detail.detections, "tool_definition_poisoning"))
+check("an unknown detector is reported, not filtered", list_has(v.detail.detections, "some_future_detector"))
+
+-- ---------------------------------------------------------------------------
+section("detail is ALWAYS a table -- metrics.block_detail rejects a string on every request")
+
+-- MEASURED (2026-09-14, AI Gateway 2.0.3): metrics.block_detail is evaluated
+-- whether the request was blocked or not, and a string value there is
+-- silently dropped with a type warning on every call. So this is not only a
+-- block-path property.
+check("unparseable verdict",        type(verdict(nil).detail) == "table")
+check("non-table response",         type(verdict(42).detail) == "table")
+check("empty table response",       type(verdict({}).detail) == "table")
+check("clean allow",                type(verdict{ action = "allow" }.detail) == "table")
+check("partial failure (error)",    type(verdict{ action = "allow", error = true }.detail) == "table")
+check("partial failure (timeout)",  type(verdict{ action = "allow", timeout = true }.detail) == "table")
+check("degraded detector",          type(verdict{ action = "allow",
+                                        errors = { { feature = "dlp", status = "timeout" } } }.detail) == "table")
+check("legacy category=error",      type(verdict{ action = "allow", category = "error" }.detail) == "table")
+check("ordinary block",             type(verdict{ action = "block", category = "malicious" }.detail) == "table")
+check("unrecognised action",        type(verdict{ action = "quarantine" }.detail) == "table")
 
 -- ---------------------------------------------------------------------------
 section("the string branch that is inactive today")
