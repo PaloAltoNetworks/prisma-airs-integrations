@@ -425,9 +425,26 @@ it; that belongs in your client integration notes.
 MEASURED: the `scan_id` in the client's error matches the `scan_id` in Strata Cloud Manager exactly,
 so an operator can go from a user complaint to the detection record. MEASURED: with
 `guarding_mode: BOTH` both legs genuinely run — two separate SCM transactions, one showing Prompt
-and one Response. MEASURED: SCM shows `model_name: None` and `user_id: None` on every scan, because
-a guardrail function cannot reach the model name or the calling consumer; do not plan correlation
-work on either field.
+and one Response. MEASURED 2026-09-14 (prior art, `docs/CREDITS.md`): `model_name`, `user_id` and `user_ip` now carry
+real values, and one buffered exchange reaches SCM as one transaction with two scans — the prompt
+and the response it produced. An earlier revision of this guide said those fields were always
+`None` and that correlation was unavailable; that was true of the configuration it described, not
+of the platform. Two caveats to plan around. `user_ip` is the immediate peer's address unless that
+peer is in the data plane's `trusted_ips`, so behind a load balancer it is the load balancer. And a
+**streamed** response leg has no request context, so its scans carry no identifiers at all and AIRS
+generates its own — the prompt scans of a streamed conversation group, the response scans do not.
+
+To group several exchanges into one conversation, have the client send a conversation identifier
+and name that header in the policy:
+
+```yaml
+params:
+  session_header: "x-airs-session-id"   # your application's conversation id
+  user_header: "x-airs-user"            # only used when no consumer is authenticated
+```
+
+Both are caller-supplied labels for the scan log, never authentication. The per-round identifier is
+Kong's own request id and needs no configuration.
 
 ### MCP path
 

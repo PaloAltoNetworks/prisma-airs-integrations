@@ -17,7 +17,7 @@ unit-tested offline, and is inlined into the applied YAML by `scripts/build-conf
 | Prompt | ✅ | The `ai-custom-guardrail` policy scans the prompt before the AI Model route forwards it. A block is HTTP 400. |
 | Response | ✅ | Scanned on the response leg under `guarding_mode: BOTH`; both legs genuinely run. Full coverage when buffered; partial and best-effort when streamed — see Streaming. |
 | Streaming | ⚠️ | GAP 1. The OUTPUT leg runs on a stream, per `response_buffer_size` segment — but with a floor (short answers are never scanned), a tail (the final partial segment is never scanned), and a delay (a block lands after the flagged segment already reached the client). `response_streaming: deny` on the AI Model trades streaming away for full coverage. |
-| Pre-tool call | ⚠️ | MCP only, and requests only. The `request-callout` policy scans `tools/call` arguments before the MCP server sees them. LLM `tool_calls[].function.arguments` are unreachable — GAP 2. |
+| Pre-tool call | ⚠️ | MCP: the `request-callout` policy scans `tools/call` arguments before the MCP server sees them. LLM: `params.tool_scan` puts the tool catalogue and the tool-call arguments the client sends back as conversation history in front of the scanner — opt-in, off by default. A tool call on the leg where the model first emits it is still unreachable — GAP 2. |
 | Post-tool call | ❌ | GAP 3. All three `request-callout` hooks run before the upstream call, so no tool result and no tool catalogue can be inspected. |
 | Unclassifiable MCP body | ✅ | GAP 4, **closed by default**. A JSON-RPC batch, a non-JSON-RPC body or an undecodable body cannot be inspected, so it is refused rather than forwarded. `params.unclassified_action: allow` opts back into pass-through. |
 
@@ -45,6 +45,8 @@ MEASURED 2026-09-12 on a live gateway: Kong AI Gateway 2.0.3, Konnect control pl
 | Prompt injection on the request leg | HTTP 400, block body below |
 | `guarding_mode: BOTH` | Both legs genuinely run — two separate transactions in Strata Cloud Manager, one Prompt, one Response |
 | Correlation | The `scan_id` in the client's error matches the `scan_id` in SCM exactly |
+| Correlation, prompt to response | Both legs of one buffered exchange carry the same `transaction_id`, and consecutive exchanges carrying the same conversation header share one `session_id` (MEASURED 2026-09-14 by the prior art — [docs/CREDITS.md](docs/CREDITS.md)) |
+| Attribution | The scan record carries the model, the caller's address and the authenticated consumer, and the scanned text names who said each turn |
 | MCP `tools/call`, clean arguments | HTTP 200, allowed |
 | MCP `tools/call`, injection in arguments | HTTP 403, JSON-RPC error below |
 | AIRS refuses the scan — profile misconfigured, callout answered HTTP 400 | Every `tools/call` refused with `-32003`, upstream never reached |
@@ -128,13 +130,28 @@ give it — by refusing streaming rather than scanning it — but `allow` is not
 is "coverage with a floor, a tail and a delay". Never set `response_buffer_size` to a large value
 "to scan a whole streamed answer at once": MEASURED, it scans nothing.
 
-### GAP 2 — tool-call arguments are invisible on the LLM path (MEASURED)
+### GAP 2 — a tool call is invisible on the leg that emits it (MEASURED, narrowed)
 
 A buffered reply with `content: null` and the payload only inside
 `tool_calls[].function.arguments` is allowed. Kong's text extraction does not include tool-call
 arguments, so AIRS never receives them, under any value of `text_source`; tool definitions
-(`tools[].function.description`) are likewise not message content. **This is not fixable in
-configuration** — the Kong Gateway 3.x custom plugin can read `tool_calls` directly, this
+(`tools[].function.description`) are likewise not message content.
+
+**Narrowed since, on the request leg only.** MEASURED 2026-09-14 (prior art —
+[docs/CREDITS.md](docs/CREDITS.md)): a guardrail function body reaches
+`kong.request.get_body()`, which carries `tools[]` and the `tool_calls` of the assistant turns
+the client replays as conversation history — neither of which `$(content)` ever exposes. With
+`params.tool_scan: "calls"`, a conversation whose injection sits only in a tool call's arguments
+was refused 5 times out of 5 where it was allowed 5/5 with the setting off. `"catalogue"` adds
+`tools[]`, which is the tool-poisoning surface. Both are off by default and both are worth
+trying against your own profile first: a JSON parameter schema reads as source code to a profile
+with that detector enabled.
+
+**What is still open.** `kong.request.get_body()` returns the *request* body on both legs, so
+the OUTPUT leg — where the model first emits a tool call, before any client has replayed it —
+still cannot see it. The residual gap is exactly the case above: a buffered reply whose only
+payload is a freshly generated `tool_calls[].function.arguments`. That is not fixable in
+configuration; the Kong Gateway 3.x custom plugin reads the response body directly and this
 config-only policy cannot.
 
 ### GAP 3 — the MCP response leg cannot be inspected (MEASURED)
@@ -210,9 +227,25 @@ assertions in `spec/mcp_callout_spec.lua`, including that a misspelled opt-out s
   `ai.proxy.custom-guardrail.input_block_detail` populated. The client-facing `block_message`
   contract is unchanged — the category and detector names go only into `detail` and the SCM scan
   log, never to the caller.
-- SCM shows `model_name: None` and `user_id: None` on every LLM scan. A guardrail function
-  can be handed only `source`, `content`, `conf` and `resp`; the calling consumer and the
-  model name are unreachable from that phase. See [docs/DESIGN.md](docs/DESIGN.md).
+- **Corrected.** This section used to record that SCM shows `model_name: None` and
+  `user_id: None` on every LLM scan, because a guardrail function can be handed only
+  `source`, `content`, `conf` and `resp`. The argument allowlist is real; the conclusion was
+  not. MEASURED 2026-09-14 on AI Gateway 2.0.3: a guardrail function *body* reaches the Kong
+  PDK, so `airs_metadata` now sends the model name, the caller's address and the
+  authenticated consumer, and `airs_correlation` sends a per-round and a per-conversation
+  identifier. Every PDK call in one must be `pcall`-wrapped — on a streamed response leg an
+  unguarded raise silently skips the scan instead of failing the request, which is a
+  fail-open. Method error, measurements and the streaming constraint are in
+  [docs/CREDITS.md](docs/CREDITS.md); the design is in [docs/DESIGN.md](docs/DESIGN.md)
+  section 7.
+- **Unattributed conversation text is itself a false positive.** `text_source` joins message
+  content with no roles, and MEASURED 2026-09-14 on a live tenant an ordinary two-turn chat
+  ("What is the capital of France? / The capital of France is Paris. / And Italy?") is blocked
+  3 times out of 3 as agent + prompt injection: the model's own previous answer, unattributed,
+  reads as an assertion planted in the prompt. `airs_contents` rebuilds the scanned text from
+  the request body and prefixes `user:` and `assistant:`, which clears it 3/3 without weakening
+  detection. It never prefixes `system:` — that is the shape of a system-prompt spoof and gets
+  the whole conversation blocked.
 - Delimiter-dense machine syntax in a prompt can itself trip the AIRS prompt-injection
   detector. `do it @@toolcall@@` returns 200 and `do it @@canned:p0@@` returns 200, but the two
   concatenated return 400. Steering tokens in test prompts can silently turn a response-leg
@@ -294,17 +327,17 @@ the `url` in the policy to the endpoint your AIRS onboarding gives you; the path
 | --- | --- |
 | `config/llm/`, `config/mcp/` | The two policies: `ai-custom-guardrail` for LLM traffic and `request-callout` for MCP traffic, both heavily commented. |
 | `config/lab/` | Fixtures, not part of the integration: an AI Model over the echo upstream, an AI MCP Server over the lab MCP server, and the config store plus vault that hold the AIRS key. |
-| `lua/guardrail/` | The four guardrail functions: `airs_profile`, `airs_metadata`, `airs_contents`, `airs_verdict`. |
+| `lua/guardrail/` | The five guardrail functions: `airs_profile`, `airs_correlation`, `airs_metadata`, `airs_contents`, `airs_verdict`. |
 | `lua/callout/` | The three `request-callout` hooks: `request_by_lua`, `response_by_lua`, `upstream_by_lua`. |
 | `scripts/` | `build-config.py` (inline Lua into config, emit `dist/`), `check-policy-schema.py`, `kongctl_yaml.py`, `test-airs.sh` (live traffic through a gateway), the two lab servers, `run-lua-tests.sh`. |
-| `spec/` | Offline Lua assertions — 52 in `verdict_spec.lua`, 66 in `mcp_callout_spec.lua`. |
+| `spec/` | Offline Lua assertions — 114 in `verdict_spec.lua`, 87 in `mcp_callout_spec.lua`. |
 | `dist/` | **Generated, and deliberately not committed.** The build inlines the Lua and, for the MCP callout, also the AIRS profile name and MCP server name, which are tenant-specific. Build before applying, then validate the result with `scripts/check-policy-schema.py`. |
 
 ## Checking it works
 
 ```bash
 # Offline: needs no gateway, no Konnect and no AIRS credential.
-bash scripts/run-lua-tests.sh          # 118 assertions over the verdict and callout logic
+bash scripts/run-lua-tests.sh          # 201 assertions over the verdict and callout logic
 
 # The build bakes these two into the Lua, so it needs them set even offline.
 # They are names, not secrets — any placeholder builds a config you can validate.
