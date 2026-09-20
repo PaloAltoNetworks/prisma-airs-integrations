@@ -57,14 +57,27 @@ ai_gateway_policies:
       #
       # MEASURED (2026-09-08, AI Gateway 2.0.3): the text is the message
       # contents joined by "\n\n" in REVERSE chronological order, system prompt
-      # included. Two consequences to plan for rather than discover: a system
-      # prompt that reads like an injection is a false-positive surface, and
-      # larger payloads cost more AIRS tokens per scan.
+      # included, with NO indication of who said what. Two consequences to plan
+      # for rather than discover: a system prompt that reads like an injection
+      # is a false-positive surface, and larger payloads cost more AIRS tokens
+      # per scan.
+      #
+      # A THIRD consequence turned out to be the serious one. MEASURED
+      # (2026-09-14, AI Gateway 2.0.3) on a live tenant: an unattributed join of
+      # an ordinary conversation is blocked as prompt injection, because the
+      # model's own previous answer reads as an assertion planted in the prompt.
+      # airs_contents therefore rebuilds the scanned text from the request body
+      # with each turn attributed, and this value is now the FALLBACK used when
+      # that rebuild meets a body shape it does not understand. It still has to
+      # be concatenate_all_content for that fallback to be the widest one.
       #
       # MEASURED, and this is a coverage GAP the README states plainly:
       # tools[].function.description and assistant tool_calls[].function.arguments
       # are NOT message content and never enter $(content) under any value of
-      # this setting. Tool definitions on the LLM path are outside this control.
+      # this setting. They ARE in the raw request body, which airs_contents can
+      # read, so params.tool_scan below puts them in front of the scanner --
+      # opt-in, off by default. What no setting reaches is a tool call on the
+      # leg the model emits it on: GAP 2, README and docs/DESIGN.md 8.2.
       text_source: concatenate_all_content
 
       # DOCUMENTED. Restated rather than left to the default because both are
@@ -120,9 +133,42 @@ ai_gateway_policies:
         #     export PRISMA_AIRS_PROFILE_NAME=my-profile
         profile: !env PRISMA_AIRS_PROFILE_NAME
         app_name: "kong-ai-gateway"
-        # app_user and ai_model are optional and are sent only if set. They are
-        # static: see docs/DESIGN.md for why a guardrail function cannot
-        # reach the calling consumer or the model name.
+
+        # MEASURED (2026-09-14, AI Gateway 2.0.3): a guardrail function body
+        # reaches the Kong PDK, so the model name, the caller's address and the
+        # authenticated consumer are all available to airs_metadata and no
+        # longer have to be pinned per policy. app_user and ai_model remain
+        # accepted here as the LAST fallback, for an operator who prefers a
+        # fixed label on a policy attached to one consumer group:
+        #   app_user: "team-a"
+        #   ai_model: "my-model"
+
+        # user_header names a request header carrying the end user, used only
+        # when Kong has authenticated no consumer. It is caller-supplied, so it
+        # labels a scan and must never be read as an authenticated identity.
+        # Point it at whatever header your application already sends.
+        user_header: "x-airs-user"
+
+        # Correlation. session_header names the CONVERSATION, which only the
+        # caller can know -- absent, a conversation is a single exchange. The
+        # ROUND is Kong's own request id and needs no configuration;
+        # transaction_header exists only for an application trusted to name its
+        # own rounds, and hands that choice to the caller, so leave it unset
+        # unless you mean it. See docs/DESIGN.md section 7.
+        session_header: "x-airs-session-id"
+        # transaction_header: "x-airs-transaction-id"
+
+        # tool_scan closes part of GAP 2, and it is off unless set to exactly
+        # "calls" or "catalogue". MEASURED (2026-09-14): tools[] and
+        # tool_calls[].function.arguments are not message content and never
+        # enter $(content) under any text_source, but the raw request body
+        # carries both, so airs_contents can put them in front of the
+        # detectors. "calls" appends the arguments the model generated;
+        # "catalogue" also prepends the tool declarations, which is the
+        # tool-poisoning surface -- and the one a profile with the source_code
+        # detector flags, because a JSON parameter schema reads as code. Try
+        # either against your own profile before enabling it in production.
+        # tool_scan: "calls"
 
       request:
         # The hostname depends on your tenant's region. The endpoint shipped
@@ -174,6 +220,25 @@ ai_gateway_policies:
         # HTTP 500 "invalid expression syntax" and no request reaches the model.
         # Built-ins are injected by PARAMETER NAME.
         body:
+          # Correlation identifiers, built by airs_correlation below. They nest
+          # and they are not interchangeable: transaction_id is one ROUND -- a
+          # prompt and the response it produced -- and carries the same value on
+          # both legs so Strata Cloud Manager shows one exchange rather than two
+          # unrelated scans; session_id is the CONVERSATION grouping several
+          # rounds, taken from the caller's header and falling back to the round
+          # so an exchange is never split across two sessions.
+          #
+          # tr_id is deliberately absent. MEASURED (2026-09-14): it is the older
+          # name of session_id, NOT of transaction_id -- a request carrying only
+          # tr_id comes back with session_id set to that value. Sending the
+          # round under it files the round in the conversation slot.
+          #
+          # MEASURED (2026-09-14): a field the function leaves nil is omitted
+          # from the payload, and AIRS then generates pan_<uuid> for that slot.
+          # A field set to an empty string is rendered as JSON false instead,
+          # which is why airs_correlation returns nothing rather than blanks.
+          transaction_id: "$(airs_correlation.transaction_id)"
+          session_id: "$(airs_correlation.session_id)"
           ai_profile: "$(airs_profile)"
           metadata: "$(airs_metadata)"
           contents: "$(airs_contents)"
@@ -207,6 +272,7 @@ ai_gateway_policies:
         # GENERATED FROM lua/guardrail/ — edit there, then run
         # scripts/build-config.py. Do not hand-edit.
         airs_profile: "__INLINE__lua/guardrail/airs_profile.lua"
+        airs_correlation: "__INLINE__lua/guardrail/airs_correlation.lua"
         airs_metadata: "__INLINE__lua/guardrail/airs_metadata.lua"
         airs_contents: "__INLINE__lua/guardrail/airs_contents.lua"
         airs_verdict: "__INLINE__lua/guardrail/airs_verdict.lua"
