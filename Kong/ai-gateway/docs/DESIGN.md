@@ -126,7 +126,7 @@ custom plugin, the Lua arrives as the value of a config field on a policy that a
 
 The Lua therefore lives in real `.lua` files, inlined into the policy at build time by
 `scripts/build-config.py` and unit-tested offline by `spec/verdict_spec.lua` and
-`spec/mcp_callout_spec.lua` (40 and 66 assertions, 106 in total) — Lua living only inside a YAML string is Lua nobody
+`spec/mcp_callout_spec.lua` (114 and 87 assertions, 201 in total) — Lua living only inside a YAML string is Lua nobody
 lints or reviews.
 
 ---
@@ -138,7 +138,7 @@ graph LR
   CL["client"]
   subgraph POL["<b>airs-scan</b> — ai-custom-guardrail, guarding_mode BOTH"]
     IN["<b>INPUT leg</b><br/>text_source + request body<br/>airs_profile · airs_correlation<br/>airs_metadata · airs_contents<br/>airs_verdict"]
-    OUT["<b>OUTPUT leg</b><br/>the same five functions<br/><i>buffered responses only</i>"]
+    OUT["<b>OUTPUT leg</b><br/>the same five functions<br/><i>whole body when buffered,<br/>per segment when streamed</i>"]
   end
   MODEL["the model"]
   AIRS["Prisma AIRS<br/>/v1/scan/sync/request"]
@@ -289,8 +289,9 @@ It is **400, not 403**. The Kong Gateway 3.x custom plugin returns 403 for the s
 log-based alerting keyed on the status must expect the difference; the MCP half answers 403 (4.4), so the
 two halves do not share a status code either. UNVERIFIED: the exact status line and body of `rejection_mode:
 stealth`; if it is used, expect the `scan_id` to stop reaching the client and the support path in 7.4 to go
-with it. The two gaps on this path — streamed responses and tool calls — and the metrics defect are in
-section 8. Do not deploy this half without reading it.
+with it. The two gaps on this path — the floor, tail and delay of a streamed response (8.1) and a tool
+call on the leg that emits it (8.2) — are in section 8, together with the block-metrics defect fixed in
+8.4. Do not deploy this half without reading it.
 
 ---
 

@@ -233,14 +233,14 @@ control plane and a self-managed data plane.
 
 ### Do not build the two policies here
 
-The guardrail carries four Lua functions. They live in `lua/guardrail/` as real files,
+The guardrail carries five Lua functions. They live in `lua/guardrail/` as real files,
 `spec/verdict_spec.lua` exercises them offline, and `scripts/build-config.py` inlines
 them into the policy YAML under `dist/`. Paste those function bodies into a console form and that
 chain is broken: the Lua becomes a string in a SaaS form field — not linted, not unit tested, not
 reviewed line by line, not reproducible. `airs_verdict.lua` is the only code here that decides
 whether traffic continues, and it should not be maintained by copy and paste. The same holds for the
 MCP callout's three `by_lua` hooks, covered by `spec/mcp_callout_spec.lua`. The two spec files are
-106 assertions in total — 40 in `verdict_spec.lua`, 66 in `mcp_callout_spec.lua`.
+201 assertions in total — 114 in `verdict_spec.lua`, 87 in `mcp_callout_spec.lua`.
 
 | Task | Console | `kongctl` |
 | --- | --- | --- |
@@ -493,7 +493,7 @@ never called, and the test appears to pass while proving nothing. The lab fixtur
 ## 7. Limitations
 
 Read this before you tell anyone the gateway is protected. Two measured coverage gaps — partial
-streamed-response scanning, and LLM tool-call arguments not scanned at all — and one structural
+streamed-response scanning, and a tool call invisible on the leg that emits it — and one structural
 MCP limit, the unreachable response leg.
 
 ### Gap 1 — streaming leaves gaps in response scanning (MEASURED, corrected)
@@ -530,14 +530,33 @@ mode buys full coverage by **refusing** streaming, not by scanning it faster; si
 scans nothing. The original finding that a streamed response needs a remedy at all was the prior
 art's, found first — see [docs/CREDITS.md](CREDITS.md).
 
-### Gap 2 — tool calls are invisible on the LLM path (MEASURED)
+### Gap 2 — a tool call is invisible on the leg that emits it (MEASURED, narrowed)
 
 A buffered reply with `content: null` and the payload only inside `tool_calls[].function.arguments`
 is **allowed**. Kong's text extraction does not include tool-call arguments under any value of
 `text_source`, so AIRS never sees them. The same applies to `tools[].function.description`: tool
-definitions are not message content and never reach the scanner. This is **not fixable in
-configuration** — the Kong 3.x custom plugin can read `tool_calls` directly, this config-only policy
-cannot.
+definitions are not message content and never reach the scanner.
+
+**Narrowed on the request leg** (MEASURED 2026-09-14, prior art — [docs/CREDITS.md](CREDITS.md)). A
+guardrail function reads the raw request body, which carries `tools[]` and the tool calls a client
+replays as conversation history — neither of them in `$(content)`. Two opt-ins, both off by
+default, put that text inside the scanned prompt:
+
+```yaml
+params:
+  tool_scan: "calls"       # tool_calls[].function.name and .arguments from assistant turns
+  # tool_scan: "catalogue" # the above, plus the whole tools[] declaration
+```
+
+MEASURED with `guarding_mode: INPUT` to isolate the prompt leg, on a conversation whose injection
+sits only in a tool call's arguments: off, allowed 5 times out of 5; `"calls"`, refused 5 out of 5.
+Try either against your own profile before enforcing — a JSON parameter schema reads as source code
+to a profile with that detector enabled.
+
+**What is still open.** The request body is what a guardrail function can read on *both* legs, so
+the response leg — where the model first emits a tool call, before any client has replayed it —
+still cannot see it. That case is **not fixable in configuration**: the Kong 3.x custom plugin can
+read `tool_calls` from the response directly, this config-only policy cannot.
 
 ### Gap 3 — the MCP response leg is unreachable (MEASURED)
 

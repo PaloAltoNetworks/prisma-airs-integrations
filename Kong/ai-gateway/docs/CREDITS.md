@@ -37,9 +37,9 @@ around.
 | 4 | A block from this policy is **HTTP 400** with a body of the form `{"error":{"message":...}}`. | Documented as the client contract; clients must not expect 403 |
 | 5 | Under `text_source: concatenate_all_content` the scanned text is the message contents joined by `"\n\n"` in **reverse chronological order**, system prompt included. | The `text_source` comment in the guardrail policy, and the false-positive and token-cost warnings that follow from it |
 | 6 | A guardrail function that **raises fails the request closed at HTTP 500**. | The whole design of `lua/guardrail/airs_contents.lua` depends on this |
-| 7 | **The streaming bypass.** See below. | `response_streaming: deny` on the AI Model |
+| 7 | **The streaming bypass.** See below — the method stands, the blanket conclusion does not: the OUTPUT leg does run on a stream, per segment. | `response_streaming: deny` on the AI Model, as the strict-mode posture |
 | 8 | **The tool-call extraction gap**, established as a matrix. See below. | Stated as a coverage gap; narrowed, not closed, by `params.tool_scan` |
-| 9 | **A guardrail function body reaches the Kong PDK**, and every call in one must be `pcall`-wrapped or it is a silent fail-open on streamed responses. This supersedes half of finding 2. See [below](#one-credited-finding-partly-superseded). | All four guardrail functions |
+| 9 | **A guardrail function body reaches the Kong PDK**, and every call in one must be `pcall`-wrapped or it is a silent fail-open on streamed responses. This supersedes half of finding 2. See [below](#one-credited-finding-partly-superseded). | The three guardrail functions that touch the PDK: `airs_contents`, `airs_metadata`, `airs_correlation` |
 | 10 | **Unattributed conversation text is read as prompt injection.** `text_source` joins message content with no roles, and an ordinary multi-turn chat is blocked 3/3 as agent + injection. Prefixing `user:` and `assistant:` clears it without weakening detection; prefixing `system:` blocks it again, because that is the shape of a system-prompt spoof. | `lua/guardrail/airs_contents.lua` rebuilds and attributes the scanned text |
 | 11 | **Prisma AIRS judges only the LAST element of `contents[]`.** Earlier elements are context and are not scanned, so a conversation split one-element-per-message stops scanning every turn but the newest. | `airs_contents` returns exactly one element, and `spec/verdict_spec.lua` fails if it ever returns more |
 | 12 | **The AIRS correlation identifiers**, settled by nine probes against a live tenant because no published page settles it: `transaction_id` is the round, `session_id` is the conversation, and `tr_id` is the legacy name of `session_id` — not of `transaction_id`. A `request.body` field that is `nil` is omitted; one that is `""` is sent as JSON `false`. | `lua/guardrail/airs_correlation.lua`, and the `request.body` comment in the guardrail policy |
@@ -158,8 +158,12 @@ message content and never enter `$(content)` under any value of the setting.
 
 MEASURED here (2026-09-12, AI Gateway 2.0.3): a buffered reply with
 `content: null` whose payload lives only in `tool_calls[].function.arguments` is
-allowed. This is not fixable in configuration. The Kong 3.x custom plugin can
-read `tool_calls` directly; a config-only policy cannot.
+allowed. That case is not fixable in configuration. The Kong 3.x custom plugin
+can read `tool_calls` directly; a config-only policy cannot. The *request* leg
+has since been narrowed: the raw body a guardrail function can read carries
+`tools[]` and the tool calls a client replays as history, which `params.tool_scan`
+puts in front of the scanner (GAP 2 in `README.md`). The gap that remains is the
+leg the model emits a tool call on, which no configuration reaches.
 
 ## What differs in this repository
 
