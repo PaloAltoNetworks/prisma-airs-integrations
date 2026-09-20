@@ -65,8 +65,8 @@ ai_gateway_mcp_servers:
 Binding by name keeps the blast radius to the entities an operator chose, and makes coverage only as good as
 the binding: a caller reaching a model whose policy was never attached is not scanned. MEASURED:
 `response_streaming: allow|deny` is a field on the AI **Model** (`config.response_streaming`), not on any
-policy; it is the remedy for GAP 1 (8.1), applied to the model. Routing and upstream-URL traps are in the
-troubleshooting table of `docs/DEPLOYMENT.md`.
+policy; it is the strict-mode remedy for GAP 1's partial coverage (8.1), applied to the model. Routing and
+upstream-URL traps are in the troubleshooting table of `docs/DEPLOYMENT.md`.
 
 ---
 
@@ -158,8 +158,8 @@ graph LR
   style AIRS fill:#FBEEE6,stroke:#B4530A,stroke-width:2px
 ```
 
-A streamed response never reaches the OUTPUT leg, and tool-call arguments are not part of the text
-Kong extracts. Both are in section 8.
+A streamed response reaches the OUTPUT leg only in part — per-segment, with a floor and a tail left
+unscanned — and tool-call arguments are not part of the text Kong extracts at all. Both are in section 8.
 
 
 One `ai-custom-guardrail` policy, `guarding_mode: BOTH`. On the INPUT leg Kong matches the route on
@@ -596,10 +596,12 @@ in the Kong error log only.
 ### 7.5 Absence of a detection is not evidence of clean traffic
 
 Several classes of traffic produce **no scan record at all**, indistinguishable in a dashboard from a clean
-scan: streamed responses (8.1), LLM tool-call arguments (8.2), the whole MCP response leg (8.3), and the
-bypassed MCP control messages (4.5) — which do produce a record, a clean scan of the placeholder prompt
-`"."` (4.3), so counting those inflates coverage. This integration reports what it scanned and nothing about
-what it could not reach.
+scan: the unscanned floor and tail of a streamed response (8.1), LLM tool-call arguments (8.2), the whole MCP
+response leg (8.3), and the bypassed MCP control messages (4.5) — which do produce a record, a clean scan of
+the placeholder prompt `"."` (4.3), so counting those inflates coverage. A streamed response's *scanned*
+segments do produce records — one per `response_buffer_size` chunk (8.1) — so a stream is not uniformly
+silent, only partially so. This integration reports what it scanned and nothing about what it could not
+reach.
 
 ---
 
@@ -608,8 +610,8 @@ what it could not reach.
 | Surface | Covered | Status |
 | --- | --- | --- |
 | LLM prompt, buffered | Yes | MEASURED |
-| LLM response, buffered | Yes | MEASURED; requires `response_streaming: deny` on the model |
-| LLM response, streamed | **No** | **GAP 1** — MEASURED bypass, 8.1 |
+| LLM response, buffered | Yes | MEASURED; full coverage regardless of `response_streaming` |
+| LLM response, streamed | **Partial** | **GAP 1** — MEASURED per-segment scanning with a floor, a tail and a delay, 8.1. `response_streaming: deny` trades it for full (buffered) coverage |
 | LLM tool-call arguments and tool definitions | **No** | **GAP 2** — MEASURED, 8.2. Not fixable in configuration |
 | MCP `tools/call` arguments | Yes | MEASURED, blocked in protocol with `-32001` |
 | MCP other content-bearing methods | Yes, as a prompt | DOCUMENTED in source, 4.3 |
@@ -622,32 +624,60 @@ what it could not reach.
 | Correlation from a client error to the detection record | Yes | MEASURED: `scan_id` matches SCM exactly |
 | Scanner failure the gateway can see (measured case: a misconfigured profile, callout answering HTTP 400) | Fails closed | MEASURED on the MCP path: every `tools/call` refused `-32003`, upstream never reached. A network failure of the callout is UNVERIFIED; `stop_on_error: true` on the LLM path is DOCUMENTED, UNVERIFIED here |
 
-### 8.1 GAP 1 — streaming bypasses response scanning (MEASURED 2026-09-12)
+### 8.1 GAP 1 — streaming leaves gaps in response scanning (MEASURED 2026-09-14, corrects 2026-09-12)
 
-With `response_streaming: allow` on the AI Model, an identical payload is blocked when buffered and
-delivered when streamed:
+The previous revision of this section, credited to the prior art (`docs/CREDITS.md`), said `stream: true`
+skips the OUTPUT phase entirely — the guardrail receives no call, no error, no warning. That reading held on
+the config this repository shipped, but the *cause* was the config, not the platform:
+`response_buffer_size: 65536` in `config/llm/airs-guardrail.yaml` kept a typical streamed answer below the
+threshold at which the OUTPUT phase ever fires, so every measurement of it looked like a total bypass because
+none of them ever crossed the threshold.
 
-```text
-payload in message content, buffered  -> HTTP 400, blocked on the response leg
-payload in message content, streamed  -> HTTP 200, content delivered
-```
+MEASURED 2026-09-14, AI Gateway 2.0.3, against a guardrail service that counted every call it received, buffer
+value varied on purpose: the OUTPUT phase **runs** on a stream, once per `response_buffer_size` segment
+(schema default 100). A 309-character answer produced 3 calls of 101/104/103 characters; at buffer 512, 2
+calls for 1148 characters; at 2048 — closer to the 65536 this repository shipped — zero calls. Non-streamed
+replies are always ONE call carrying the whole body, at every buffer value tried.
 
-DOCUMENTED by Kong: "You can't add AI Policies that use the Response Transformer Policy or otherwise trigger
-in the response phase when streaming is configured." MEASURED 2026-09-08, who found this
-bypass first (`docs/CREDITS.md`): with `stream: true` the OUTPUT phase is never invoked, the guardrail
-receives no call, and there is no error and no warning. Untreated, **any caller can opt itself out of
-response scanning by setting one flag in its own request body.**
+So "the response leg is not scanned on a stream" is wrong as a blanket claim. What is true, and matters more
+because it is subtler than a total bypass:
 
-The remedy is `response_streaming: deny` on the AI Model. MEASURED 2026-09-12: with `deny` a `stream: true`
-request is refused at the gateway before any scan runs, buffered traffic unaffected:
+- **Floor.** MEASURED: a 32-character streamed answer records zero OUTPUT calls at buffer 100, 20 **and** 1 —
+  lowering the setting does not lower the roughly-100-byte floor before the phase runs at all. Most streamed
+  chat answers are short; short answers are the ones most likely to never be scanned.
+- **Tail.** MEASURED: a 419-character stream was scanned as 106/101/100/101 = 408 characters. The last 11
+  characters — carrying the word a test guardrail was set to block on — were never sent to the scanner, and
+  the stream completed with `finish_reason: stop`.
+- **Delay.** Scans are sequential AIRS round trips against a live stream, so a block always lands *after* the
+  flagged segment has already been delivered, HTTP 200 already sent. MEASURED, with an artificial scan delay
+  against ~450 characters/second of output: at 3 s latency, 1005 characters delivered and the stream finished
+  normally (`finish_reason: stop`) with nine block verdicts arriving after the fact; at 0.5 s, roughly 320
+  characters leaked before the cut; at 0.05 s, roughly 120. Leak before a cut is roughly output rate x scan
+  latency.
+- **Termination is driver-dependent.** MEASURED: on the `openai` driver a block ends the stream with a final
+  chunk carrying `finish_reason: "blocked_by_guard"` then `data: [DONE]`; on the `ollama` driver the stream is
+  simply cut, no terminal chunk. (The earlier revision flagged this as UNVERIFIED, quoting the `rejection_mode`
+  schema description; it is now measured, with the driver caveat the description omits.)
+
+DOCUMENTED by Kong, unchanged: "You can't add AI Policies that use the Response Transformer Policy or
+otherwise trigger in the response phase when streaming is configured" — that sentence describes the
+mechanism (segmented buffering) that produces all four points above, not a total skip. The remedy this
+repository ships, `response_streaming: deny` on the AI Model, is unaffected by this correction. MEASURED
+2026-09-12: with `deny` a `stream: true` request is refused at the gateway before any scan runs, buffered
+traffic unaffected:
 
 ```text
 HTTP 400 {"error":{"message":"response streaming is not enabled for this LLM"}}
 ```
 
-Frame that honestly: **the bypass is closed by refusing streaming, not by scanning streams. Streaming and
-response-leg scanning cannot both be had on this policy today.** If some models must stream, give them an
-INPUT-only policy and state the prompt-only coverage plainly.
+Frame it as two postures, not one fix: **simple mode** (`response_streaming: allow`, the schema default) gets
+partial, asynchronous, best-effort response coverage with the floor, the tail and the delay above, and keeps
+streaming; **strict mode** (`deny`) gets one OUTPUT call over the whole answer and no streaming at all.
+Streaming and *full* response-leg coverage cannot both be had on this policy today — that conclusion is
+unchanged — but "streamed" no longer means "unscanned". If some models must stream under strict mode, give
+them an INPUT-only policy and state the prompt-only coverage plainly. Never set `response_buffer_size` to a
+large value "to scan a whole streamed answer at once": MEASURED, it scans nothing, which is exactly how this
+repository's own 65536 produced the original, now-corrected, reading.
 
 ### 8.2 GAP 2 — tool calls are invisible on the LLM path (MEASURED 2026-09-12)
 

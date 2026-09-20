@@ -15,8 +15,8 @@ unit-tested offline, and is inlined into the applied YAML by `scripts/build-conf
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
 | Prompt | ✅ | The `ai-custom-guardrail` policy scans the prompt before the AI Model route forwards it. A block is HTTP 400. |
-| Response | ✅ | Scanned on the response leg under `guarding_mode: BOTH`; both legs genuinely run. Buffered replies only — see Streaming. |
-| Streaming | ❌ | GAP 1. A streamed reply bypasses the response leg entirely. Close it with `response_streaming: deny` on the AI Model, which refuses streaming rather than scanning it. |
+| Response | ✅ | Scanned on the response leg under `guarding_mode: BOTH`; both legs genuinely run. Full coverage when buffered; partial and best-effort when streamed — see Streaming. |
+| Streaming | ⚠️ | GAP 1. The OUTPUT leg runs on a stream, per `response_buffer_size` segment — but with a floor (short answers are never scanned), a tail (the final partial segment is never scanned), and a delay (a block lands after the flagged segment already reached the client). `response_streaming: deny` on the AI Model trades streaming away for full coverage. |
 | Pre-tool call | ⚠️ | MCP only, and requests only. The `request-callout` policy scans `tools/call` arguments before the MCP server sees them. LLM `tool_calls[].function.arguments` are unreachable — GAP 2. |
 | Post-tool call | ❌ | GAP 3. All three `request-callout` hooks run before the upstream call, so no tool result and no tool catalogue can be inspected. |
 | Unclassifiable MCP body | ✅ | GAP 4, **closed by default**. A JSON-RPC batch, a non-JSON-RPC body or an undecodable body cannot be inspected, so it is refused rather than forwarded. `params.unclassified_action: allow` opts back into pass-through. |
@@ -79,29 +79,54 @@ SCM scan log, reachable by `scan_id`.
 
 Read this before deploying: three open coverage gaps and one closed by default.
 
-### GAP 1 — streaming bypasses response scanning (MEASURED)
+### GAP 1 — streaming leaves gaps in response scanning (MEASURED, corrected)
 
-With `response_streaming: allow` on the AI Model, an identical payload is blocked when the
-response is buffered and delivered when it is streamed:
+An earlier revision of this section said a streamed reply bypasses the response leg entirely.
+That reading was itself an artefact of `response_buffer_size: 65536` in the shipped config: a
+buffer that large keeps a typical stream below the threshold at which the OUTPUT phase ever
+fires, so nothing was scanned and it looked identical to a total bypass. See the comment on
+`response_buffer_size` in `config/llm/airs-guardrail.yaml`.
 
-| Request | Outcome |
-| --- | --- |
-| payload in message content, buffered | HTTP 400, blocked on the response leg |
-| payload in message content, `stream: true` | HTTP 200, content delivered |
+MEASURED (2026-09-14, AI Gateway 2.0.3), against a guardrail service that counted every call it
+received: the OUTPUT phase **does** run on a stream, once per `response_buffer_size` segment
+(schema default 100 bytes). A 309-character streamed answer produced 3 OUTPUT calls of
+101/104/103 characters; at buffer 512, 2 calls for 1148 characters; at 2048, zero calls. A
+non-streamed reply is always ONE call carrying the whole body, whatever the buffer.
 
-Any caller can opt itself out of response scanning by setting one flag in its own request
-body. The remedy is `response_streaming: deny`, a field on the AI Model and not on the policy.
-MEASURED 2026-09-12: with `deny`, a `stream: true` request is refused at the gateway before
-any scan runs, with HTTP 400 and the body
-`{"error":{"message":"response streaming is not enabled for this LLM"}}`, while buffered
-traffic is unaffected. **The bypass is closed by refusing streaming, not by scanning it.**
+So response scanning on a stream is real, but partial and best-effort, in three specific ways:
 
-What was measured is narrow: with `response_streaming: allow` the response leg does not run on a
-streamed reply, and with `deny` the request is refused before any scan. UNVERIFIED: the policy
-schema hints at a streaming block path that was not exercised here — the `rejection_mode`
-description mentions that "In streaming mode, the final SSE chunk includes
-`finish_reason='blocked_by_guard'`", and `allow_masking` states "Streaming will be disabled if
-this is enabled".
+- **A floor.** Roughly 100 bytes must accumulate before the OUTPUT phase runs at all, and
+  lowering `response_buffer_size` below that does not lower the floor — MEASURED: buffers of
+  100, 20 and 1 all left a 32-character answer completely unscanned. Most chat-UI answers are
+  short, and short answers are the ones most likely to never be scanned.
+- **A tail.** Content still below the threshold when the stream ends is never scanned. MEASURED:
+  a 419-character stream was scanned as 106/101/100/101 = 408 characters; the last 11 characters
+  — the ones carrying the flagged word — were never sent to the scanner, and the stream completed
+  normally with `finish_reason: stop`.
+- **A delay.** Each segment costs one sequential AIRS round trip, and a block always lands
+  *after* the flagged segment has already reached the client — HTTP 200 already sent. MEASURED:
+  at roughly 450 characters/second of output against a 3 s scan latency, 1005 characters were
+  delivered and the stream finished normally with nine block verdicts arriving after the fact; at
+  0.5 s latency, roughly 320 characters leaked before the cut; at 0.05 s, roughly 120. Rough rule:
+  leak before a cut ≈ output rate × scan latency.
+
+The termination itself is driver-dependent (MEASURED): on the `openai` driver a block ends the
+stream with a final chunk carrying `finish_reason: "blocked_by_guard"` followed by
+`data: [DONE]`; on the `ollama` driver the stream is simply cut, with no terminal chunk at all.
+
+Two honest postures, not one fix:
+
+| Posture | `response_streaming` | Response coverage | Cost |
+| --- | --- | --- | --- |
+| Simple (schema default) | `allow` | Partial, asynchronous, best-effort — the three points above | None; streaming preserved |
+| Strict | `deny` on the AI Model | Full — one OUTPUT call carrying the whole body | No streaming at all |
+
+MEASURED 2026-09-12: with `deny`, a `stream: true` request is refused at the gateway before any
+scan runs, HTTP 400, body `{"error":{"message":"response streaming is not enabled for this
+LLM"}}`, buffered traffic unaffected. `deny` still buys full coverage the only way this policy can
+give it — by refusing streaming rather than scanning it — but `allow` is not "zero coverage"; it
+is "coverage with a floor, a tail and a delay". Never set `response_buffer_size` to a large value
+"to scan a whole streamed answer at once": MEASURED, it scans nothing.
 
 ### GAP 2 — tool-call arguments are invisible on the LLM path (MEASURED)
 
@@ -236,14 +261,16 @@ manager, a secrets store, or a file only you can read — rather than pasting th
 that records history.
 
 Nothing is intercepted yet. A policy defaults to `global: false` and then covers nothing. Bind
-it by naming the policy in the AI Model's or AI MCP Server's `policies:` list — and set
-`response_streaming: deny` at the same time, or GAP 1 is open.
+it by naming the policy in the AI Model's or AI MCP Server's `policies:` list — and decide which
+side of GAP 1 you want: `response_streaming: deny` for strict, full-coverage mode, or leave
+`allow` for simple mode's partial, best-effort streamed coverage. See GAP 1 in Limitations.
 
 A complete AI Model definition — the union selector, the provider, `targets`, `formats` and the
 `ai_gateway: !lookup { id: !env AI_GATEWAY_ID }` every applied file needs — is in
 [config/lab/lab-model.yaml](config/lab/lab-model.yaml). It names the policy in `policies:` and
-deliberately leaves `response_streaming: allow`, so that the streaming bypass can be reproduced;
-set `deny` outside the lab. Apply it the same way as the policies:
+deliberately leaves `response_streaming: allow`, so that simple mode's per-segment OUTPUT
+scanning can be reproduced; set `deny` outside the lab for strict mode. Apply it the same way as
+the policies:
 
 ```bash
 export LAB_UPSTREAM_KEY="YOUR_UPSTREAM_API_KEY"   # the lab model's own upstream credential

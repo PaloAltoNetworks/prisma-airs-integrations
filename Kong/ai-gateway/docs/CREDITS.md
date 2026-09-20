@@ -56,6 +56,22 @@ MEASURED here (2026-09-12, AI Gateway 2.0.3): we reproduced the effect on our ow
 runtime — an identical payload is blocked with HTTP 400 when buffered and
 delivered with HTTP 200 when streamed. The remedy was measured here: `response_streaming: deny` on the AI Model refuses a `stream: true` request with HTTP 400 before any scan runs (2026-09-12). The hole is theirs; the remedy is measured here.
 
+**Correction, MEASURED (2026-09-14, AI Gateway 2.0.3).** "The guardrail service
+received no call at all" does not generalise the way we generalised it. It was
+true of the config we ran on 2026-09-08 and 2026-09-12, and that config is what
+caused it: `response_buffer_size: 65536` in `config/llm/airs-guardrail.yaml`
+kept the streamed answer below the threshold at which the OUTPUT phase ever
+fires, so nothing was ever scanned and it looked identical to a total bypass.
+Pointed at a guardrail service that counted every call it received, with the
+buffer at other values: the OUTPUT phase runs on a stream, once per
+`response_buffer_size` segment (schema default 100 bytes) — a 309-character
+answer produced 3 calls of 101/104/103 characters; at 2048, zero calls, same
+mechanism as our own 65536. So the prior art's method (point a blocking
+guardrail at the stream, count calls) was exactly right and is still the right
+method; the number this repository fed it as the buffer was the confound. See
+GAP 1 in `README.md` for the corrected coverage claim: partial, per-segment,
+best-effort, with a floor, a tail and a delay, not zero.
+
 **The tool-call extraction gap.** The method was a **matrix: five message
 positions by three `text_source` values**, each cell tested rather than reasoned
 about. That is what makes the negative result trustworthy — it distinguishes "we

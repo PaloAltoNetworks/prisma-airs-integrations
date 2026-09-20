@@ -99,11 +99,20 @@ ai_gateway_policies:
       # received from upstream before the buffer is handed to the guardrail, and
       # the default is 100.
       #
-      # UNVERIFIED VALUE. At 100 a single answer could produce many AIRS calls,
-      # each on a context-free fragment, with part of the response already
-      # delivered before a block lands. 65536 keeps a typical completion in one
-      # scan. How many calls each value actually produces has not been measured.
-      response_buffer_size: 65536
+      # MEASURED (2026-09-14, AI Gateway 2.0.3), against a guardrail service
+      # that counted every call it received: this is the SEGMENT SIZE of
+      # chunked OUTPUT scanning on a streamed response, not a total-answer
+      # buffer. A 309-character streamed answer at the default (100) produced
+      # 3 OUTPUT calls of 101/104/103 characters; at 512, 2 calls for 1148
+      # characters; at 2048, ZERO calls -- the stream ended before the
+      # threshold was ever reached. Non-streamed replies are always ONE call
+      # carrying the whole body, at every value tried. A large value therefore
+      # buys nothing on the buffered path and, on the streamed path, is why an
+      # earlier revision of this file believed the response leg never runs on
+      # a stream at all -- see GAP 1 in the README, and `config/lab/lab-model.yaml`
+      # for how to reproduce the segment behaviour. NEVER set a large value
+      # here "to scan a whole streamed answer at once": it scans nothing. Left
+      # at the schema default (100) by not setting the key.
 
       params:
         # Your AIRS security profile name, supplied at apply time so that no
@@ -203,23 +212,34 @@ ai_gateway_policies:
         airs_verdict: "__INLINE__lua/guardrail/airs_verdict.lua"
 
 # =============================================================================
-# Attaching the policy, and closing the streaming hole at the same time.
+# Attaching the policy: SIMPLE mode versus STRICT mode on streaming.
 #
-# Take your existing AI Model and add ONE policy reference, plus
-# response_streaming: deny.
+# Take your existing AI Model and add ONE policy reference. What you do about
+# `response_streaming` decides which of two honest postures you are in — there
+# is no config that gives both full streaming AND full response coverage.
 #
-# WHY deny MATTERS. DOCUMENTED by Kong: "You can't add AI Policies that use the
-# Response Transformer Policy or otherwise trigger in the response phase when
-# streaming is configured." MEASURED (2026-09-08): with stream:true the OUTPUT
-# phase is never invoked — the guardrail service receives no call, there is no
-# error and no warning, and every SSE chunk reaches the client. So without this
-# line ANY CALLER CAN OPT ITSELF OUT OF RESPONSE SCANNING by setting one flag in
-# its own request body.
+# SIMPLE MODE (leave response_streaming: allow, the schema default). MEASURED
+# (2026-09-14, AI Gateway 2.0.3): the OUTPUT phase DOES run on a stream, once
+# per response_buffer_size segment. Coverage is real but partial and
+# best-effort: roughly the first 100 bytes of a short answer are never scanned
+# at all (most chat-UI answers are short), the final partial segment when the
+# stream ends is never scanned, and a block always lands AFTER the flagged
+# segment has already reached the client (HTTP 200 already sent) — leak before
+# a cut is roughly output rate x AIRS scan latency. Good enough for a
+# streaming UX where "eventually blocked, mostly" is an acceptable bar.
 #
-# If some models must stream, attach to those models a second copy of this
-# policy with guarding_mode: INPUT, and state plainly that their coverage is
-# prompt-only — rather than attaching this one and assuming the response is
-# inspected.
+# STRICT MODE (response_streaming: deny on the AI Model, below). DOCUMENTED by
+# Kong: "You can't add AI Policies that use the Response Transformer Policy or
+# otherwise trigger in the response phase when streaming is configured."
+# MEASURED (2026-09-12): with deny, a stream:true request is refused at HTTP
+# 400 before any scan runs; buffered traffic is unaffected. Full response
+# coverage, no streaming. This is the only way to guarantee the whole answer
+# is scanned before the client sees any of it.
+#
+# If some models must stream and also need STRICT coverage, attach to those
+# models a second copy of this policy with guarding_mode: INPUT, and state
+# plainly that their coverage is prompt-only — rather than assuming SIMPLE
+# mode's per-segment OUTPUT scanning is equivalent to a buffered scan.
 # =============================================================================
 #
 # ai_gateway_models:

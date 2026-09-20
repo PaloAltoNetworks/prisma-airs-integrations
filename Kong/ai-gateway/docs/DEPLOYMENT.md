@@ -203,7 +203,7 @@ ai_gateway_models:
       - {name: my-model-target, provider: my-provider, config: {type: openai,
           upstream_url: http://upstream.internal:9100/v1/chat/completions}}
     config:
-      response_streaming: deny        # closes Gap 1 -- section 7
+      response_streaming: deny        # strict mode for Gap 1 -- section 7
       route: {paths: [/v1]}           # BASE path; Kong appends /chat/completions
 
 ai_gateway_mcp_servers:
@@ -329,10 +329,12 @@ Create a model of type **Model** (declaratively `type: model`; the alternative i
 - **Format** `openai` is what makes the appended `/chat/completions` suffix correct;
   **capabilities** `generate` is what a chat-completions model needs. Other values are UNVERIFIED.
 - **`response_streaming` lives here, on the model.** MEASURED: it is `config.response_streaming` on
-  the AI Model, **not a field on any policy**, and it is what closes Gap 1 (section 7). Set it to
-  `deny` on every model carrying this guardrail. If some models genuinely must stream, give those an
-  INPUT-only policy and state plainly that their coverage is prompt-only; do not attach the BOTH
-  policy and assume the response is inspected.
+  the AI Model, **not a field on any policy**, and it is the strict-mode choice for Gap 1's partial
+  streamed coverage (section 7). Set it to `deny` on every model carrying this guardrail for full
+  response coverage. If some models genuinely must stream and need that guarantee, give those an
+  INPUT-only policy and state plainly that their coverage is prompt-only; leaving `allow` and
+  attaching the BOTH policy is a legitimate choice too, but it buys partial, best-effort coverage
+  on the response leg, not none — see Gap 1.
 
 ### The AIRS key — Vaults tab
 
@@ -473,27 +475,43 @@ never called, and the test appears to pass while proving nothing. The lab fixtur
 
 ## 7. Limitations
 
-Read this before you tell anyone the gateway is protected. Two measured coverage gaps — streamed
-responses are not scanned, and LLM tool-call arguments are not scanned — one structural MCP limit,
-the unreachable response leg, and one defect.
+Read this before you tell anyone the gateway is protected. Two measured coverage gaps — partial
+streamed-response scanning, and LLM tool-call arguments not scanned at all — and one structural
+MCP limit, the unreachable response leg.
 
-### Gap 1 — streaming bypass (MEASURED)
+### Gap 1 — streaming leaves gaps in response scanning (MEASURED, corrected)
 
-With `response_streaming: allow` on the AI Model, an identical payload is blocked when buffered and
-delivered when streamed:
+An earlier revision of this guide said a streamed reply bypasses the response leg entirely. That
+was an artefact of `response_buffer_size: 65536` in the shipped config, which keeps a typical
+stream below the threshold at which the OUTPUT phase ever fires — see the comment on that field in
+`config/llm/airs-guardrail.yaml`.
 
-| Request | Result |
+MEASURED (2026-09-14, AI Gateway 2.0.3), against a guardrail service that counted every call it
+received: the OUTPUT phase **does** run on a stream, once per `response_buffer_size` segment
+(schema default 100 bytes). A 309-character streamed answer produced 3 OUTPUT calls of
+101/104/103 characters; at buffer 2048, zero calls — the same mechanism the shipped 65536 hit.
+Non-streamed replies are always ONE call carrying the whole body, whatever the buffer.
+
+So response scanning on a stream is real, but partial and best-effort:
+
+| Effect | What was measured |
 | --- | --- |
-| payload in message content, buffered | HTTP 400, blocked on the response leg |
-| payload in message content, streamed | HTTP 200, content delivered |
+| A floor | Roughly 100 bytes must accumulate before the OUTPUT phase runs at all; buffers of 100, 20 and 1 all left a 32-character answer completely unscanned. Most streamed chat answers are short. |
+| A tail | Content still below the threshold when the stream ends is never scanned: a 419-character stream was scanned as 408 characters, the last 11 (carrying the flagged word) never sent, `finish_reason: stop`. |
+| A delay | A block always lands after the flagged segment already reached the client (HTTP 200 already sent) — leak before a cut is roughly output rate x AIRS scan latency. |
+| Driver-dependent termination | On the `openai` driver, a final chunk carries `finish_reason: "blocked_by_guard"` then `data: [DONE]`; on `ollama`, the stream is simply cut with no terminal chunk. |
 
-There is no error and no warning: any caller can opt itself out of response scanning by setting one
-flag in its own request body. The remedy is `response_streaming: deny` on the AI Model. MEASURED
-(2026-09-12): with `deny`, a `stream: true` request is refused at the gateway with HTTP 400 and the
-body `{"error":{"message":"response streaming is not enabled for this LLM"}}` before any scan runs,
-while buffered traffic is unaffected. Frame this honestly: the bypass is closed by **refusing**
-streaming, not by scanning streams. Streaming and response-leg scanning cannot both be had on this
-policy today. Found first by the prior art — see [docs/CREDITS.md](CREDITS.md).
+Two postures, not one fix. **Simple** (leave `response_streaming: allow`, the schema default):
+partial, best-effort response coverage as above, streaming preserved. **Strict**
+(`response_streaming: deny` on the AI Model): MEASURED (2026-09-12), a `stream: true` request is
+refused at the gateway with HTTP 400 and the body
+`{"error":{"message":"response streaming is not enabled for this LLM"}}` before any scan runs,
+while buffered traffic is unaffected — full coverage, no streaming. Frame this honestly: strict
+mode buys full coverage by **refusing** streaming, not by scanning it faster; simple mode is not
+"unscanned", it is "scanned with a floor, a tail and a delay". Never set
+`response_buffer_size` to a large value "to scan a whole streamed answer at once" — MEASURED, it
+scans nothing. The original finding that a streamed response needs a remedy at all was the prior
+art's, found first — see [docs/CREDITS.md](CREDITS.md).
 
 ### Gap 2 — tool calls are invisible on the LLM path (MEASURED)
 
