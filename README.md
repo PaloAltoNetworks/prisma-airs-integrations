@@ -38,7 +38,6 @@ This repository collects example configurations, sample code, and reference patt
 | [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ❌ |
 | [Bifrost](./Bifrost/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 | [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ |
-| [Portkey](./Portkey/) | AI Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [TrueFoundry](./TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 | [AWS (Lambda Decorator)](./AWS/lambda-decorator/) | Serverless Compute | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [AWS (Bedrock SDK Hooks — Python · Node.js · Java · Go)](./AWS/bedrock-sdk-hooks/) | AI SDK | ✅ | ✅ | ⚠️ | ❌ | ❌ |

@@ -15,7 +15,6 @@ This is a **documentation-first repository** - primarily markdown guides, config
 ├── Kong/               # Kong custom plugin & request callout
 ├── LiteLLM/            # LiteLLM proxy integration
 ├── n8n/                # Workflow automation
-├── Portkey/            # AI Gateway & observability
 └── TrueFoundry/        # AI Gateway
 ```
 

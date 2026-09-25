@@ -259,7 +259,7 @@ Examples:
 ```
 docs: add LangChain integration guide
 fix: correct Kong plugin configuration syntax
-feat: add automated setup script for Portkey
+feat: add automated setup script for hooks
 ```
 
 ## 🤝 Code of Conduct
