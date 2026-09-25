@@ -3,6 +3,7 @@
 // src/config.ts
 var DEFAULT_BASE_URL = "https://service.api.aisecurity.paloaltonetworks.com";
 var SCAN_PATH = "/v1/scan/sync/request";
+var STARTED_AT = Date.now();
 function loadConfig(env = process.env) {
   const base = (env.PRISMA_AIRS_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
   const profileId = str(env.PRISMA_AIRS_PROFILE_ID);
@@ -22,6 +23,9 @@ function loadConfig(env = process.env) {
     // per-agent default (<vendor>-user) set in the entrypoint
     timeoutMs: intEnv(env.AIRS_TIMEOUT_MS, 1e4),
     retries: intEnv(env.AIRS_RETRIES, 1),
+    // Opt-in overall budget (ms) from engine start; 0/unset = off. Each AIRS attempt is clamped to
+    // what is left, and an exhausted budget is a scan error, so the fail rules decide in time.
+    deadlineMs: intEnv(env.AIRS_DEADLINE_MS, 0),
     // Normalize case/whitespace: only a clean "open" opts out; everything else stays fail-CLOSED.
     failMode: str(env.AIRS_FAIL_MODE).toLowerCase() === "open" ? "open" : "closed",
     requireConfig: bool(env.AIRS_REQUIRE_CONFIG),
@@ -179,8 +183,17 @@ async function scan(cfg, content, meta) {
   };
   let lastError = "";
   for (let attempt = 0; attempt <= cfg.retries; attempt++) {
+    let attemptMs = cfg.timeoutMs;
+    if (cfg.deadlineMs > 0) {
+      const left = STARTED_AT + cfg.deadlineMs - Date.now();
+      if (left <= 0) {
+        lastError = `AIRS_DEADLINE_MS budget (${cfg.deadlineMs}ms) exhausted${lastError ? "; " + lastError : ""}`;
+        break;
+      }
+      attemptMs = Math.min(attemptMs, left);
+    }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), attemptMs);
     try {
       const res = await fetch(cfg.apiUrl, {
         method: "POST",
@@ -201,7 +214,7 @@ async function scan(cfg, content, meta) {
       return parseVerdict(text);
     } catch (err) {
       const e = err;
-      lastError = e?.name === "AbortError" ? `timeout after ${cfg.timeoutMs}ms` : String(e?.message ?? err);
+      lastError = e?.name === "AbortError" ? `timeout after ${attemptMs}ms` : String(e?.message ?? err);
     } finally {
       clearTimeout(timer);
     }
@@ -447,6 +460,88 @@ function safeJson(v) {
   }
 }
 
+// src/content-grok.ts
+function isPlain(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+// MCP names are "<server>__<tool>" (no mcp__ prefix): split on the FIRST "__". A name without one
+// falls back to the MCP result's own server_name / tool_name (same rule as the bash/ps engines).
+function grokMcpIdentity(name, result) {
+  const i = name.indexOf("__");
+  if (i > 0) return { server: name.slice(0, i), tool: name.slice(i + 2) || name };
+  const r = isPlain(result) ? result : {};
+  return { server: str2(r.server_name) || "unknown", tool: str2(r.tool_name) || name || "unknown" };
+}
+function grokMcpCall(name, ti) {
+  if (!isPlain(ti) || typeof ti.tool_name !== "string" || !isPlain(ti.tool_input)) return null;
+  return { name: name || ti.tool_name, args: ti.tool_input };
+}
+function grokPreToolContent(input) {
+  const call = grokMcpCall(str2(input.tool_name), input.tool_input);
+  // toolInputTruncated: Grok cut the input at its hook payload cap; the tool still runs with ALL of it.
+  const plan = call ? null : preToolContent(input);
+  if (plan && input.tool_input_truncated === true) plan.truncated = true;
+  if (!call) return plan;
+  const text = safeJson(call.args);
+  const id = grokMcpIdentity(call.name, null);
+  return text.trim().length > 0 ? { kind: "toolInput", server: id.server, tool: id.tool, text, mcp: true } : null;
+}
+function grokPostToolContent(input, maxInputChars) {
+  const toolName = str2(input.tool_name);
+  const result = input.tool_response;
+  const text = grokResultText(result);
+  if (text.trim().length === 0) return null;
+  // toolResultTruncated: the model reads the whole output, the hook only got its head.
+  const truncated = input.tool_result_truncated === true || void 0;
+  const call = grokMcpCall(toolName, input.tool_input);
+  if (call || isPlain(result) && result.type === "MCP") {
+    const id = grokMcpIdentity(call ? call.name : toolName, result);
+    const inputText = clip(call ? safeJson(call.args) : s(input.tool_input), maxInputChars);
+    return { kind: "toolOutput", server: id.server, tool: id.tool, inputText, text, mcp: true, truncated };
+  }
+  const ti = asObject(input.tool_input);
+  const { server, tool } = toolIdentity(toolName, ti);
+  return { kind: "toolOutput", server, tool, inputText: clip(toolInputText(toolName, ti), maxInputChars), text, truncated };
+}
+// The generic collector stops at depth 64; for anything nested deeper, also scan the full JSON so
+// a deep string is never dropped (the bash/ps collectors reach further).
+function grokCollect(r) {
+  const deeper = (v, d) => d > 64 || v !== null && typeof v === "object" && Object.values(v).some((x) => deeper(x, d + 1));
+  const t = toolOutputText(r);
+  return deeper(r, 0) ? join([t, safeJson(r)]) : t;
+}
+// Bash "output" is the raw byte array; decode it (UTF-8) when output_for_prompt is empty.
+function grokBytes(v) {
+  if (!Array.isArray(v) || v.length === 0 || !v.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) return "";
+  return Buffer.from(v).toString("utf8");
+}
+function grokResultText(r) {
+  if (r == null) return "";
+  if (typeof r === "string") return r;
+  if (!isPlain(r)) return grokCollect(r);
+  let t;
+  switch (r.type) {
+    case "Bash":
+      t = r.output_for_prompt;
+      if (!(typeof t === "string" && t.trim().length > 0)) t = grokBytes(r.output);
+      break;
+    case "ReadFile": {
+      const fc = asObject(r.FileContent);
+      t = fc.raw_output ?? fc.content;
+      break;
+    }
+    case "MCP":
+      t = isPlain(r.output) && typeof r.output.OkayOutput === "string" ? r.output.OkayOutput : safeJson(r.output);
+      break;
+    case "SearchTool":
+      t = r.content;
+      break;
+    default:
+      return grokCollect(r);
+  }
+  return typeof t === "string" && t.trim().length > 0 ? t : safeJson(r);
+}
+
 // src/decide.ts
 function decide(verdict, ctx) {
   if (ctx.configError) {
@@ -459,12 +554,18 @@ function decide(verdict, ctx) {
     if (ctx.side === "input") {
       return { kind: "block", reason: `Prisma AIRS not configured (${ctx.configError}) \u2014 set PRISMA_AIRS_API_KEY (+ profile), then reload \u2014 blocking (fail-closed)` };
     }
+    // Vendors whose warn channel is invisible (Grok) render an output-side config error as that event's block.
+    if (ctx.outputFailClosed) return { kind: "block", reason: `Prisma AIRS not configured (${ctx.configError}) \u2014 content NOT scanned` };
     return { kind: "warn", message: `Prisma AIRS not configured (${ctx.configError}) \u2014 content NOT scanned` };
   }
   if (verdict.category === "content_overflow" && ctx.side === "input" && ctx.event !== "Stop") {
     return { kind: "block", reason: "Content exceeds the AIRS scan budget \u2014 unscanned tail blocked" };
   }
   if (verdict.error) {
+    // Vendors whose warn channel is invisible (Grok) render an output-side error as that event's block.
+    if (ctx.outputFailClosed && ctx.cfg.failMode === "closed") {
+      return { kind: "block", reason: `Prisma AIRS scan failed (${verdict.error}) \u2014 ${ctx.side === "input" ? "blocking (fail-closed)" : "content NOT scanned"}` };
+    }
     if (ctx.event === "Stop") return { kind: "warn", message: `AIRS scan error at Stop (${verdict.error}) \u2014 allowing` };
     if (ctx.cfg.failMode === "closed" && ctx.side === "input") {
       return { kind: "block", reason: `Prisma AIRS scan failed (${verdict.error}) \u2014 blocking (fail-closed)` };
@@ -487,14 +588,32 @@ async function route(input, cfg, log, caps) {
   switch (event) {
     case "UserPromptSubmit":
       return { event, decision: await handle(input, cfg, log, caps, "UserPromptSubmit", "input", cfgErr, promptContent(input), "user prompt") };
-    case "PreToolUse":
-      return { event, decision: await handle(input, cfg, log, caps, "PreToolUse", "input", cfgErr, preToolContent(input), `${input.tool_name ?? "tool"} input`) };
-    case "PostToolUse":
+    case "PreToolUse": {
+      const plan = caps.grokPayload ? grokPreToolContent(input) : preToolContent(input);
+      return { event, decision: await handle(input, cfg, log, caps, "PreToolUse", "input", cfgErr, plan, `${input.tool_name ?? "tool"} input`) };
+    }
+    case "PostToolUse": {
+      const plan = caps.grokPayload ? grokPostToolContent(input, cfg.maxContentChars) : postToolContent(input, cfg.maxContentChars);
       return {
         event,
-        decision: await handle(input, cfg, log, caps, "PostToolUse", "output", cfgErr, postToolContent(input, cfg.maxContentChars), `${input.tool_name ?? "tool"} output`)
+        decision: await handle(input, cfg, log, caps, "PostToolUse", "output", cfgErr, plan, `${input.tool_name ?? "tool"} output`)
       };
+    }
     case "Stop":
+      if (caps.grokPayload) {
+        // Grok also fires Stop at session end (reason shutdown/channel_closed): no turn left, skip only
+        // those. Any other reason (a new one, or none) is scanned.
+        if (input.stop_reason === "shutdown" || input.stop_reason === "channel_closed") {
+          log.log(`Stop: session-end fire (reason ${input.stop_reason}) — not scanned`);
+          return { event: "Stop", decision: ALLOW };
+        }
+        const plan = answerContent(input);
+        if (!plan) {
+          log.log("Stop: nothing to scan (no lastAssistantMessage) — allowing");
+          return { event: "Stop", decision: ALLOW };
+        }
+        return { event: "Stop", decision: await handle(input, cfg, log, caps, "Stop", "output", cfgErr, plan, "model answer") };
+      }
       if (input.stop_hook_active) {
         log.debug("Stop: stop_hook_active set \u2014 allowing (loop guard)");
         return { event: "Stop", decision: ALLOW };
@@ -506,10 +625,14 @@ async function route(input, cfg, log, caps) {
   }
 }
 async function handle(input, cfg, log, caps, event, side, cfgErr, plan, label) {
-  const ctx = { event, side, cfg, configError: cfgErr, unconfigured: !cfg.apiKey };
+  const ctx = { event, side, cfg, configError: cfgErr, unconfigured: !cfg.apiKey, outputFailClosed: !!caps.outputFailClosed };
+  // Grok's MCP output replacement names the category/scan_id and must know the tool was MCP.
+  // No usable verdict (config/scan error) reads "not scanned" / "none", as in the bash/ps engines.
+  const withToolMeta = (d, v) => caps.grokPayload && d.kind === "block" ? { ...d, mcp: !!plan?.mcp, category: d.category ?? (cfgErr || v.error ? "not scanned" : v.category), scanId: d.scanId ?? (cfgErr || v.error ? "none" : v.scanId) } : d;
   if (cfgErr) {
     log.log(`${event} ${label}: config_error (${cfgErr})`);
-    return decide({ action: "unknown", category: "config_error", scanId: "unknown", detections: [] }, ctx);
+    const v = { action: "unknown", category: "config_error", scanId: "unknown", detections: [] };
+    return withToolMeta(decide(v, ctx), v);
   }
   if (!plan) {
     log.debug(`${event}: no scannable content for ${label} \u2014 allowing`);
@@ -520,15 +643,23 @@ async function handle(input, cfg, log, caps, event, side, cfgErr, plan, label) {
   const verdict = await scanPlan(cfg, plan, scanMeta);
   const tag = verdict.error ? `error(${verdict.error})` : verdict.action === "block" ? `BLOCK ${reasonText(verdict)}` : `allow${verdict.detections.length ? " [" + verdict.detections.join(",") + "]" : ""} [scan:${verdict.scanId}]`;
   log.log(`${event} ${label}: ${tag}`);
-  const canRewrite = event === "PreToolUse" && caps.rewriteInput || event === "PostToolUse" && caps.rewriteOutput;
+  // Grok: content the hook could not see in full (Grok's payload cap, or an output past the scan budget)
+  // is the event's block unless AIRS already blocked the part it saw. Grok never shows a warn.
+  const cut = !caps.grokPayload || verdict.action === "block" ? null : plan.truncated ? "truncated" : side === "output" && splitChunks(plan.text, cfg.maxContentChars, cfg.maxChunks, CHUNK_OVERLAP).overflow ? "content_overflow" : null;
+  if (cut) {
+    log.log(`${event} ${label}: ${cut} \u2014 tail unscanned`);
+    const reason = cut === "content_overflow" ? `Content exceeds the AIRS scan budget (${plan.text.length} chars) \u2014 tail NOT scanned` : side === "input" ? "Tool input exceeds Grok's hook payload cap \u2014 unscanned tail blocked" : "Tool output exceeds Grok's hook payload cap \u2014 tail NOT scanned";
+    return withToolMeta({ kind: "block", reason, category: cut, scanId: verdict.error ? "none" : verdict.scanId }, verdict);
+  }
+  const canRewrite = event === "PreToolUse" && caps.rewriteInput || event === "PostToolUse" && caps.rewriteOutput && (caps.rewriteOutput !== "mcp" || plan.mcp);
   if (cfg.enableMasking && canRewrite && verdict.action === "allow" && plan.text.length <= cfg.maxContentChars) {
     const masked = await tryMask(input, plan, cfg, scanMeta, event);
     if (masked) {
       log.log(`${event} ${label}: MASKED (DLP redacted in place)`);
-      return masked;
+      return withToolMeta(masked, verdict);
     }
   }
-  return decide(verdict, ctx);
+  return withToolMeta(decide(verdict, ctx), verdict);
 }
 async function tryMask(input, plan, cfg, scanMeta, event) {
   if (event === "PreToolUse" && plan.kind === "toolInput") {
@@ -544,14 +675,14 @@ async function tryMask(input, plan, cfg, scanMeta, event) {
     return null;
   }
   if (event === "PostToolUse" && plan.kind === "toolOutput") {
-    const surface = primaryOutputSurface(input.tool_response ?? input.tool_result);
+    const surface = plan.mcp ? plan.text : primaryOutputSurface(input.tool_response ?? input.tool_result);
     if (!surface || surface.length > cfg.maxContentChars) return null;
     const v = await scan(cfg, { response: surface }, scanMeta);
     const masked = v.maskedResponse;
     if (isPureDlpMask(v, masked, surface)) {
       return { kind: "maskOutput", updatedOutput: masked, note: `Prisma AIRS masked sensitive data in ${input.tool_name} output (scan_id: ${v.scanId})` };
     }
-    if (v.action === "block") return { kind: "block", reason: reasonText(v) };
+    if (v.action === "block") return { kind: "block", reason: reasonText(v), category: v.category, scanId: v.scanId };
     return null;
   }
   return null;
@@ -1011,6 +1142,114 @@ function blockOutcome2(event, reason) {
 var antigravityAdapter = makeGeminiAdapter("antigravity", "Antigravity");
 var geminiAdapter = makeGeminiAdapter("gemini", "Gemini CLI");
 
+// src/adapters/grok.ts
+function mapEvent5(name) {
+  switch (name) {
+    case "UserPromptSubmit":
+    case "user_prompt_submit":
+      return "UserPromptSubmit";
+    case "PreToolUse":
+    case "pre_tool_use":
+      return "PreToolUse";
+    case "PostToolUse":
+    case "post_tool_use":
+      return "PostToolUse";
+    case "Stop":
+    case "stop":
+      return "Stop";
+    default:
+      return "";
+  }
+}
+var grokAdapter = {
+  name: "grok",
+  appName: "Grok Build",
+  // Prompt and pre-tool are hard blocks. PostToolUse can replace an MCP tool's output only (a
+  // built-in needs Grok's per-tool tagged shape), so output masking is MCP-only. Grok discards
+  // stderr on success, so output-side scan/config errors render as that event's block.
+  capabilities: { rewriteInput: false, rewriteOutput: "mcp", postCanBlock: true, grokPayload: true, outputFailClosed: true },
+  normalize(raw, eventName) {
+    // Grok sends camelCase and Claude-style snake_case side by side; camelCase wins. Only the final
+    // answer (lastAssistantMessage) and the Stop reason are camelCase-only.
+    return {
+      hook_event_name: mapEvent5(eventName) || mapEvent5(raw.hook_event_name) || mapEvent5(raw.hookEventName),
+      cwd: raw.cwd,
+      session_id: raw.sessionId ?? raw.session_id,
+      prompt_id: raw.promptId ?? raw.prompt_id,
+      tool_use_id: raw.toolUseId ?? raw.tool_use_id,
+      prompt: raw.prompt,
+      tool_name: raw.toolName ?? raw.tool_name,
+      tool_input: raw.toolInput ?? raw.tool_input,
+      tool_response: raw.toolResult ?? raw.tool_response,
+      tool_input_truncated: raw.toolInputTruncated,
+      tool_result_truncated: raw.toolResultTruncated,
+      last_assistant_message: raw.lastAssistantMessage,
+      stop_reason: raw.reason
+    };
+  },
+  render(event, decision) {
+    switch (decision.kind) {
+      case "allow":
+        return { exitCode: 0 };
+      case "warn":
+        return { exitCode: 0, stderr: `[Prisma AIRS] ${decision.message}
+` };
+      case "block":
+        return blockOutcome3(event, decision);
+      case "maskOutput":
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            hookSpecificOutput: { hookEventName: "PostToolUse", updatedMCPToolOutput: decision.updatedOutput, additionalContext: decision.note }
+          }),
+          stderr: `${decision.note}
+`
+        };
+      // rewriteInput is off for Grok, so this is unreachable. Defensive: allow.
+      case "maskInput":
+        return { exitCode: 0 };
+    }
+  }
+};
+function blockOutcome3(event, decision) {
+  // One line: each CR / LF becomes one space (the bash/ps engines use the same rule).
+  const flat = (v) => String(v).replace(/[\r\n]/g, " ");
+  const reason = flat(decision.reason ?? "").trim() || "Blocked by Prisma AIRS";
+  const stderr = `${reason}
+`;
+  switch (event) {
+    case "UserPromptSubmit":
+      return { exitCode: 2, stdout: JSON.stringify({ decision: "block", reason }), stderr };
+    case "PreToolUse":
+      return {
+        exitCode: 2,
+        stdout: JSON.stringify({
+          decision: "deny",
+          reason,
+          hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason }
+        }),
+        stderr
+      };
+    case "PostToolUse": {
+      // Advisory: the reason reaches the model next to the output. For MCP tools Grok passes a
+      // string replacement through verbatim, so the flagged output is withheld from the model.
+      const out = { decision: "block", reason };
+      if (decision.mcp) {
+        out.hookSpecificOutput = {
+          hookEventName: "PostToolUse",
+          updatedMCPToolOutput: `[Prisma AIRS] Tool output withheld (${flat(decision.category ?? "not scanned")}). scan_id: ${flat(decision.scanId ?? "none")}`
+        };
+      }
+      return { exitCode: 0, stdout: JSON.stringify(out), stderr };
+    }
+    case "Stop":
+    default:
+      // Never {"decision":"block"} here: Grok feeds that back to the model and loops. The answer is
+      // already on screen; continue:false ends the turn once.
+      return { exitCode: 0, stdout: JSON.stringify({ continue: false, stopReason: reason }), stderr };
+  }
+}
+
 // src/adapters/registry.ts
 var ADAPTERS = {
   claude: claudeAdapter,
@@ -1021,7 +1260,8 @@ var ADAPTERS = {
   // Antigravity reuses Gemini CLI's verified hook contract; `gemini` is the same
   // adapter with Gemini-CLI attribution.
   antigravity: antigravityAdapter,
-  gemini: geminiAdapter
+  gemini: geminiAdapter,
+  grok: grokAdapter
 };
 function getAdapter(name) {
   return ADAPTERS[(name || "claude").toLowerCase()] ?? claudeAdapter;
@@ -1029,6 +1269,10 @@ function getAdapter(name) {
 var adapterNames = Object.keys(ADAPTERS);
 
 // src/index.ts
+import { homedir } from "node:os";
+function homeDir() {
+  return str(process.env.HOME) || str(process.env.USERPROFILE) || homedir();
+}
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -1047,7 +1291,8 @@ var CONFIG_DIRS = {
   cline: ".clinerules",
   devin: ".devin",
   antigravity: ".agents",
-  gemini: ".gemini"
+  gemini: ".gemini",
+  grok: ".grok"
 };
 var INPUT_EVENTS = /* @__PURE__ */ new Set([
   "UserPromptSubmit",
@@ -1081,12 +1326,15 @@ async function main() {
   const adapter = getAdapter(args.vendor);
   cfg.appName = cfg.appSuffix ? `${adapter.appName}-${cfg.appSuffix}` : adapter.appName;
   cfg.appUser = cfg.appUser || `${vendorKey}-user`;
-  cfg.logPath = cfg.logPath || `${CONFIG_DIRS[vendorKey] ?? ".claude"}/hooks/prisma-airs.log`;
+  cfg.logPath = cfg.logPath || (vendorKey === "grok" ? resolve(homeDir(), ".grok", "hooks", "prisma-airs.log") : `${CONFIG_DIRS[vendorKey] ?? ".claude"}/hooks/prisma-airs.log`);
   const failClosed = (why) => {
     process.stderr.write(`[airs-hook] ${why}
 `);
     const ev = args.event ? String(args.event) : "";
-    if (cfg.failMode !== "closed" || ev !== "" && !INPUT_EVENTS.has(ev)) {
+    // Output events allow here, except for a vendor whose warn channel is invisible (Grok): there an
+    // unscannable output renders as that event's block too.
+    const outputEv = ev !== "" && !INPUT_EVENTS.has(ev);
+    if (cfg.failMode !== "closed" || outputEv && !adapter.capabilities.outputFailClosed) {
       process.exitCode = 0;
       return;
     }
@@ -1098,7 +1346,7 @@ async function main() {
     }
     if (internal) {
       try {
-        const outcome = adapter.render(internal, { kind: "block", reason: `Prisma AIRS: ${why} \u2014 blocking (fail-closed)` });
+        const outcome = adapter.render(internal, { kind: "block", reason: `Prisma AIRS: ${why} \u2014 ${outputEv ? "content NOT scanned" : "blocking (fail-closed)"}` });
         if (outcome.stderr) process.stderr.write(outcome.stderr);
         if (outcome.stdout) {
           process.stdout.write(outcome.stdout);
@@ -1141,7 +1389,10 @@ async function main() {
     const evName = String(input?.hook_event_name ?? args.event ?? "");
     process.stderr.write(`[airs-hook] internal error (${evName || "?"}): ${String(err?.stack ?? err)}
 `);
-    if (cfg.failMode === "closed" && INPUT_EVENTS.has(String(args.event))) {
+    if (adapter.capabilities.outputFailClosed) {
+      // Grok: render the event's block JSON (input and output alike), as for unparseable input.
+      failClosed("internal error");
+    } else if (cfg.failMode === "closed" && INPUT_EVENTS.has(String(args.event))) {
       process.stderr.write("[airs-hook] internal error \u2014 blocking (fail-closed)\n");
       process.exitCode = 2;
     } else {
@@ -1163,4 +1414,8 @@ function readStdin() {
     process.stdin.on("error", () => resolve2(data));
   });
 }
-void main();
+void main().finally(() => {
+  // An aborted fetch can leave an undici connect pending (~10 s on a black-holed host) and keep the
+  // process alive past the client's hook timeout; AIRS_DEADLINE_MS promises an on-time exit.
+  if (intEnv(process.env.AIRS_DEADLINE_MS, 0) > 0) process.stderr.write("", () => process.stdout.write("", () => process.exit()));
+});

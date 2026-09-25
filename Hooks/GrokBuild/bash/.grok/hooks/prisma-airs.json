@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${HOME}/.grok/hooks/airs-hooks.sh\" --vendor grok --event UserPromptSubmit",
+            "timeout": 30,
+            "env": {
+              "AIRS_REQUIRE_CONFIG": "1",
+              "AIRS_FAIL_MODE": "closed",
+              "AIRS_TIMEOUT_MS": "8000",
+              "AIRS_RETRIES": "1",
+              "AIRS_DEADLINE_MS": "25000"
+            }
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${HOME}/.grok/hooks/airs-hooks.sh\" --vendor grok --event PreToolUse",
+            "timeout": 30,
+            "env": {
+              "AIRS_REQUIRE_CONFIG": "1",
+              "AIRS_FAIL_MODE": "closed",
+              "AIRS_TIMEOUT_MS": "8000",
+              "AIRS_RETRIES": "1",
+              "AIRS_DEADLINE_MS": "25000"
+            }
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${HOME}/.grok/hooks/airs-hooks.sh\" --vendor grok --event PostToolUse",
+            "timeout": 60,
+            "env": {
+              "AIRS_REQUIRE_CONFIG": "1",
+              "AIRS_FAIL_MODE": "closed",
+              "AIRS_TIMEOUT_MS": "8000",
+              "AIRS_RETRIES": "1",
+              "AIRS_DEADLINE_MS": "55000"
+            }
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${HOME}/.grok/hooks/airs-hooks.sh\" --vendor grok --event Stop",
+            "timeout": 60,
+            "env": {
+              "AIRS_REQUIRE_CONFIG": "1",
+              "AIRS_FAIL_MODE": "closed",
+              "AIRS_TIMEOUT_MS": "8000",
+              "AIRS_RETRIES": "1",
+              "AIRS_DEADLINE_MS": "55000"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

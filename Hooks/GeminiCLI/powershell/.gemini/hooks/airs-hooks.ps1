@@ -3,7 +3,7 @@
 # Prisma AIRS security hook — PowerShell core engine (core-parity port).
 #
 # Windows-native: uses Invoke-RestMethod + ConvertTo/From-Json — NO jq, NO curl.
-# One script, all six vendors (-Vendor), all four checkpoints (-EventName).
+# One script, every vendor (-Vendor), all four checkpoints (-EventName).
 # Core parity with the Node.js / bash engines:
 #   • 4 checkpoints, correct AIRS content-types incl. tool_event (tools/call)
 #   • per-tool input mapping, recursive string capture on tool output
@@ -20,6 +20,8 @@ param(
   [string]$EventName = ''
 )
 $ErrorActionPreference = 'Stop'
+# Engine start time for the opt-in overall deadline (AIRS_DEADLINE_MS), taken before any work.
+$Clock = [Diagnostics.Stopwatch]::StartNew()
 # Suppress the WARNING stream: ConvertTo-Json emits a depth-truncation warning that, on this host,
 # can surface on STDOUT and corrupt the deny-JSON decision channel (clients parse stdout as JSON).
 $WarningPreference = 'SilentlyContinue'
@@ -28,13 +30,16 @@ $Vendor = $Vendor.ToLower()
 # UNKNOWN -Vendor must never silently alias to Claude: on a stdout-reading client (Cursor/Cline) a
 # Claude-shaped block renders in the wrong channel and fails OPEN. Fail closed loudly on unknown; on an
 # OMITTED vendor keep the historical Claude default but say so. (ASCII only — PS 5.1 console safety.)
-$KnownVendors = @('claude','codex','cursor','cline','devin','antigravity','gemini')
+$KnownVendors = @('claude','codex','cursor','cline','devin','antigravity','gemini','grok')
 if ($Vendor -eq '') {
   [Console]::Error.Write("[airs-hooks] no -Vendor given; defaulting to claude`n"); $Vendor = 'claude'
 } elseif ($Vendor -notin $KnownVendors) {
   [Console]::Error.Write("`n[BLOCK] Prisma AIRS: unknown -Vendor '$Vendor' - blocking (fail-closed). Known: $($KnownVendors -join ', ').`n`n")
   exit 2
 }
+# grok: Grok parses stdout as UTF-8 JSON and treats malformed output as ALLOW, so never let a console
+# code page (Windows PowerShell 5.1) re-encode a reason that carries non-ASCII (e.g. localized errors).
+if ($Vendor -eq 'grok') { try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { } }
 # Windows PowerShell 5.1 defaults to old TLS — force 1.2 so the AIRS HTTPS call works.
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
 
@@ -52,6 +57,8 @@ $ProfileName = $env:PRISMA_AIRS_PROFILE_NAME
 $LogFile     = if ($env:SECURITY_LOG_PATH) { $env:SECURITY_LOG_PATH } else { '' }   # per-agent default set below
 $TimeoutMs   = IntEnv $env:AIRS_TIMEOUT_MS 10000
 $Retries     = IntEnv $env:AIRS_RETRIES 1
+# Overall engine budget in ms (opt-in; unset/0 = off). Each AIRS attempt is clamped to what is left.
+$DeadlineMs  = IntEnv $env:AIRS_DEADLINE_MS 0
 # normalize case/whitespace so "CLOSED" / "Closed" / " closed " all mean closed; only a clean "open" opts out.
 $FailMode    = if ($env:AIRS_FAIL_MODE) { $env:AIRS_FAIL_MODE.Trim().ToLower() } else { 'closed' }
 if ($FailMode -ne 'open') { $FailMode = 'closed' }
@@ -79,15 +86,22 @@ $AppName = switch ($Vendor) {
   'devin'       { 'Devin CLI' }
   'antigravity' { 'Antigravity' }
   'gemini'      { 'Gemini CLI' }
+  'grok'        { 'Grok Build' }
   default       { 'Claude Code' }
 }
 $CfgDir = switch ($Vendor) {
   'claude' { '.claude' } 'codex' { '.codex' } 'cursor' { '.cursor' } 'cline' { '.clinerules' }
-  'devin' { '.devin' } 'antigravity' { '.agents' } 'gemini' { '.gemini' } default { '.claude' }
+  'devin' { '.devin' } 'antigravity' { '.agents' } 'gemini' { '.gemini' } 'grok' { '.grok' } default { '.claude' }
 }
 if ($Suffix) { $AppName = "$AppName-$Suffix" }
 # app_user now reflects the actual agent (was hardcoded 'claude-code-user'); env-overridable.
 $AppUser = if ($env:AIRS_APP_USER) { $env:AIRS_APP_USER } else { "$Vendor-user" }
+# grok: the hook cwd is the user's workspace, so a relative default would scatter logs into every
+# repo Grok opens. Default to an ABSOLUTE path under the home dir (USERPROFILE when HOME is unset).
+if (-not $LogFile -and $Vendor -eq 'grok') {
+  $GrokHome = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+  if ($GrokHome) { $LogFile = "$($GrokHome.TrimEnd('/','\'))/.grok/hooks/prisma-airs.log" }
+}
 if (-not $LogFile) { $LogFile = "$CfgDir/hooks/prisma-airs.log" }
 
 function Dbg($m) { if ($Debug) { [Console]::Error.WriteLine("[airs-hooks] $m") } }
@@ -100,7 +114,10 @@ function Field($obj, [string]$name) { if ($null -eq $obj) { return $null } $p = 
 
 # ---- event mapping ----------------------------------------------------------
 $RawEvent = if ($EventName) { $EventName } else { [string](Field $In 'hook_event_name') }
+if (-not $RawEvent -and $Vendor -eq 'grok') { $RawEvent = [string](Field $In 'hookEventName') }
 $IEvent = switch ($Vendor) {
+  # grok sends BOTH shapes: hook_event_name "PreToolUse" and hookEventName "pre_tool_use".
+  'grok' { switch ($RawEvent) { {$_ -in @('UserPromptSubmit','user_prompt_submit')}{'UserPromptSubmit'} {$_ -in @('PreToolUse','pre_tool_use')}{'PreToolUse'} {$_ -in @('PostToolUse','post_tool_use')}{'PostToolUse'} 'Stop'{'Stop'} default{''} } }
   'cursor' { switch ($RawEvent) { 'beforeSubmitPrompt'{'UserPromptSubmit'} 'beforeShellExecution'{'PreToolUse'} 'beforeMCPExecution'{'PreToolUse'} 'postToolUse'{'PostToolUse'} 'afterAgentResponse'{'Stop'} default{''} } }
   'cline' { switch ($RawEvent) { 'UserPromptSubmit'{'UserPromptSubmit'} 'PreToolUse'{'PreToolUse'} 'PostToolUse'{'PostToolUse'} 'TaskComplete'{'Stop'} default{''} } }
   { $_ -in @('antigravity','gemini') } { switch ($RawEvent) { {$_ -in @('BeforeAgent','UserPromptSubmit','PreInvocation')}{'UserPromptSubmit'} {$_ -in @('BeforeTool','PreToolUse')}{'PreToolUse'} {$_ -in @('AfterTool','PostToolUse')}{'PostToolUse'} {$_ -in @('AfterAgent','Stop','SubagentStop','PostInvocation')}{'Stop'} default{''} } }
@@ -186,6 +203,29 @@ function Render([string]$kind, [string]$text) {
         }
       }
     }
+    'grok' {
+      # Grok Build: stdout JSON is the decision; exit 2 only on the two pre-action gates. PostToolUse
+      # stays exit 0 (non-zero drops the MCP replacement). Stop uses continue:false, never
+      # decision:block (that feeds the reason back to the model and loops). Reason is one line.
+      if ($kind -eq 'block') {
+        # inline (not Flatten): Render can run before the helpers below are defined (malformed stdin).
+        $text = ([string]$text) -replace "[\r\n]", ' '
+        switch ($IEvent) {
+          'UserPromptSubmit' { $out = [ordered]@{ decision='block'; reason=$text } | ConvertTo-Json -Compress -Depth 6; $code = 2 }
+          'PreToolUse'       { $out = [ordered]@{ decision='deny'; reason=$text; hookSpecificOutput=[ordered]@{ hookEventName='PreToolUse'; permissionDecision='deny'; permissionDecisionReason=$text } } | ConvertTo-Json -Compress -Depth 6; $code = 2 }
+          'PostToolUse'      {
+            $o = [ordered]@{ decision='block'; reason=$text }
+            if ($script:GrokMcp) {
+              $gc = if ($script:Category) { ([string]$script:Category) -replace "[\r\n]", ' ' } else { 'not scanned' }
+              $gs = if ($script:ScanId) { ([string]$script:ScanId) -replace "[\r\n]", ' ' } else { 'none' }
+              $o['hookSpecificOutput'] = [ordered]@{ hookEventName='PostToolUse'; updatedMCPToolOutput=("[Prisma AIRS] Tool output withheld ($gc). scan_id: $gs") }
+            }
+            $out = $o | ConvertTo-Json -Compress -Depth 6
+          }
+          'Stop'             { $out = [ordered]@{ continue=$false; stopReason=$text } | ConvertTo-Json -Compress -Depth 6 }
+        }
+      }
+    }
   }
   if ($out) { [Console]::Out.Write($out) }
   if ($kind -eq 'warn') { [Console]::Error.Write("[Prisma AIRS] $text`n") }
@@ -193,6 +233,7 @@ function Render([string]$kind, [string]$text) {
     if ($Vendor -eq 'devin' -and $IEvent -in @('UserPromptSubmit','PostToolUse','Stop')) { [Console]::Error.Write("`n[ALERT] Devin $IEvent is advisory (not a hard block) - $text`n`n") }
     elseif ($Vendor -eq 'cursor' -and $IEvent -eq 'Stop') { [Console]::Error.Write("`n[ALERT] Cursor cannot block the model answer - $text`n`n") }
     elseif ($Vendor -in @('gemini','antigravity') -and $IEvent -eq 'Stop') { [Console]::Error.Write("`n[ALERT] Gemini response scanned; not hard-blocked (avoids retry loop) - $text`n`n") }
+    elseif ($Vendor -eq 'grok') { [Console]::Error.Write("$text`n") }   # no leading blank line: Grok shows the FIRST stderr line
     else { [Console]::Error.Write("`n[BLOCKED] $text`n`n") }
   }
   exit $code
@@ -205,6 +246,8 @@ trap {
   # Fail-closed on the input side unless fail-open was explicitly requested — default to block
   # even when $FailMode was never assigned (an error before config parsing).
   if ($Side -eq 'input' -and $FailMode -ne 'open') { Render 'block' "Prisma AIRS internal error - blocking (fail-closed)" }
+  # grok never shows a warn: an output-side internal error renders as that event's block too.
+  if ($Vendor -eq 'grok' -and $FailMode -ne 'open') { Render 'block' "Prisma AIRS internal error - content NOT scanned" }
   Render 'allow' ''
 }
 
@@ -225,6 +268,8 @@ if ($Raw.Trim().Length -gt 0 -and ($Raw.Trim()[0] -eq '[' -or -not ($In -is [Sys
   Log 'input' "unscannable (hook input is not a JSON object)"
   if (-not $IEvent) { [Console]::Error.Write("`n[BLOCKED] Prisma AIRS could not scan (hook input is not a JSON object) - fail-closed`n`n"); exit 2 }
   if ($Side -eq 'input') { Render 'block' "Prisma AIRS could not scan (hook input is not a JSON object) - blocking (fail-closed)" }
+  # grok never shows a warn (it drops an allowing hook's stderr): render the event's block.
+  elseif ($Vendor -eq 'grok' -and $FailMode -eq 'closed') { Render 'block' "Prisma AIRS could not scan (hook input is not a JSON object) - content NOT scanned" }
   else { Render 'warn' "Prisma AIRS could not scan (hook input is not a JSON object) - content NOT scanned" }
 }
 
@@ -308,8 +353,78 @@ function ToolInputText([string]$name, $ti) {
 }
 function NormToolName([string]$n) { if ($n -like 'MCP:*') { 'mcp__' + (($n.Substring(4)) -replace ':', '__') } else { $n } }
 
+# grok: an MCP call arrives as toolName "<server>__<tool>" (no mcp__ prefix) with the arguments
+# WRAPPED: toolInput = { tool_name: "<server>__<tool>", tool_input: { ...args } }.
+function GrokIsMcpWrapper($ti) {
+  if (-not ($ti -is [System.Management.Automation.PSCustomObject])) { return $false }
+  (Field $ti 'tool_name') -is [string] -and (Field $ti 'tool_input') -is [System.Management.Automation.PSCustomObject]
+}
+# MCP names are "<server>__<tool>" (no mcp__ prefix): split on the FIRST "__". A name without one falls
+# back to the MCP result's own server_name / tool_name (same rule as the node/bash engines).
+function GrokMcpIdentity([string]$name, $tr) {
+  $i = $name.IndexOf('__')
+  if ($i -gt 0) {
+    $script:Server = $name.Substring(0, $i); $t = $name.Substring($i + 2)
+    $script:Tool = if ($t) { $t } else { $name }
+  } else {
+    $s = $null; $t = $null
+    if ($tr -is [System.Management.Automation.PSCustomObject]) { $s = Field $tr 'server_name'; $t = Field $tr 'tool_name' }
+    $script:Server = if ($s -is [string] -and $s) { $s } else { 'unknown' }
+    $script:Tool = if ($t -is [string] -and $t) { $t } elseif ($name) { $name } else { 'unknown' }
+  }
+}
+# ConvertTo-Json silently stubs anything nested past -Depth 100 (the warning is suppressed above), so a
+# value that deep is flagged over-depth instead of being scanned as a lossy stub.
+function GrokDepth($x, [int]$d) {
+  if ($d -gt 99) { return $d }
+  $m = $d
+  if ($x -is [System.Management.Automation.PSCustomObject]) { foreach ($p in $x.PSObject.Properties) { $m = [math]::Max($m, (GrokDepth $p.Value ($d + 1))) } }
+  elseif ($x -is [System.Collections.IEnumerable] -and -not ($x -is [string])) { foreach ($e in $x) { $m = [math]::Max($m, (GrokDepth $e ($d + 1))) } }
+  $m
+}
+function GrokJson($v) {
+  if ($null -eq $v) { return '' }
+  if ($v -is [string]) { return $v }
+  if ((GrokDepth $v 0) -gt 99) { $script:OverDepth = $true }
+  ConvertTo-Json -InputObject $v -Compress -Depth 100
+}
+# Bash "output" is the raw byte array: decode it (UTF-8) when output_for_prompt is empty.
+function GrokBytes($v) {
+  $a = @($v)
+  if ($null -eq $v -or $a.Count -eq 0) { return '' }
+  foreach ($n in $a) { if (-not (($n -is [int] -or $n -is [long]) -and $n -ge 0 -and $n -le 255)) { return '' } }
+  [System.Text.Encoding]::UTF8.GetString([byte[]]$a)
+}
+function GrokHasContent($v) {
+  if ($null -eq $v) { return $false }
+  if ($v -is [string]) { return -not [string]::IsNullOrWhiteSpace($v) }
+  if ($v -is [System.Management.Automation.PSCustomObject]) { return @($v.PSObject.Properties).Count -gt 0 }
+  if ($v -is [System.Collections.IEnumerable]) { return @($v).Count -gt 0 }
+  $true
+}
+# grok PostToolUse: pick the model-facing text out of Grok's tagged toolResult. A non-empty result
+# must never yield empty scan text, so anything unrecognised or empty falls back to its JSON.
+function GrokResultText($r) {
+  if ($null -eq $r) { return '' }
+  if ($r -is [string]) { return $r }                     # toolResultTruncated: a plain string
+  $t = ''
+  if ($r -is [System.Management.Automation.PSCustomObject]) {
+    switch -CaseSensitive ([string](Field $r 'type')) {
+      'Bash'       { $t = JStr (Field $r 'output_for_prompt'); if ([string]::IsNullOrWhiteSpace($t)) { $t = GrokBytes (Field $r 'output') } }
+      'ReadFile'   { $fc = Field $r 'FileContent'; $v = Field $fc 'raw_output'; if ($null -eq $v) { $v = Field $fc 'content' }; $t = JStr $v }
+      'MCP'        { $o = Field $r 'output'; $ok = Field $o 'OkayOutput'; if ($ok -is [string]) { $t = $ok } else { $t = (Get-AllStrings $o) -join "`n" } }
+      'SearchTool' { $t = JStr (Field $r 'content') }
+      default      { $t = (Get-AllStrings $r) -join "`n" }
+    }
+  } else { $t = (Get-AllStrings $r) -join "`n" }
+  if ([string]::IsNullOrWhiteSpace($t) -and (GrokHasContent $r)) { $t = GrokJson $r }
+  $t
+}
+
 # ---- normalize + ScanPlan ---------------------------------------------------
 $Kind=''; $Text=''; $Server=''; $Tool=''; $InText=''; $ToolName=''; $StopActive=$false; $Label=''
+$GrokMcp = $false   # grok: the tool is MCP (wrapped input or an MCP-typed result) -> MCP output replacement on block
+$GrokCut = ''; $GrokCutLen = 0   # grok: 'truncated' (Grok's payload cap) / 'content_overflow' -> tail unscanned
 $script:OverDepth = $false   # set by Get-AllStrings when content nests past the scan-depth cap
 switch ($IEvent) {
   'UserPromptSubmit' {
@@ -331,11 +446,24 @@ switch ($IEvent) {
         else { $ToolName=NormToolName([string](Field $In 'tool_name')); $ti=Field $In 'tool_input' }
       }
       { $_ -in @('antigravity','gemini') } { $tn=Field $In 'tool_name'; if (-not $tn) { $tn=Field (Field $In 'toolCall') 'name' }; $ToolName=[string]$tn; $ti=Field $In 'tool_input'; if ($null -eq $ti) { $ti=Field (Field $In 'toolCall') 'args' } }
+      'grok'     { $tn=Field $In 'toolName'; if ($null -eq $tn) { $tn=Field $In 'tool_name' }; $ToolName=[string]$tn; $ti=Field $In 'toolInput'; if ($null -eq $ti) { $ti=Field $In 'tool_input' } }
       default    { $ToolName=[string](Field $In 'tool_name'); $ti=Field $In 'tool_input' }
     }
     $Label="$(if ($ToolName) { $ToolName } else { 'tool' }) input"
-    $Text = ToolInputText $ToolName $ti
-    ToolIdentity $ToolName $ti
+    if ($Vendor -eq 'grok' -and (GrokIsMcpWrapper $ti)) {
+      # MCP: scan the unwrapped arguments as a tool_event, identity split exactly like mcp__server__tool.
+      $script:GrokMcp = $true
+      $mn = if ($ToolName) { $ToolName } else { [string](Field $ti 'tool_name') }
+      $Text = ToolInputText "mcp__$mn" (Field $ti 'tool_input')
+      GrokMcpIdentity $mn $null
+    } else {
+      # built-in (or toolInputTruncated: a plain string - its head is scanned, and the tail the tool
+      # still runs with is blocked unless AIRS blocks first; see GrokCutBlock)
+      $Text = ToolInputText $ToolName $ti
+      ToolIdentity $ToolName $ti
+      $tt = Field $In 'toolInputTruncated'
+      if ($Vendor -eq 'grok' -and $tt -is [bool] -and $tt) { $script:GrokCut = 'truncated' }
+    }
   }
   'PostToolUse' {
     $Kind='toolOutput'; $ti=$null; $tr=$null
@@ -343,12 +471,28 @@ switch ($IEvent) {
       'cline'    { $ptu=Field $In 'postToolUse'; $ToolName=[string](Field $ptu 'toolName'); $ti=Field $ptu 'parameters'; $tr=Field $ptu 'result' }
       'cursor'   { $ToolName=NormToolName([string](Field $In 'tool_name')); $ti=Field $In 'tool_input'; $tr=Field $In 'tool_response'; if ($null -eq $tr) { $tr=Field $In 'tool_output' } }
       { $_ -in @('antigravity','gemini') } { $tn=Field $In 'tool_name'; if (-not $tn) { $tn=Field (Field $In 'toolCall') 'name' }; $ToolName=[string]$tn; $ti=Field $In 'tool_input'; $tr=Field $In 'tool_response'; if ($null -eq $tr) { $tr=Field $In 'tool_result' } }
+      'grok'     { $tn=Field $In 'toolName'; if ($null -eq $tn) { $tn=Field $In 'tool_name' }; $ToolName=[string]$tn; $ti=Field $In 'toolInput'; if ($null -eq $ti) { $ti=Field $In 'tool_input' }; $tr=Field $In 'toolResult'; if ($null -eq $tr) { $tr=Field $In 'tool_response' } }
       default    { $ToolName=[string](Field $In 'tool_name'); $ti=Field $In 'tool_input'; $tr=Field $In 'tool_response'; if ($null -eq $tr) { $tr=Field $In 'tool_result' } }
     }
     $Label="$(if ($ToolName) { $ToolName } else { 'tool' }) output"
-    $Text = (Get-AllStrings $tr) -join "`n"
-    $InText = ToolInputText $ToolName $ti
-    ToolIdentity $ToolName $ti
+    if ($Vendor -eq 'grok') {
+      $Text = GrokResultText $tr
+      if ((GrokIsMcpWrapper $ti) -or ($tr -is [System.Management.Automation.PSCustomObject] -and [string](Field $tr 'type') -ceq 'MCP')) {
+        $script:GrokMcp = $true
+        $mn = if ($ToolName) { $ToolName } elseif (GrokIsMcpWrapper $ti) { [string](Field $ti 'tool_name') } else { '' }
+        $ta = if (GrokIsMcpWrapper $ti) { Field $ti 'tool_input' } else { $ti }
+        $InText = ToolInputText "mcp__$mn" $ta
+        GrokMcpIdentity $mn $tr
+      } else {
+        $InText = ToolInputText $ToolName $ti
+        ToolIdentity $ToolName $ti
+      }
+      $tt = Field $In 'toolResultTruncated'; if ($tt -is [bool] -and $tt) { $script:GrokCut = 'truncated' }
+    } else {
+      $Text = (Get-AllStrings $tr) -join "`n"
+      $InText = ToolInputText $ToolName $ti
+      ToolIdentity $ToolName $ti
+    }
   }
   'Stop' {
     $Label='model answer'; $Kind='response'
@@ -356,6 +500,15 @@ switch ($IEvent) {
       'cline'    { $Text=[string](Field (Field $In 'taskComplete') 'task') }
       'cursor'   { $t=Field $In 'text'; foreach ($k in @('response','message','content','output')) { if (-not $t) { $t=Field $In $k } }; $Text=[string]$t }
       { $_ -in @('antigravity','gemini') } { $t=Field $In 'last_assistant_message'; foreach ($k in @('prompt_response','response','agent_response')) { if (-not $t) { $t=Field $In $k } }; $Text=[string]$t; $StopActive=[bool](Field $In 'stop_hook_active') }
+      'grok'     {
+        # The session-end fire (reason shutdown / channel_closed) has no turn left to judge: skip only
+        # those. Any other reason (a new one, or none) is scanned.
+        $rs = Field $In 'reason'
+        if ($rs -is [string] -and $rs -cin @('shutdown','channel_closed')) { Log $Label "skipped (session-end Stop, reason: $rs)"; Render 'allow' '' }
+        # The final text is ONLY in camelCase lastAssistantMessage (the snake half has none).
+        $Text = JStr (Field $In 'lastAssistantMessage')
+        if ([string]::IsNullOrWhiteSpace($Text)) { Log $Label 'nothing to scan (empty lastAssistantMessage)'; Render 'allow' '' }
+      }
       default    { $Text=[string](Field $In 'last_assistant_message'); $StopActive=[bool](Field $In 'stop_hook_active') }
     }
   }
@@ -379,7 +532,11 @@ if ($CfgErr) {
     [Console]::Error.Write("`n[WARN] Prisma AIRS NOT CONFIGURED - traffic passing UNSCANNED. Set PRISMA_AIRS_API_KEY (+ profile) in $CfgDir\hooks\.env, then reload. (AIRS_REQUIRE_CONFIG=1 to block instead.)`n`n")
     Render 'allow' ''
   }
+  # grok reads no .env: its credentials come from the environment Grok is launched from.
+  if ($Side -eq 'input' -and $Vendor -eq 'grok') { Render 'block' "Prisma AIRS not configured ($CfgErr) - set PRISMA_AIRS_API_KEY (+ profile), then reload - blocking (fail-closed)" }
   if ($Side -eq 'input') { Render 'block' "Prisma AIRS not configured ($CfgErr) - set it in $CfgDir\hooks\.env - blocking (fail-closed)" }
+  # grok discards an allowing hook's output, so a warn would be invisible: render the event's block.
+  elseif ($Vendor -eq 'grok') { Render 'block' "Prisma AIRS not configured ($CfgErr) - content NOT scanned" }
   else { Render 'warn' "Prisma AIRS not configured ($CfgErr) - content NOT scanned" }
 }
 
@@ -389,6 +546,8 @@ if ($CfgErr) {
 if ($script:OverDepth) {
   Log $Label "content_over_depth (nesting exceeds scan depth)"
   if ($Side -eq 'input') { Render 'block' "Content nesting exceeds the AIRS scan depth - blocking unscanned (fail-closed)" }
+  # grok never shows a warn: render the event's block.
+  elseif ($Vendor -eq 'grok' -and $FailMode -eq 'closed') { Render 'block' "Content nesting exceeds the AIRS scan depth - content NOT scanned" }
   else { Render 'warn' "Content nesting exceeds the AIRS scan depth - NOT fully scanned" }
 }
 if ([string]::IsNullOrWhiteSpace($Text)) { Dbg "no scannable content for $Label - allowing"; Render 'allow' '' }
@@ -398,20 +557,37 @@ if ([string]::IsNullOrWhiteSpace($Text)) { Dbg "no scannable content for $Label 
 if ($Text.Length -gt $MaxBudget) {
   Log $Label "content_overflow ($($Text.Length) chars > $MaxBudget budget)"
   if ($Side -eq 'input') { Render 'block' "Content exceeds the AIRS scan budget ($($Text.Length) chars) - blocking unscanned" }
+  # grok never shows a warn: scan the head for a real verdict, then block the unscanned tail.
+  elseif ($Vendor -eq 'grok') { $GrokCut = 'content_overflow'; $GrokCutLen = $Text.Length; $Text = $Text.Substring(0, $MaxChars) }
   else { Render 'warn' "Content exceeds the AIRS scan budget ($($Text.Length) chars) - NOT fully scanned" }
+}
+
+# grok: content the hook could not see in full - Grok's payload cap (toolInputTruncated /
+# toolResultTruncated) or an output past the scan budget - is the event's block unless AIRS already
+# blocked the part it saw. Called after the scan; no-op when nothing was cut.
+function GrokCutBlock {
+  if (-not $script:GrokCut) { return }
+  Log $Label "$($script:GrokCut) - tail unscanned"
+  # scan_id: the head scan's ("none" when it failed); an over-budget output has no single scan id.
+  $script:Category = $script:GrokCut
+  if ($script:GrokCut -eq 'content_overflow') { $script:ScanId = ''; Render 'block' "Content exceeds the AIRS scan budget ($($script:GrokCutLen) chars) - tail NOT scanned" }
+  if ($Side -eq 'input') { Render 'block' "Tool input exceeds Grok's hook payload cap - unscanned tail blocked" }
+  Render 'block' "Tool output exceeds Grok's hook payload cap - tail NOT scanned"
 }
 
 # ---- build AIRS request -----------------------------------------------------
 $AiProfile = if ($ProfileId) { @{ profile_id = $ProfileId } } else { @{ profile_name = $ProfileName } }
 $Session = ''
-foreach ($k in @('session_id','taskId','trajectory_id','conversation_id','conversationId')) { if (-not $Session) { $v = Field $In $k; if ($v) { $Session = [string]$v } } }
+$SessKeys = if ($Vendor -eq 'grok') { @('sessionId','session_id') } else { @('session_id','taskId','trajectory_id','conversation_id','conversationId') }
+foreach ($k in $SessKeys) { if (-not $Session) { $v = Field $In $k; if ($v) { $Session = [string]$v } } }
 if (-not $Session) {
   $cwd = [string](Field $In 'cwd'); if (-not $cwd) { $cwd = (Get-Location).Path }
   $sha = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($cwd))
   $Session = -join ($sha | ForEach-Object { $_.ToString('x2') }); $Session = $Session.Substring(0, [math]::Min(32, $Session.Length))
 }
 $Txn = ''
-foreach ($k in @('tool_use_id','prompt_id','turn_id')) { if (-not $Txn) { $v = Field $In $k; if ($v) { $Txn = [string]$v } } }
+$TxnKeys = if ($Vendor -eq 'grok') { @('toolUseId','tool_use_id','promptId') } else { @('tool_use_id','prompt_id','turn_id') }
+foreach ($k in $TxnKeys) { if (-not $Txn) { $v = Field $In $k; if ($v) { $Txn = [string]$v } } }
 # per-event id: synthesize a GUID rather than reusing the session id, so AIRS can distinguish
 # turns even when the client gives no per-turn id.
 if (-not $Txn) { $Txn = [guid]::NewGuid().ToString() }
@@ -442,8 +618,19 @@ $BodyJson = $Body | ConvertTo-Json -Depth 12 -Compress
 $Scan = $null; $ScanErr = ''
 $headers = @{ 'x-pan-token' = $ApiKey; 'Accept' = 'application/json' }
 for ($attempt = 0; $attempt -le $Retries; $attempt++) {
+  # AIRS_DEADLINE_MS: clamp this attempt to the budget left. -TimeoutSec is whole seconds (and 0 means
+  # NO timeout), so round DOWN and treat < 1 s left as exhausted - never overshoot the hook's timeout.
+  $AttemptSec = $TimeoutSec
+  if ($DeadlineMs -gt 0) {
+    $left = $DeadlineMs - $Clock.ElapsedMilliseconds
+    if ($left -lt 1000) {
+      $ScanErr = if ($ScanErr) { "$ScanErr; deadline exceeded (AIRS_DEADLINE_MS=$DeadlineMs)" } else { "deadline exceeded (AIRS_DEADLINE_MS=$DeadlineMs)" }
+      $Scan = $null; break
+    }
+    $AttemptSec = [int][math]::Min($TimeoutSec, [math]::Floor($left / 1000))
+  }
   try {
-    $Scan = Invoke-RestMethod -Uri $ApiUrl -Method Post -ContentType 'application/json' -Headers $headers -Body $BodyJson -TimeoutSec $TimeoutSec
+    $Scan = Invoke-RestMethod -Uri $ApiUrl -Method Post -ContentType 'application/json' -Headers $headers -Body $BodyJson -TimeoutSec $AttemptSec
     $ScanErr = ''; break
   } catch {
     $ScanErr = $_.Exception.Message; $Scan = $null
@@ -457,6 +644,13 @@ for ($attempt = 0; $attempt -le $Retries; $attempt++) {
 if ($ScanErr -or $null -eq $Scan) {
   if (-not $ScanErr) { $ScanErr = 'empty response' }
   Log $Label "error($ScanErr)"
+  GrokCutBlock
+  # grok: a warn is invisible there, so a scan error renders as that event's block (deny on input;
+  # advisory block + MCP output withheld / turn halt on output). AIRS_FAIL_MODE=open still allows.
+  if ($Vendor -eq 'grok' -and $FailMode -eq 'closed') {
+    if ($Side -eq 'input') { Render 'block' "Prisma AIRS scan failed ($ScanErr) - blocking (fail-closed)" }
+    else { Render 'block' "Prisma AIRS scan failed ($ScanErr) - content NOT scanned" }
+  }
   if ($IEvent -eq 'Stop') { Render 'warn' "AIRS scan error at Stop ($ScanErr) - allowing" }
   elseif ($FailMode -eq 'closed' -and $Side -eq 'input') { Render 'block' "Prisma AIRS scan failed ($ScanErr) - blocking (fail-closed)" }
   else { Render 'warn' "AIRS scan error ($ScanErr) - allowing (fail-open)" }
@@ -482,10 +676,14 @@ if ($Action -eq 'block') {
   $tag = if ($DetStr) { "allow [$DetStr]" } else { 'allow' }
   $tag += " [scan:$ScanId]"
   Log $Label $tag
+  GrokCutBlock
   Render 'allow' ''
 } else {
   # Unrecognized action (partial response / API contract drift) is NOT clean -> fail-mode.
   Log $Label "unexpected action '$Action' - fail-mode ($FailMode)"
+  # grok: no usable verdict, so an MCP placeholder reads "not scanned" / "none" (as in the node engine).
+  if ($Vendor -eq 'grok') { $Category = ''; $ScanId = ''; GrokCutBlock }
   if ($FailMode -eq 'closed' -and $Side -eq 'input') { Render 'block' "Prisma AIRS returned an unexpected action ('$Action') - blocking (fail-closed)" }
+  if ($FailMode -eq 'closed' -and $Vendor -eq 'grok') { Render 'block' "Prisma AIRS returned an unexpected action ('$Action') - content NOT scanned" }
   else { Render 'warn' "Prisma AIRS returned an unexpected action ('$Action') - allowing (fail-open)" }
 }
