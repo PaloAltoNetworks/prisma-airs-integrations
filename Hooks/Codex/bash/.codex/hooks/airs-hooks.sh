@@ -2,7 +2,7 @@
 # =============================================================================
 # Prisma AIRS security hook — BASH core engine (core-parity port of hooks-x).
 #
-# One script, all six vendors (via --vendor), all four checkpoints (via --event).
+# One script, every vendor (via --vendor), all four checkpoints (via --event).
 # Delegates every judgment to Prisma AIRS. Core parity with the Node.js engine:
 #   • 4 checkpoints: UserPromptSubmit / PreToolUse / PostToolUse / Stop
 #   • correct AIRS content-types, incl. tool_event (method "tools/call") so
@@ -72,6 +72,22 @@ case "${AIRS_CODE_AWARE:-1}" in 1|true|yes) CODE_AWARE=1 ;; *) CODE_AWARE=0 ;; e
 case "$TIMEOUT_MS" in ''|*[!0-9]*) TIMEOUT_MS=10000 ;; esac
 TIMEOUT_S=$(( (TIMEOUT_MS + 999) / 1000 )); [ "$TIMEOUT_S" -lt 1 ] && TIMEOUT_S=1
 case "$RETRIES" in ''|*[!0-9]*) RETRIES=1 ;; esac
+# OPT-IN overall deadline for the whole hook run (unset / 0 / non-numeric = off, no behaviour change).
+# A client that kills a slow hook and treats the kill as ALLOW (Grok Build) must see the engine's
+# own decision first: each AIRS attempt is clamped to the budget left, and an exhausted budget is a
+# scan error (-> the normal fail rules, closed on the input side). Clock: bash 5 EPOCHREALTIME, else
+# jq `now` (jq is already required), else whole seconds counted pessimistically (+1s).
+DEADLINE_MS="${AIRS_DEADLINE_MS:-}"
+case "$DEADLINE_MS" in ''|*[!0-9]*) DEADLINE_MS=0 ;; esac
+DEADLINE_MS=$(( 10#$DEADLINE_MS ))
+now_ms() { # [slack ms added only on the whole-second fallback: 0 for the start mark, 1000 for "now"]
+  local t=""
+  if [ -n "${EPOCHREALTIME:-}" ]; then t="${EPOCHREALTIME//[.,]/}"; t=$(( 10#$t / 1000 ))
+  else t="$(jq -n 'now*1000|floor' 2>/dev/null)"; fi
+  case "$t" in ''|*[!0-9]*) t=$(( $(date +%s) * 1000 + ${1:-0} )) ;; esac
+  printf '%s' "$t"
+}
+[ "$DEADLINE_MS" -gt 0 ] && START_MS="$(now_ms 0)"
 
 # vendor -> app_name + config dir for AIRS metadata / default log path
 case "$VENDOR" in
@@ -82,6 +98,7 @@ case "$VENDOR" in
   devin)       APP_NAME="Devin CLI";   CFGDIR=".devin" ;;
   antigravity) APP_NAME="Antigravity"; CFGDIR=".agents" ;;
   gemini)      APP_NAME="Gemini CLI";  CFGDIR=".gemini" ;;
+  grok)        APP_NAME="Grok Build";  CFGDIR=".grok" ;;
   "")          # no --vendor given: keep the historical Claude default, but SAY so (a broken
                # wiring that dropped --vendor is then visible, not silent).
                printf '[airs-hooks] no --vendor given; defaulting to claude\n' >&2
@@ -89,13 +106,18 @@ case "$VENDOR" in
   *)           # UNKNOWN vendor: do NOT silently alias to Claude. On a stdout-reading client
                # (Cursor/Cline) a Claude-shaped exit-2 block renders in the wrong channel and fails
                # OPEN — so fail closed loudly here. (Vendor is config-time, not attacker-controlled.)
-               printf '\n🚫 Prisma AIRS: unknown --vendor %s — blocking (fail-closed). Known: claude, codex, cursor, cline, devin, gemini, antigravity.\n\n' "$VENDOR" >&2
+               printf '\n🚫 Prisma AIRS: unknown --vendor %s — blocking (fail-closed). Known: claude, codex, cursor, cline, devin, gemini, antigravity, grok.\n\n' "$VENDOR" >&2
                exit 2 ;;
 esac
 [ -n "$SUFFIX" ] && APP_NAME="$APP_NAME-$SUFFIX"
 # app_user now reflects the actual agent (was hardcoded "claude-code-user"); env-overridable.
 APP_USER="${AIRS_APP_USER:-${VENDOR}-user}"
 # log defaults under THIS agent's config dir, not always .claude/
+# grok: ABSOLUTE under the home dir — Grok runs hooks with cwd = the session workspace, so a relative
+# default would scatter .grok/hooks/ logs into every repo the agent opens.
+if [ -z "$LOG_FILE" ] && [ "$VENDOR" = "grok" ] && [ -n "${HOME:-${USERPROFILE:-}}" ]; then
+  LOG_FILE="${HOME:-${USERPROFILE:-}}/$CFGDIR/hooks/prisma-airs.log"
+fi
 [ -z "$LOG_FILE" ] && LOG_FILE="$CFGDIR/hooks/prisma-airs.log"
 
 dbg() { [ "$DEBUG" = "1" ] || [ "$DEBUG" = "true" ] && printf '[airs-hooks] %s\n' "$1" >&2; return 0; }
@@ -112,6 +134,7 @@ jc() { jq -c  "$1" <<<"$INPUT" 2>/dev/null; }   # compact JSON
 # ----------------------------------------------------------------------------
 RAW_EVENT="$EVENT"
 [ -z "$RAW_EVENT" ] && RAW_EVENT="$(j '.hook_event_name // empty')"
+[ -z "$RAW_EVENT" ] && [ "$VENDOR" = "grok" ] && RAW_EVENT="$(j '.hookEventName // empty')"
 # jq-free fallback: when jq is missing, `j` returns empty, so derive the event name from the raw
 # JSON by hand (grep + bash parameter expansion — no sed, to avoid adding a dependency). Without
 # this, a jq-missing + no-`--event` invocation can't resolve the event and the dep-gate falls to a
@@ -137,6 +160,15 @@ case "$VENDOR" in
       PreToolUse)       IEVENT="PreToolUse" ;;
       PostToolUse)      IEVENT="PostToolUse" ;;
       TaskComplete)     IEVENT="Stop" ;;
+      *) IEVENT="" ;;
+    esac ;;
+  grok)
+    # Grok Build sends BOTH hook_event_name (PascalCase) and hookEventName (snake_case) on every hook.
+    case "$RAW_EVENT" in
+      UserPromptSubmit|user_prompt_submit) IEVENT="UserPromptSubmit" ;;
+      PreToolUse|pre_tool_use)             IEVENT="PreToolUse" ;;
+      PostToolUse|post_tool_use)           IEVENT="PostToolUse" ;;
+      Stop|stop)                           IEVENT="Stop" ;;
       *) IEVENT="" ;;
     esac ;;
   antigravity|gemini)
@@ -260,6 +292,45 @@ render() {
           Stop) code=0; err=$'\n⚠️  ALERT (Gemini response scanned; not hard-blocked to avoid retry loop) — '"$text"$'\n\n' ;;
         esac
       fi ;;
+    grok)
+      # Grok Build: stdout JSON is the decision; the FIRST stderr line is its deny/scrollback text,
+      # so no leading blank line and a single-line reason. UserPromptSubmit/PreToolUse blocks also
+      # exit 2 (stderr alone still denies if stdout is lost). PostToolUse is advisory (the tool already
+      # ran; for MCP tools updatedMCPToolOutput replaces the model's copy). Stop uses continue:false —
+      # decision:block would feed the reason back to the model and loop.
+      text="$(printf '%s' "$text" | tr '\r\n' '  ')"   # (flatten() is defined later; render can run first)
+      case "$kind" in
+        warn)  err="[Prisma AIRS] $text"$'\n' ;;
+        block) err="$text"$'\n' ;;
+      esac
+      if [ "$kind" = "block" ]; then
+        case "$IEVENT" in
+          UserPromptSubmit) code=2; out="$(jq -nc --arg r "$text" '{decision:"block",reason:$r}' 2>/dev/null)" ;;
+          PreToolUse)       code=2; out="$(jq -nc --arg r "$text" '{decision:"deny",reason:$r,hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}' 2>/dev/null)" ;;
+          PostToolUse)
+            if [ "$GROK_MCP" = "1" ]; then
+              out="$(jq -nc --arg r "$text" --arg m "[Prisma AIRS] Tool output withheld ($(printf '%s' "${CATEGORY:-not scanned}" | tr '\r\n' '  ')). scan_id: $(printf '%s' "${SCAN_ID:-none}" | tr '\r\n' '  ')" \
+                '{decision:"block",reason:$r,hookSpecificOutput:{hookEventName:"PostToolUse",updatedMCPToolOutput:$m}}' 2>/dev/null)"
+            else
+              out="$(jq -nc --arg r "$text" '{decision:"block",reason:$r}' 2>/dev/null)"
+            fi ;;
+          Stop)             out="$(jq -nc --arg r "$text" '{continue:false,stopReason:$r}' 2>/dev/null)" ;;
+        esac
+        # jq-empty safety net: an empty stdout reads as allow, so never exit on a block without JSON.
+        if [ -z "$out" ]; then
+          case "$IEVENT" in
+            UserPromptSubmit) out='{"decision":"block","reason":"Prisma AIRS blocked this prompt"}' ;;
+            PreToolUse)       out='{"decision":"deny","reason":"Prisma AIRS blocked this tool call","hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Prisma AIRS blocked this tool call"}}' ;;
+            PostToolUse)
+              if [ "$GROK_MCP" = "1" ]; then
+                out='{"decision":"block","reason":"Prisma AIRS flagged this tool output","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedMCPToolOutput":"[Prisma AIRS] Tool output withheld (not scanned). scan_id: none"}}'
+              else
+                out='{"decision":"block","reason":"Prisma AIRS flagged this tool output"}'
+              fi ;;
+            Stop)             out='{"continue":false,"stopReason":"Prisma AIRS flagged this response"}' ;;
+          esac
+        fi
+      fi ;;
   esac
 
   [ -n "$out" ] && printf '%s' "$out"
@@ -295,6 +366,13 @@ emit_nojq_block() {
         UserPromptSubmit) printf '{"decision":"block","reason":"%s"}' "$msg" ;;
       esac
       printf '\n🚫 %s\n\n' "$msg" >&2; exit 0 ;;
+    grok)
+      # stdout JSON + exit 2, reason on the FIRST stderr line (Grok's deny text).
+      case "$IEVENT" in
+        PreToolUse)       printf '{"decision":"deny","reason":"%s","hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$msg" "$msg" ;;
+        UserPromptSubmit) printf '{"decision":"block","reason":"%s"}' "$msg" ;;
+      esac
+      printf '%s\n' "$msg" >&2; exit 2 ;;
     *) # devin / gemini / antigravity block input via exit 2 (no stdout needed)
       printf '\n🚫 %s\n\n' "$msg" >&2; exit 2 ;;
   esac
@@ -313,6 +391,39 @@ log_line() {
   return 0
 }
 
+# grok: does a payload that could NOT be parsed still say its tool was MCP? Only then can an unscannable
+# output be WITHHELD (updatedMCPToolOutput) instead of merely flagged next to the raw content.
+# jq < 1.8 refuses to parse past 256 parser levels — 256 nested arrays but only 128 nested OBJECTS, since
+# each object level costs two (measured, jq 1.7.1 = Ubuntu 24.04's default; jq 1.8 allows ~10000, and fails
+# past that the same way) — so a deep MCP result reaches the gate below as "not valid JSON" and plain jq
+# cannot read its envelope.
+# `jq --stream` has no depth limit and emits the envelope's shallow leaves before any syntax error, so it
+# finds the TOP-LEVEL markers in either key order: a result tagged "type":"MCP", an MCP call wrapper
+# ({"tool_name": <string>, "tool_input": <any>}), or such a wrapper that Grok cut to a string. When jq can
+# read the whole input (only too deep for a normal parse) that structural answer stands. Only input jq
+# cannot tokenize at all falls back to the raw-text match the node and pwsh engines use (Grok's serializer
+# puts "type" first in a result, "tool_name" first in an MCP call). A false positive only withholds more.
+GROK_MCP_RAW_RE='"(toolResult|tool_response)"[[:space:]]*:[[:space:]]*\{[[:space:]]*"type"[[:space:]]*:[[:space:]]*"MCP"|"(toolInput|tool_input)"[[:space:]]*:[[:space:]]*\{[[:space:]]*"tool_name"[[:space:]]*:[[:space:]]*"'
+grok_mcp_markers() {
+  local m rc
+  m="$(jq -rc --stream '
+      select(length == 2) as [$p, $v]
+      | if ($p|length) == 2 and ($p[0] == "toolResult" or $p[0] == "tool_response") and $p[1] == "type" and $v == "MCP" then "mcp-result"
+        elif ($p|length) == 2 and ($p[0] == "toolInput" or $p[0] == "tool_input") and $p[1] == "tool_name" and ($v|type) == "string" then "mcp-name"
+        elif ($p|length) >= 2 and ($p[0] == "toolInput" or $p[0] == "tool_input") and $p[1] == "tool_input" then "mcp-args"
+        elif ($p|length) == 1 and ($p[0] == "toolInput" or $p[0] == "tool_input") and ($v|type) == "string"
+             and ($v|startswith("{\"tool_name\":\"")) then "mcp-cut-call"
+        else empty end' <<<"$INPUT" 2>/dev/null)"; rc=$?
+  case "$m" in *mcp-result*|*mcp-cut-call*) return 0 ;; esac
+  case "$m" in *mcp-name*) case "$m" in *mcp-args*) return 0 ;; esac ;; esac
+  [ "$rc" -eq 0 ] && return 1
+  grep -Eq "$GROK_MCP_RAW_RE" <<<"$INPUT"   # here-strings, not pipes: under pipefail an early grep exit could SIGPIPE printf
+}
+# A PostToolUse toolInput that names an MCP call: the wrapper with ANY args (Grok may send none), or the
+# wrapper cut to a string by Grok's payload cap. (Pre-tool unwrapping still needs object args: JQ_GROK_MCP.)
+JQ_GROK_MCP_CALL='(type=="object" and (.tool_name|type)=="string" and has("tool_input"))
+  or (type=="string" and startswith("{\"tool_name\":\""))'
+
 # ----------------------------------------------------------------------------
 # dependency + input-integrity gate — fail-CLOSED on input, warn on output.
 # jq/curl are hard requirements; without jq every extractor silently yields ""
@@ -330,7 +441,9 @@ if [ -z "$DEP_ERR" ] && [ -n "$(printf '%s' "$INPUT" | tr -d '[:space:]')" ]; th
     if ! printf '%s' "$INPUT" | jq -e 'type=="object"' >/dev/null 2>&1; then
       DEP_ERR="hook input is not a JSON object (primitive/array)"
     elif ! printf '%s' "$INPUT" | jq -e 'def d: if (type=="object" or type=="array") then ([.[]|d]|max // -1)+1 else 0 end; d < 200' >/dev/null 2>&1; then
-      # jq's ENCODER truncates its OUTPUT past ~256 nesting depth (while its parser tolerates ~5000).
+      # jq's ENCODER truncates its OUTPUT past ~256 nesting depth (jq 1.8's parser tolerates ~10000;
+      # jq 1.7.x refuses to parse past 256 levels / 128 nested objects, which lands in the "not valid
+      # JSON" branch below instead — see grok_mcp_markers).
       # A value nested that deep re-serializes (jc '.tool_input') to INVALID JSON at rc=0, then the
       # extractor errors to empty and falls through to a silent allow. Reject past a generous bound
       # (200, safely below the 256 encoder limit) as unscannable — closes the ~257..4999 band without
@@ -344,7 +457,15 @@ fi
 if [ -n "$DEP_ERR" ]; then
   log_line "${LABEL:-input}" "unscannable ($DEP_ERR)"
   case "$IEVENT" in
-    PostToolUse|Stop)            render warn  "Prisma AIRS could not scan ($DEP_ERR) — content NOT scanned" ;;
+    PostToolUse|Stop)
+      if [ "$VENDOR" = "grok" ] && [ "$FAIL_MODE" = "closed" ]; then
+        # Grok never shows a warn (it drops an allowing hook's stderr): render the event's block, and
+        # withhold an MCP output when the payload still says it is one — valid but over-deep, past jq's
+        # parse limit, or malformed (grok_mcp_markers reads the envelope in every one of those cases).
+        [ "$IEVENT" = "PostToolUse" ] && grok_mcp_markers && GROK_MCP=1
+        render block "Prisma AIRS could not scan ($DEP_ERR) — content NOT scanned"
+      fi
+      render warn  "Prisma AIRS could not scan ($DEP_ERR) — content NOT scanned" ;;
     UserPromptSubmit|PreToolUse)
       if command -v jq >/dev/null 2>&1; then
         render block "Prisma AIRS could not scan ($DEP_ERR) — blocking (fail-closed)"
@@ -416,11 +537,55 @@ tool_input_text() {
 # VALUES plus object KEYS, so an injection hidden in a key (not a value) is still scanned.
 tool_output_text() { jq -r '([.. | strings] + [.. | objects | keys_unsorted[]]) | join("\n")' <<<"$1" 2>/dev/null; }
 
+# grok: Grok's MCP wrapper {tool_name:"<server>__<tool>", tool_input:{...arguments}}
+JQ_GROK_MCP='type=="object" and (.tool_name|type)=="string" and (.tool_input|type)=="object"'
+# grok: MCP names are "<server>__<tool>" (no mcp__ prefix) — split on the FIRST "__"; when the name has
+# none, fall back to the MCP result's own server_name/tool_name. Sets SERVER, TOOL.
+grok_mcp_identity() {
+  local name="$1" tr="${2:-null}"
+  if [[ "$name" == ?*__* ]]; then SERVER="${name%%__*}"; TOOL="${name#*__}"
+  else
+    SERVER="$(jq -r 'if type=="object" and (.server_name|type)=="string" then .server_name else empty end' <<<"$tr" 2>/dev/null)"
+    TOOL="$(jq -r 'if type=="object" and (.tool_name|type)=="string" then .tool_name else empty end' <<<"$tr" 2>/dev/null)"
+  fi
+  [ -z "$SERVER" ] && SERVER="unknown"
+  [ -z "$TOOL" ] && TOOL="${name:-unknown}"
+}
+# grok: the model-facing text of a tagged toolResult (Bash output_for_prompt — its "output" is a byte
+# array, decoded as UTF-8 only when output_for_prompt is empty; ReadFile raw_output; MCP OkayOutput;
+# SearchTool content = the MCP tool catalogue); a string (truncated) result as-is; any other shape
+# through the generic collector. A non-empty result NEVER yields empty scan text — the last resort is
+# the result's JSON.
+grok_output_text() {
+  local tr="$1" ty t
+  ty="$(jq -r 'if type=="string" then "@string" elif type=="object" and (.type|type)=="string" then .type else "" end' <<<"$tr" 2>/dev/null)"
+  case "$ty" in
+    @string|Bash|ReadFile|MCP|SearchTool)
+      t="$(jq -r "$JQ_S"'
+        if type=="string" then .
+        elif .type=="Bash"     then (.output_for_prompt|s)
+        elif .type=="ReadFile" then (.FileContent as $f | if ($f|type)=="object" then (($f.raw_output // $f.content)|s) else ($f|s) end)
+        elif .type=="MCP"      then (.output as $o | if ($o|type)=="object" and ($o.OkayOutput|type)=="string" then $o.OkayOutput else ($o|s) end)
+        else (.content|s) end' <<<"$tr" 2>/dev/null)" ;;
+    *) t="$(tool_output_text "$tr")" ;;
+  esac
+  if [ "$ty" = "Bash" ] && [ -z "$(printf '%s' "$t" | tr -d '[:space:]')" ]; then
+    # bytes -> "\xHH" escapes -> printf %b (bash cannot hold NUL; those bytes drop)
+    t="$(printf '%b' "$(jq -r '"0123456789abcdef" as $h
+      | if (.output|type)=="array" and (.output|length)>0 and all(.output[]; type=="number" and .>=0 and .<=255 and .==floor)
+        then [.output[] | "\\x" + $h[(./16|floor):(./16|floor)+1] + $h[(.%16):(.%16)+1]] | join("") else "" end' <<<"$tr" 2>/dev/null)")"
+  fi
+  if [ -z "$(printf '%s' "$t" | tr -d '[:space:]')" ]; then
+    case "$tr" in null|'""'|'{}'|'[]'|'') : ;; *) t="$tr" ;; esac
+  fi
+  printf '%s' "$t"
+}
+
 # ----------------------------------------------------------------------------
 # normalize per vendor + build the ScanPlan (KIND, TEXT, SERVER, TOOL, INTEXT)
 # ----------------------------------------------------------------------------
 KIND=""; TEXT=""; SERVER=""; TOOL=""; INTEXT=""; TOOL_NAME=""; STOP_ACTIVE="false"
-SESSION=""; LABEL=""
+SESSION=""; LABEL=""; GROK_MCP=0; CATEGORY=""; SCAN_ID=""; GROK_CUT=""; GROK_CUT_LEN=0
 
 norm_tool_name() { # cursor: "MCP:server:tool" -> "mcp__server__tool" (colons only)
   local n="$1"
@@ -447,12 +612,25 @@ case "$IEVENT" in
           TOOL_NAME="$(norm_tool_name "$(j '.tool_name // empty')")"; TI="$(jc '.tool_input // {}')"
         fi ;;
       antigravity|gemini) TOOL_NAME="$(j '.tool_name // .toolCall.name // empty')"; TI="$(jc '.tool_input // .toolCall.args // {}')" ;;
+      grok)
+        # camelCase first, snake alias second. An MCP call arrives WRAPPED — unwrap to its arguments.
+        # toolInputTruncated=true: Grok cut the input at its hook payload cap, and the tool still runs with
+        # ALL of it — the head is scanned and the tail is blocked unless AIRS blocks first (grok_cut_block).
+        # Grok documents a cut input as a plain string, but the FLAG decides, whatever the shape: an
+        # object-form (e.g. MCP-wrapped) input flagged as cut is held to the same rule.
+        TOOL_NAME="$(j '.toolName // .tool_name // empty')"; TI="$(jc '.toolInput // .tool_input // {}')"
+        if jq -e "$JQ_GROK_MCP" <<<"$TI" >/dev/null 2>&1; then
+          GROK_MCP=1; [ -z "$TOOL_NAME" ] && TOOL_NAME="$(jq -r '.tool_name' <<<"$TI" 2>/dev/null)"
+          TI="$(jq -c '.tool_input' <<<"$TI" 2>/dev/null)"
+        fi
+        [ "$(j '.toolInputTruncated == true or .tool_input_truncated == true')" = "true" ] && GROK_CUT="truncated" ;;
       *)        TOOL_NAME="$(j '.tool_name // empty')"; TI="$(jc '.tool_input // {}')" ;;
     esac
     [ -z "$TI" ] && TI="{}"
     LABEL="${TOOL_NAME:-tool} input"
     TEXT="$(tool_input_text "$TOOL_NAME" "$TI")"
-    tool_identity "$TOOL_NAME" "$TI" ;;
+    tool_identity "$TOOL_NAME" "$TI"
+    [ "$GROK_MCP" = "1" ] && grok_mcp_identity "$TOOL_NAME" ;;
 
   PostToolUse)
     KIND="toolOutput"
@@ -460,13 +638,26 @@ case "$IEVENT" in
       cline)    TOOL_NAME="$(j '.postToolUse.toolName // empty')"; TI="$(jc '.postToolUse.parameters // {}')"; TR="$(jc '.postToolUse.result // null')" ;;
       cursor)   TOOL_NAME="$(norm_tool_name "$(j '.tool_name // empty')")"; TI="$(jc '.tool_input // {}')"; TR="$(jc '.tool_response // .tool_output // null')" ;;
       antigravity|gemini) TOOL_NAME="$(j '.tool_name // .toolCall.name // empty')"; TI="$(jc '.tool_input // .toolCall.args // {}')"; TR="$(jc '.tool_response // .tool_result // null')" ;;
+      grok)
+        TOOL_NAME="$(j '.toolName // .tool_name // empty')"; TI="$(jc '.toolInput // .tool_input // {}')"; TR="$(jc '.toolResult // .tool_response // null')"
+        if jq -e "$JQ_GROK_MCP" <<<"$TI" >/dev/null 2>&1; then
+          GROK_MCP=1; [ -z "$TOOL_NAME" ] && TOOL_NAME="$(jq -r '.tool_name' <<<"$TI" 2>/dev/null)"
+          TI="$(jq -c '.tool_input' <<<"$TI" 2>/dev/null)"
+        elif jq -e "$JQ_GROK_MCP_CALL" <<<"$TI" >/dev/null 2>&1; then
+          # an MCP call with non-object (or no) args, or one Grok cut to a string: still MCP, so a flagged
+          # output (e.g. a result also cut to a string) is withheld rather than only flagged
+          GROK_MCP=1
+        fi
+        jq -e 'type=="object" and .type=="MCP"' <<<"$TR" >/dev/null 2>&1 && GROK_MCP=1
+        [ "$(j '.toolResultTruncated == true or .tool_result_truncated == true')" = "true" ] && GROK_CUT="truncated" ;;
       *)        TOOL_NAME="$(j '.tool_name // empty')"; TI="$(jc '.tool_input // {}')"; TR="$(jc '.tool_response // .tool_result // null')" ;;
     esac
     [ -z "$TI" ] && TI="{}"; [ -z "$TR" ] && TR="null"
     LABEL="${TOOL_NAME:-tool} output"
-    TEXT="$(tool_output_text "$TR")"
+    if [ "$VENDOR" = "grok" ]; then TEXT="$(grok_output_text "$TR")"; else TEXT="$(tool_output_text "$TR")"; fi
     INTEXT="$(tool_input_text "$TOOL_NAME" "$TI")"
-    tool_identity "$TOOL_NAME" "$TI" ;;
+    tool_identity "$TOOL_NAME" "$TI"
+    [ "$GROK_MCP" = "1" ] && grok_mcp_identity "$TOOL_NAME" "$TR" ;;
 
   Stop)
     LABEL="model answer"; KIND="response"
@@ -474,6 +665,18 @@ case "$IEVENT" in
       cline)    TEXT="$(j '.taskComplete.task // empty')" ;;
       cursor)   TEXT="$(j '.text // .response // .message // .content // .output // empty')" ;;
       antigravity|gemini) TEXT="$(j '.last_assistant_message // .prompt_response // .response // .agent_response // empty')"; STOP_ACTIVE="$(j '.stop_hook_active // false')" ;;
+      grok)
+        # The session-end fire (reason shutdown / channel_closed) has no turn left to judge: skip only
+        # those; any other reason (a new one, or none) is scanned. The final text exists ONLY as camelCase
+        # lastAssistantMessage. No loop guard needed: the grok Stop block is continue:false, which never
+        # re-prompts the model.
+        case "$(j '.reason // empty')" in
+          shutdown|channel_closed) log_line "$LABEL" "skipped (session-end Stop, reason: $(j '.reason'))"; render allow "" ;;
+        esac
+        TEXT="$(j '.lastAssistantMessage // empty')"
+        if [ -z "$(printf '%s' "$TEXT" | tr -d '[:space:]')" ]; then
+          log_line "$LABEL" "nothing to scan"; render allow ""
+        fi ;;
       *)        TEXT="$(j '.last_assistant_message // empty')"; STOP_ACTIVE="$(j '.stop_hook_active // false')" ;;
     esac ;;
 esac
@@ -501,8 +704,14 @@ if [ -n "$CFG_ERR" ]; then
     printf '\n⚠️  Prisma AIRS NOT CONFIGURED — traffic passing UNSCANNED. Set PRISMA_AIRS_API_KEY (+ profile) in %s/hooks/.env, then reload. (AIRS_REQUIRE_CONFIG=1 to block instead.)\n\n' "$CFGDIR" >&2
     render allow ""
   fi
-  if [ "$SIDE" = "input" ]; then
+  if [ "$SIDE" = "input" ] && [ "$VENDOR" = "grok" ]; then
+    # grok reads no .env: its credentials come from the environment Grok is launched from.
+    render block "Prisma AIRS not configured ($CFG_ERR) — set PRISMA_AIRS_API_KEY (+ profile), then reload — blocking (fail-closed)"
+  elif [ "$SIDE" = "input" ]; then
     render block "Prisma AIRS not configured ($CFG_ERR) — set it in $CFGDIR/hooks/.env — blocking (fail-closed)"
+  elif [ "$VENDOR" = "grok" ]; then
+    # Grok discards an allowing hook's output, so a warn would be invisible: render the event's block.
+    render block "Prisma AIRS not configured ($CFG_ERR) — content NOT scanned"
   else
     render warn "Prisma AIRS not configured ($CFG_ERR) — content NOT scanned"
   fi
@@ -510,6 +719,15 @@ fi
 
 # nothing scannable -> allow silently
 if [ -z "$(printf '%s' "$TEXT" | tr -d '[:space:]')" ]; then
+  if [ "$VENDOR" = "grok" ] && [ -n "$GROK_CUT" ]; then
+    # grok: a payload Grok flagged as cut is still cut when its visible head holds nothing to scan —
+    # the tool runs with (or the model reads) the unseen tail — so it is the event's block, as in
+    # grok_cut_block below, never "nothing to scan".
+    log_line "$LABEL" "$GROK_CUT — tail unscanned (empty head)"
+    CATEGORY="$GROK_CUT"; SCAN_ID=""
+    if [ "$SIDE" = "input" ]; then render block "Tool input exceeds Grok's hook payload cap — unscanned tail blocked"
+    else render block "Tool output exceeds Grok's hook payload cap — tail NOT scanned"; fi
+  fi
   dbg "no scannable content for $LABEL — allowing"; render allow ""
 fi
 
@@ -519,10 +737,27 @@ if [ "${#TEXT}" -gt "$MAX_BUDGET" ]; then
   log_line "$LABEL" "content_overflow (${#TEXT} chars > $MAX_BUDGET budget)"
   if [ "$SIDE" = "input" ]; then
     render block "Content exceeds the AIRS scan budget (${#TEXT} chars) — blocking unscanned"
+  elif [ "$VENDOR" = "grok" ]; then
+    # Grok never shows a warn: scan the head for a real verdict, then block the unscanned tail.
+    GROK_CUT="content_overflow"; GROK_CUT_LEN="${#TEXT}"; TEXT="${TEXT:0:$MAX_CHARS}"
   else
     render warn "Content exceeds the AIRS scan budget (${#TEXT} chars) — NOT fully scanned"
   fi
 fi
+
+# grok: content the hook could not see in full — Grok's payload cap (toolInputTruncated /
+# toolResultTruncated) or an output past the scan budget — is the event's block unless AIRS already
+# blocked the part it saw. Called after the scan; no-op when nothing was cut.
+grok_cut_block() {
+  [ -n "$GROK_CUT" ] || return 0
+  log_line "$LABEL" "$GROK_CUT — tail unscanned"
+  # SCAN_ID: the head scan's id for a truncated payload ("none" when that scan failed); an over-budget
+  # output has no single scan id (the node engine scans it in chunks), so "none" there too.
+  CATEGORY="$GROK_CUT"; [ "$GROK_CUT" = "content_overflow" ] && SCAN_ID=""
+  if [ "$GROK_CUT" = "content_overflow" ]; then render block "Content exceeds the AIRS scan budget ($GROK_CUT_LEN chars) — tail NOT scanned"
+  elif [ "$SIDE" = "input" ]; then render block "Tool input exceeds Grok's hook payload cap — unscanned tail blocked"
+  else render block "Tool output exceeds Grok's hook payload cap — tail NOT scanned"; fi
+}
 
 # ----------------------------------------------------------------------------
 # build AIRS request body (content type depends on KIND)
@@ -532,11 +767,13 @@ else AI_PROFILE="$(jq -nc --arg n "$PROFILE_NAME" '{profile_name:$n}')"; fi
 
 # transaction id (per-event) + session id, portable (no macOS `md5`)
 SESSION="$(j '.session_id // .taskId // .trajectory_id // .conversation_id // .conversationId // empty')"
+[ -z "$SESSION" ] && [ "$VENDOR" = "grok" ] && SESSION="$(j '.sessionId // empty')"
 if [ -z "$SESSION" ]; then
   CWD="$(j '.cwd // empty')"; [ -z "$CWD" ] && CWD="$PWD"
   SESSION="$(printf '%s' "$CWD" | { command -v sha256sum >/dev/null 2>&1 && sha256sum || shasum -a 256; } 2>/dev/null | cut -c1-32)"
 fi
 TXN="$(j '.tool_use_id // .prompt_id // .turn_id // empty')"
+[ -z "$TXN" ] && [ "$VENDOR" = "grok" ] && TXN="$(j '.toolUseId // .promptId // empty')"
 if [ -z "$TXN" ]; then
   # per-event id: synthesize a UUID rather than reusing SESSION, so AIRS can distinguish
   # turns even when the client (e.g. Cursor) gives no per-turn id.
@@ -579,16 +816,25 @@ BODY="$(jq -nc \
 SCAN=""; SCAN_ERR=""
 attempt=0
 while [ "$attempt" -le "$RETRIES" ]; do
+  MAXT="$TIMEOUT_S"
+  if [ "$DEADLINE_MS" -gt 0 ]; then
+    # clamp this attempt to what is left of AIRS_DEADLINE_MS; none left = scan error (fail rules apply)
+    REMAIN_MS=$(( DEADLINE_MS - ( $(now_ms 1000) - START_MS ) ))
+    if [ "$REMAIN_MS" -le 0 ]; then SCAN="";
+      SCAN_ERR="deadline exceeded (AIRS_DEADLINE_MS=$DEADLINE_MS)${SCAN_ERR:+ after: $SCAN_ERR}"; break; fi
+    ATT_MS=$(( TIMEOUT_S * 1000 )); [ "$REMAIN_MS" -lt "$ATT_MS" ] && ATT_MS="$REMAIN_MS"
+    MAXT="$(( ATT_MS / 1000 )).$(printf '%03d' $(( ATT_MS % 1000 )))"
+  fi
   # Body on STDIN (--data-binary @-) so a large tool output never hits ARG_MAX; the API key
   # goes via a process-substitution fd (-H @<(...)) so it never appears in the process table
   # (ps) or on disk. curl >= 7.55 (2017) supports -H @file.
-  RESP="$(printf '%s' "$BODY" | curl -s -L --max-time "$TIMEOUT_S" \
+  RESP="$(printf '%s' "$BODY" | curl -s -L --max-time "$MAXT" \
     -H "Content-Type: application/json" -H "Accept: application/json" \
     -H @<(printf 'x-pan-token: %s\n' "$API_KEY") \
     -w $'\n%{http_code}' --data-binary @- "$API_URL" 2>/dev/null)"
   CURL_RC=$?
   HTTP_CODE="${RESP##*$'\n'}"; BODY_TEXT="${RESP%$'\n'*}"
-  if [ "$CURL_RC" -ne 0 ]; then SCAN_ERR="curl failed (rc=$CURL_RC, timeout ${TIMEOUT_S}s)";
+  if [ "$CURL_RC" -ne 0 ]; then SCAN_ERR="curl failed (rc=$CURL_RC, timeout ${MAXT}s)";
   elif [ "${HTTP_CODE:0:1}" != "2" ]; then
     SCAN_ERR="HTTP $HTTP_CODE: $(printf '%s' "$BODY_TEXT" | head -c 200)"
     # 4xx (except 429) won't change on retry — don't waste a round-trip on a bad key/profile.
@@ -603,7 +849,13 @@ done
 if [ -n "$SCAN_ERR" ] || [ -z "$SCAN" ]; then
   [ -z "$SCAN_ERR" ] && SCAN_ERR="empty response"
   log_line "$LABEL" "error($SCAN_ERR)"
-  if [ "$IEVENT" = "Stop" ]; then
+  grok_cut_block
+  if [ "$VENDOR" = "grok" ] && [ "$FAIL_MODE" = "closed" ]; then
+    # Grok discards an allowing hook's output (a warn is invisible), so a scan error renders as that
+    # event's block: deny on input, advisory block (+ MCP output withheld) / turn halt on output.
+    if [ "$SIDE" = "input" ]; then render block "Prisma AIRS scan failed ($SCAN_ERR) — blocking (fail-closed)"
+    else render block "Prisma AIRS scan failed ($SCAN_ERR) — content NOT scanned"; fi
+  elif [ "$IEVENT" = "Stop" ]; then
     render warn "AIRS scan error at Stop ($SCAN_ERR) — allowing"
   elif [ "$FAIL_MODE" = "closed" ] && [ "$SIDE" = "input" ]; then
     render block "Prisma AIRS scan failed ($SCAN_ERR) — blocking (fail-closed)"
@@ -631,13 +883,18 @@ if [ "$ACTION" = "block" ]; then
 elif [ "$ACTION" = "allow" ]; then
   TAG="allow"; [ -n "$DETS" ] && TAG="allow [$DETS]"; TAG="$TAG [scan:$SCAN_ID]"
   log_line "$LABEL" "$TAG"
+  grok_cut_block
   render allow ""
 else
   # Unrecognized action (partial response / API contract drift) is NOT clean -> fail-mode
   # instead of silently allowing.
   log_line "$LABEL" "unexpected action '$ACTION' — fail-mode ($FAIL_MODE)"
+  # grok: no usable verdict, so an MCP placeholder reads "not scanned" / "none" (as in the node engine).
+  [ "$VENDOR" = "grok" ] && { CATEGORY=""; SCAN_ID=""; grok_cut_block; }
   if [ "$FAIL_MODE" = "closed" ] && [ "$SIDE" = "input" ]; then
     render block "Prisma AIRS returned an unexpected action ('$ACTION') — blocking (fail-closed)"
+  elif [ "$FAIL_MODE" = "closed" ] && [ "$VENDOR" = "grok" ]; then
+    render block "Prisma AIRS returned an unexpected action ('$ACTION') — content NOT scanned"
   else
     render warn "Prisma AIRS returned an unexpected action ('$ACTION') — allowing (fail-open)"
   fi
