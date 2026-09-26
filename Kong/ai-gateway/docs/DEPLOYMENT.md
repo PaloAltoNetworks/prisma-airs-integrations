@@ -4,14 +4,17 @@ Prisma AIRS enforcement on Kong AI Gateway 2.x, deployed as configuration: no cu
 rebuilt image. `kongctl` is the primary path; the same work in the Konnect console is section 5.
 
 Claims are tagged **DOCUMENTED** (from Kong or Palo Alto Networks documentation), **MEASURED**
-(established first-hand; unless stated otherwise the date is 2026-09-12 and the runtime is
-AI Gateway 2.0.3), or **UNVERIFIED** (believed, not tested — do not build a control on it). No
+(established on a live gateway; unless stated otherwise the date is 2026-09-12, the runtime is
+AI Gateway 2.0.3 and the measurement is first-hand — results dated **2026-09-14** were established
+by the prior-art project on its own AI Gateway 2.0.3 / Kong Gateway 3.14.0.3 data plane and are
+attributed in [docs/CREDITS.md](CREDITS.md), not repeated here), or **UNVERIFIED** (believed, not
+tested — do not build a control on it). No
 tenant value appears below: replace `<AI_GATEWAY_ID>`, `<REGION>`, `my-profile`, `my-model` and
 `my-mcp` with your own.
 
 **Read [section 7, Limitations](#7-limitations), before you deploy.** There are two measured
-coverage gaps, one structural MCP limit and one defect; a reader who skips them will believe this
-covers traffic it does not.
+coverage gaps and one structural MCP limit; a reader who skips them will believe this covers
+traffic it does not.
 
 ---
 
@@ -203,7 +206,7 @@ ai_gateway_models:
       - {name: my-model-target, provider: my-provider, config: {type: openai,
           upstream_url: http://upstream.internal:9100/v1/chat/completions}}
     config:
-      response_streaming: deny        # closes Gap 1 -- section 7
+      response_streaming: deny        # strict mode for Gap 1 -- section 7
       route: {paths: [/v1]}           # BASE path; Kong appends /chat/completions
 
 ai_gateway_mcp_servers:
@@ -233,14 +236,14 @@ control plane and a self-managed data plane.
 
 ### Do not build the two policies here
 
-The guardrail carries four Lua functions. They live in `lua/guardrail/` as real files,
+The guardrail carries five Lua functions. They live in `lua/guardrail/` as real files,
 `spec/verdict_spec.lua` exercises them offline, and `scripts/build-config.py` inlines
 them into the policy YAML under `dist/`. Paste those function bodies into a console form and that
 chain is broken: the Lua becomes a string in a SaaS form field — not linted, not unit tested, not
 reviewed line by line, not reproducible. `airs_verdict.lua` is the only code here that decides
 whether traffic continues, and it should not be maintained by copy and paste. The same holds for the
 MCP callout's three `by_lua` hooks, covered by `spec/mcp_callout_spec.lua`. The two spec files are
-106 assertions in total — 40 in `verdict_spec.lua`, 66 in `mcp_callout_spec.lua`.
+201 assertions in total — 114 in `verdict_spec.lua`, 87 in `mcp_callout_spec.lua`.
 
 | Task | Console | `kongctl` |
 | --- | --- | --- |
@@ -329,10 +332,12 @@ Create a model of type **Model** (declaratively `type: model`; the alternative i
 - **Format** `openai` is what makes the appended `/chat/completions` suffix correct;
   **capabilities** `generate` is what a chat-completions model needs. Other values are UNVERIFIED.
 - **`response_streaming` lives here, on the model.** MEASURED: it is `config.response_streaming` on
-  the AI Model, **not a field on any policy**, and it is what closes Gap 1 (section 7). Set it to
-  `deny` on every model carrying this guardrail. If some models genuinely must stream, give those an
-  INPUT-only policy and state plainly that their coverage is prompt-only; do not attach the BOTH
-  policy and assume the response is inspected.
+  the AI Model, **not a field on any policy**, and it is the strict-mode choice for Gap 1's partial
+  streamed coverage (section 7). Set it to `deny` on every model carrying this guardrail for full
+  response coverage. If some models genuinely must stream and need that guarantee, give those an
+  INPUT-only policy and state plainly that their coverage is prompt-only; leaving `allow` and
+  attaching the BOTH policy is a legitimate choice too, but it buys partial, best-effort coverage
+  on the response leg, not none — see Gap 1.
 
 ### The AIRS key — Vaults tab
 
@@ -423,9 +428,26 @@ it; that belongs in your client integration notes.
 MEASURED: the `scan_id` in the client's error matches the `scan_id` in Strata Cloud Manager exactly,
 so an operator can go from a user complaint to the detection record. MEASURED: with
 `guarding_mode: BOTH` both legs genuinely run — two separate SCM transactions, one showing Prompt
-and one Response. MEASURED: SCM shows `model_name: None` and `user_id: None` on every scan, because
-a guardrail function cannot reach the model name or the calling consumer; do not plan correlation
-work on either field.
+and one Response. MEASURED 2026-09-14 (prior art, `docs/CREDITS.md`): `model_name`, `user_id` and `user_ip` now carry
+real values, and one buffered exchange reaches SCM as one transaction with two scans — the prompt
+and the response it produced. An earlier revision of this guide said those fields were always
+`None` and that correlation was unavailable; that was true of the configuration it described, not
+of the platform. Two caveats to plan around. `user_ip` is the immediate peer's address unless that
+peer is in the data plane's `trusted_ips`, so behind a load balancer it is the load balancer. And a
+**streamed** response leg has no request context, so its scans carry no identifiers at all and AIRS
+generates its own — the prompt scans of a streamed conversation group, the response scans do not.
+
+To group several exchanges into one conversation, have the client send a conversation identifier
+and name that header in the policy:
+
+```yaml
+params:
+  session_header: "x-airs-session-id"   # your application's conversation id
+  user_header: "x-airs-user"            # only used when no consumer is authenticated
+```
+
+Both are caller-supplied labels for the scan log, never authentication. The per-round identifier is
+Kong's own request id and needs no configuration.
 
 ### MCP path
 
@@ -473,36 +495,79 @@ never called, and the test appears to pass while proving nothing. The lab fixtur
 
 ## 7. Limitations
 
-Read this before you tell anyone the gateway is protected. Two measured coverage gaps — streamed
-responses are not scanned, and LLM tool-call arguments are not scanned — one structural MCP limit,
-the unreachable response leg, and one defect.
+Read this before you tell anyone the gateway is protected. Two measured coverage gaps — partial
+streamed-response scanning, and a tool call invisible on the leg that emits it — and one structural
+MCP limit, the unreachable response leg.
 
-### Gap 1 — streaming bypass (MEASURED)
+### Gap 1 — streaming leaves gaps in response scanning (MEASURED 2026-09-14 by the prior art, corrected)
 
-With `response_streaming: allow` on the AI Model, an identical payload is blocked when buffered and
-delivered when streamed:
+Except where a line names 2026-09-12, every measurement in this section is the prior-art project's,
+made on 2026-09-14 on its own AI Gateway 2.0.3 / Kong Gateway 3.14.0.3 data plane
+([docs/CREDITS.md](CREDITS.md)), not on the 2026-09-12 gateway the rest of this guide reports on.
 
-| Request | Result |
+An earlier revision of this guide said a streamed reply bypasses the response leg entirely.
+INFERRED, not re-measured here: that was an artefact of `response_buffer_size: 65536` in the shipped
+config, a value large enough to keep a typical stream below the threshold at which the OUTPUT phase
+ever fires. The zero-calls-at-a-large-buffer result below was measured on the prior art's gateway;
+that it also explains the earlier reading here is the inference — see the comment on that field in
+`config/llm/airs-guardrail.yaml`.
+
+MEASURED (2026-09-14, AI Gateway 2.0.3, prior art), against a guardrail service that counted every
+call it received: the OUTPUT phase **does** run on a stream, once per `response_buffer_size` segment
+(schema default 100 bytes). A 309-character streamed answer produced 3 OUTPUT calls of
+101/104/103 characters; at buffer 2048, zero calls — the same mechanism the shipped 65536 is
+inferred to have hit. Non-streamed replies are always ONE call carrying the whole body, whatever the
+buffer.
+
+So response scanning on a stream is real, but partial and best-effort — every row below is from that
+same 2026-09-14 prior-art run:
+
+| Effect | What was measured |
 | --- | --- |
-| payload in message content, buffered | HTTP 400, blocked on the response leg |
-| payload in message content, streamed | HTTP 200, content delivered |
+| A floor | Roughly 100 bytes must accumulate before the OUTPUT phase runs at all; buffers of 100, 20 and 1 all left a 32-character answer completely unscanned. Most streamed chat answers are short. |
+| A tail | Content still below the threshold when the stream ends is never scanned: a 419-character stream was scanned as 408 characters, the last 11 (carrying the flagged word) never sent, `finish_reason: stop`. |
+| A delay | A block always lands after the flagged segment already reached the client (HTTP 200 already sent) — leak before a cut is roughly output rate x AIRS scan latency. |
+| Driver-dependent termination | On the `openai` driver, a final chunk carries `finish_reason: "blocked_by_guard"` then `data: [DONE]`; on `ollama`, the stream is simply cut with no terminal chunk. Measured on a `type: openai` provider pointed at a local model, not against a real OpenAI endpoint, so it is the driver that is pinned, not the vendor. |
 
-There is no error and no warning: any caller can opt itself out of response scanning by setting one
-flag in its own request body. The remedy is `response_streaming: deny` on the AI Model. MEASURED
-(2026-09-12): with `deny`, a `stream: true` request is refused at the gateway with HTTP 400 and the
-body `{"error":{"message":"response streaming is not enabled for this LLM"}}` before any scan runs,
-while buffered traffic is unaffected. Frame this honestly: the bypass is closed by **refusing**
-streaming, not by scanning streams. Streaming and response-leg scanning cannot both be had on this
-policy today. Found first by the prior art — see [docs/CREDITS.md](CREDITS.md).
+Two postures, not one fix. **Simple** (leave `response_streaming: allow`, the schema default):
+partial, best-effort response coverage as above, streaming preserved. **Strict**
+(`response_streaming: deny` on the AI Model): MEASURED (2026-09-12), a `stream: true` request is
+refused at the gateway with HTTP 400 and the body
+`{"error":{"message":"response streaming is not enabled for this LLM"}}` before any scan runs,
+while buffered traffic is unaffected — full coverage, no streaming. Frame this honestly: strict
+mode buys full coverage by **refusing** streaming, not by scanning it faster; simple mode is not
+"unscanned", it is "scanned with a floor, a tail and a delay". Never set
+`response_buffer_size` to a large value "to scan a whole streamed answer at once" — MEASURED, it
+scans nothing. The original finding that a streamed response needs a remedy at all was the prior
+art's, found first — see [docs/CREDITS.md](CREDITS.md).
 
-### Gap 2 — tool calls are invisible on the LLM path (MEASURED)
+### Gap 2 — a tool call is invisible on the leg that emits it (MEASURED, narrowed)
 
 A buffered reply with `content: null` and the payload only inside `tool_calls[].function.arguments`
 is **allowed**. Kong's text extraction does not include tool-call arguments under any value of
 `text_source`, so AIRS never sees them. The same applies to `tools[].function.description`: tool
-definitions are not message content and never reach the scanner. This is **not fixable in
-configuration** — the Kong 3.x custom plugin can read `tool_calls` directly, this config-only policy
-cannot.
+definitions are not message content and never reach the scanner.
+
+**Narrowed on the request leg** (MEASURED 2026-09-14, prior art — [docs/CREDITS.md](CREDITS.md)). A
+guardrail function reads the raw request body, which carries `tools[]` and the tool calls a client
+replays as conversation history — neither of them in `$(content)`. Two opt-ins, both off by
+default, put that text inside the scanned prompt:
+
+```yaml
+params:
+  tool_scan: "calls"       # tool_calls[].function.name and .arguments from assistant turns
+  # tool_scan: "catalogue" # the above, plus the whole tools[] declaration
+```
+
+MEASURED with `guarding_mode: INPUT` to isolate the prompt leg, on a conversation whose injection
+sits only in a tool call's arguments: off, allowed 5 times out of 5; `"calls"`, refused 5 out of 5.
+Try either against your own profile before enforcing — a JSON parameter schema reads as source code
+to a profile with that detector enabled.
+
+**What is still open.** The request body is what a guardrail function can read on *both* legs, so
+the response leg — where the model first emits a tool call, before any client has replayed it —
+still cannot see it. That case is **not fixable in configuration**: the Kong 3.x custom plugin can
+read `tool_calls` from the response directly, this config-only policy cannot.
 
 ### Gap 3 — the MCP response leg is unreachable (MEASURED)
 
@@ -529,20 +594,30 @@ limitation is Kong's: `request-callout` cannot see the response leg to feed them
 MCP client that receives a bare 403 sees a dead transport, while a JSON-RPC error carrying its own
 id is a tool failure the session survives.
 
-### Defect — block reason metrics are dropped (MEASURED)
+### Block reason metrics — fixed (MEASURED 2026-09-14 by the prior art, was a defect)
 
-`metrics.block_reason` and `metrics.block_detail` wired to a string expression produce, on every
-block:
+An earlier revision of this guide flagged `metrics.block_reason` and `metrics.block_detail` as an
+unresolved defect. MEASURED 2026-09-14 by the prior-art project ([docs/CREDITS.md](CREDITS.md)), not
+re-run here: with `block_detail` wired to a **string** expression, every request — allowed or
+blocked — logged
 
 ```
 [ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table
 ```
 
-and the metric is **dropped**. Blocking itself is unaffected; the operator-facing reason does not
-reach Kong telemetry. Kong's own policy reference documents these fields as `type: string`, which
-contradicts the runtime, and the shape the runtime wants is not documented. Unresolved: do not build
-a dashboard or an alert on these metrics. Strata Cloud Manager, correlated by `scan_id`, remains the
-complete record.
+and that metric was dropped. Kong's policy reference types this field as `type: string`, which is
+the type of the config value — the expression template — and says nothing about what the template
+must render to; the runtime type-checks the **rendered** value and wants a Lua **table**. An
+undocumented rendering requirement rather than a contradiction. Fixed:
+`lua/guardrail/airs_verdict.lua`'s `detail` is now `{ reason, category, detections }` on every
+path, including allow (an empty table `{}`). The warning is gone and the metric is exported — a
+`file-log` policy on the same model shows `ai.proxy.custom-guardrail.input_block_detail`
+populated. `metrics.block_reason` as a string logs no warning, and it is exported once
+`block_detail` renders a table; whether it was exported while `block_detail` was still a string was
+not measured. It stays a string, wired to the fixed, generic `block_message`. The client-facing contract is unchanged: neither field ever reaches the
+caller, only Kong's own telemetry and the SCM scan log (correlated by `scan_id`), which remains
+the fuller record — the scanned text and the full threat detail live there and nowhere else on
+the LLM path.
 
 ---
 
@@ -563,5 +638,5 @@ complete record.
 | Piping `kongctl plan` into `jq` fails to parse. | MEASURED: with deferred `!env` values present, plan prints a warning line **before** the JSON. | Strip the leading non-JSON line, or read the plan by eye. |
 | AIRS answers `415` to the scan POST. | The request carries no content type. | `Content-Type: application/json` on the callout. Both shipped configs already set it; check any variant you wrote yourself. |
 | Build fails saying a placeholder is needed and the variable is not set. | `scripts/build-config.py` resolves `!env` values for anything it bakes into Lua, because `!env` is resolved by kongctl at apply time — too late for inlined code. | `export PRISMA_AIRS_PROFILE_NAME=my-profile` and `export AIRS_MCP_SERVER_NAME=my-mcp` before building. |
-| Every block logs `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table`. | Known defect, unresolved. See [Defect](#defect--block-reason-metrics-are-dropped-measured). | Blocking is unaffected. Use SCM, correlated by `scan_id`, as the record of why. |
+| Every request logs `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table`. | `block_detail` is wired to a string instead of a table. Fixed in the shipped Lua — see [Block reason metrics](#block-reason-metrics--fixed-measured-2026-09-14-by-the-prior-art-was-a-defect). | Rebuild from the current `lua/guardrail/airs_verdict.lua`; if you hand-wrote your own verdict function, return a table. |
 
