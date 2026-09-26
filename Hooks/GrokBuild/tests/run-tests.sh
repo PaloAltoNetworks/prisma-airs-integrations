@@ -111,7 +111,10 @@ if command -v node >/dev/null; then
   done
 fi
 
-echo "== GrokBuild [$MODE] runtimes: ${RUNTIMES[*]:-none} =="
+echo "== GrokBuild [$MODE] runtimes: ${RUNTIMES[*]:-none} | $(jq --version 2>/dev/null || echo 'jq missing') =="
+# The bash engine's behaviour depends on the jq it finds: jq 1.7.x (Ubuntu 24.04's default) refuses to parse
+# past 256 levels (only 128 nested objects), jq 1.8.x allows ~10000. Run stub mode under BOTH (put the other
+# jq first on PATH) — posttool-mcp-deep.json is past 1.7's limit, so it takes the unparseable path there.
 if [ ${#MISSING[@]} -gt 0 ]; then
   echo "   MISSING RUNTIME(S): ${MISSING[*]}"
   if [ "${ALLOW_MISSING_RUNTIMES:-0}" != "1" ]; then
@@ -166,6 +169,28 @@ case "$MODE" in
     assert_all "stub pre-tool truncated input (clean head) -> BLOCK" "$HERE/fixtures/pretool-truncated.json" "$PRE_EV" BLOCK
     assert_all "stub post-tool truncated MCP result (clean head) -> not allowed" "$HERE/fixtures/posttool-truncated.json" "PostToolUse" NOT_ALLOW
     assert_stdout "stub post-tool truncated MCP result is REPLACED" "$HERE/fixtures/posttool-truncated.json" "PostToolUse" has 'updatedMCPToolOutput'
+    # The truncation FLAG decides, whatever the payload's shape: an object-form (MCP-wrapped) input flagged
+    # as cut, and a cut payload whose visible head is empty, are never read as clean / nothing-to-scan.
+    assert_all "stub pre-tool truncated MCP input in OBJECT form (clean head) -> BLOCK" "$HERE/fixtures/pretool-mcp-truncated-object.json" "$PRE_EV" BLOCK
+    assert_all "stub pre-tool truncated input with an EMPTY head -> BLOCK" "$HERE/fixtures/pretool-truncated-empty-head.json" "$PRE_EV" BLOCK
+    assert_all "stub post-tool truncated MCP result with an EMPTY head -> not allowed" "$HERE/fixtures/posttool-truncated-empty-head.json" "PostToolUse" NOT_ALLOW
+    assert_stdout "stub post-tool truncated MCP result with an EMPTY head is REPLACED" "$HERE/fixtures/posttool-truncated-empty-head.json" "PostToolUse" has 'updatedMCPToolOutput'
+    assert_all "stub pre-tool truncated input, flag only in snake_case -> BLOCK" "$HERE/fixtures/pretool-truncated-snake-flag.json" "$PRE_EV" BLOCK
+    # A result cut to a string keeps its MCP identity through the call: a call Grok also cut to a string,
+    # or one with no args, is still MCP, so the output is withheld rather than merely flagged.
+    assert_stdout "stub post-tool cut MCP result + cut call is REPLACED" "$HERE/fixtures/posttool-mcp-cut-result-cut-call.json" "PostToolUse" has 'updatedMCPToolOutput'
+    assert_stdout "stub post-tool cut MCP result + no-args call is REPLACED" "$HERE/fixtures/posttool-mcp-cut-result-null-args.json" "PostToolUse" has 'updatedMCPToolOutput'
+    # An MCP output the engine cannot PARSE (here: cut mid-document or garbled; in the field: nested past
+    # jq 1.7's parse limit of 128 objects, or ConvertFrom-Json's depth limit) must still be WITHHELD, not
+    # merely flagged next to the raw content — whichever envelope marker survives. Every engine's
+    # unparseable-input path, on any jq; garbled = jq cannot even stream it (bash's raw-text fallback).
+    for fx in posttool-mcp-unparseable-result posttool-mcp-unparseable-call posttool-mcp-garbled; do
+      assert_all "stub post-tool UNPARSEABLE MCP ($fx) -> not allowed" "$HERE/fixtures/$fx.json" "PostToolUse" NOT_ALLOW
+      assert_stdout "stub post-tool UNPARSEABLE MCP ($fx) is REPLACED" "$HERE/fixtures/$fx.json" "PostToolUse" has 'updatedMCPToolOutput'
+    done
+    # ...but an unparseable BUILT-IN output is only flagged: no MCP replacement for a non-MCP tool.
+    assert_all "stub post-tool UNPARSEABLE built-in output -> not allowed" "$HERE/fixtures/posttool-builtin-unparseable.json" "PostToolUse" NOT_ALLOW
+    assert_stdout "stub post-tool UNPARSEABLE built-in output is NOT given an MCP replacement" "$HERE/fixtures/posttool-builtin-unparseable.json" "PostToolUse" lacks 'updatedMCPToolOutput'
     OVER="${TMPDIR:-/tmp}/grok-posttool-mcp-overflow-$$.json"
     node -e 'const fs=require("fs"),o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));for(const k of ["toolResult","tool_response"])o[k].output.OkayOutput="x".repeat(125000);fs.writeFileSync(process.argv[2],JSON.stringify(o))' "$HERE/fixtures/posttool-mcp-injection.json" "$OVER"
     assert_all "stub post-tool MCP output past the scan budget -> not allowed" "$OVER" "PostToolUse" NOT_ALLOW

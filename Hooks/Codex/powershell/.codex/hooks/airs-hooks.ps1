@@ -246,8 +246,12 @@ trap {
   # Fail-closed on the input side unless fail-open was explicitly requested — default to block
   # even when $FailMode was never assigned (an error before config parsing).
   if ($Side -eq 'input' -and $FailMode -ne 'open') { Render 'block' "Prisma AIRS internal error - blocking (fail-closed)" }
-  # grok never shows a warn: an output-side internal error renders as that event's block too.
-  if ($Vendor -eq 'grok' -and $FailMode -ne 'open') { Render 'block' "Prisma AIRS internal error - content NOT scanned" }
+  # grok never shows a warn: an output-side internal error renders as that event's block too, and an MCP
+  # output is withheld (MCP identity is set before the text walk; the raw-text rule covers anything earlier).
+  if ($Vendor -eq 'grok' -and $FailMode -ne 'open') {
+    if ($IEvent -eq 'PostToolUse' -and $Raw -cmatch '"(toolResult|tool_response)"\s*:\s*\{\s*"type"\s*:\s*"MCP"|"(toolInput|tool_input)"\s*:\s*\{\s*"tool_name"\s*:\s*"') { $script:GrokMcp = $true }
+    Render 'block' "Prisma AIRS internal error - content NOT scanned"
+  }
   Render 'allow' ''
 }
 
@@ -268,8 +272,17 @@ if ($Raw.Trim().Length -gt 0 -and ($Raw.Trim()[0] -eq '[' -or -not ($In -is [Sys
   Log 'input' "unscannable (hook input is not a JSON object)"
   if (-not $IEvent) { [Console]::Error.Write("`n[BLOCKED] Prisma AIRS could not scan (hook input is not a JSON object) - fail-closed`n`n"); exit 2 }
   if ($Side -eq 'input') { Render 'block' "Prisma AIRS could not scan (hook input is not a JSON object) - blocking (fail-closed)" }
-  # grok never shows a warn (it drops an allowing hook's stderr): render the event's block.
-  elseif ($Vendor -eq 'grok' -and $FailMode -eq 'closed') { Render 'block' "Prisma AIRS could not scan (hook input is not a JSON object) - content NOT scanned" }
+  # grok never shows a warn (it drops an allowing hook's stderr): render the event's block, and WITHHOLD an
+  # output whose payload still says its tool was MCP. ConvertFrom-Json rejects input nested past its depth
+  # limit (Windows PowerShell 5.1 has no -Depth switch at all; pwsh 7 defaults to 1024), so a deep MCP
+  # result lands here unparsed. Same raw-text rule as the bash (grok_mcp_markers) and node engines; Grok's
+  # serializer puts "type" first in a result and "tool_name" first in an MCP call. A false positive only
+  # withholds more.
+  elseif ($Vendor -eq 'grok' -and $FailMode -eq 'closed') {
+    # (only when ConvertFrom-Json failed: a parsed top-level array/primitive is not a Grok payload, as in bash/node)
+    if ($IEvent -eq 'PostToolUse' -and $null -eq $In -and $Raw -cmatch '"(toolResult|tool_response)"\s*:\s*\{\s*"type"\s*:\s*"MCP"|"(toolInput|tool_input)"\s*:\s*\{\s*"tool_name"\s*:\s*"') { $script:GrokMcp = $true }
+    Render 'block' "Prisma AIRS could not scan (hook input is not a JSON object) - content NOT scanned"
+  }
   else { Render 'warn' "Prisma AIRS could not scan (hook input is not a JSON object) - content NOT scanned" }
 }
 
@@ -358,6 +371,17 @@ function NormToolName([string]$n) { if ($n -like 'MCP:*') { 'mcp__' + (($n.Subst
 function GrokIsMcpWrapper($ti) {
   if (-not ($ti -is [System.Management.Automation.PSCustomObject])) { return $false }
   (Field $ti 'tool_name') -is [string] -and (Field $ti 'tool_input') -is [System.Management.Automation.PSCustomObject]
+}
+# A PostToolUse toolInput that names an MCP call: the wrapper with ANY args (Grok may send none), or the
+# wrapper cut to a string by Grok's payload cap. (Pre-tool unwrapping still needs object args: GrokIsMcpWrapper.)
+function GrokIsMcpCallShape($ti) {
+  if ($ti -is [string]) { return $ti.StartsWith('{"tool_name":"', [System.StringComparison]::Ordinal) }
+  ($ti -is [System.Management.Automation.PSCustomObject]) -and (Field $ti 'tool_name') -is [string] -and $null -ne $ti.PSObject.Properties['tool_input']
+}
+# A Grok boolean flag: camelCase or the snake alias, like every other grok field.
+function GrokFlag([string]$camel, [string]$snake) {
+  foreach ($n in @($camel, $snake)) { $v = Field $In $n; if ($v -is [bool] -and $v) { return $true } }
+  $false
 }
 # MCP names are "<server>__<tool>" (no mcp__ prefix): split on the FIRST "__". A name without one falls
 # back to the MCP result's own server_name / tool_name (same rule as the node/bash engines).
@@ -457,13 +481,14 @@ switch ($IEvent) {
       $Text = ToolInputText "mcp__$mn" (Field $ti 'tool_input')
       GrokMcpIdentity $mn $null
     } else {
-      # built-in (or toolInputTruncated: a plain string - its head is scanned, and the tail the tool
-      # still runs with is blocked unless AIRS blocks first; see GrokCutBlock)
       $Text = ToolInputText $ToolName $ti
       ToolIdentity $ToolName $ti
-      $tt = Field $In 'toolInputTruncated'
-      if ($Vendor -eq 'grok' -and $tt -is [bool] -and $tt) { $script:GrokCut = 'truncated' }
     }
+    # toolInputTruncated: Grok cut the input at its hook payload cap, and the tool still runs with ALL of
+    # it - the head is scanned and the tail is blocked unless AIRS blocks first (GrokCutBlock). Grok
+    # documents a cut input as a plain string, but the FLAG decides, whatever the shape: an object-form
+    # (e.g. MCP-wrapped) input flagged as cut is held to the same rule.
+    if ($Vendor -eq 'grok' -and (GrokFlag 'toolInputTruncated' 'tool_input_truncated')) { $script:GrokCut = 'truncated' }
   }
   'PostToolUse' {
     $Kind='toolOutput'; $ti=$null; $tr=$null
@@ -476,9 +501,12 @@ switch ($IEvent) {
     }
     $Label="$(if ($ToolName) { $ToolName } else { 'tool' }) output"
     if ($Vendor -eq 'grok') {
+      # MCP identity BEFORE the text walk, so an internal error in it still withholds an MCP output (trap).
+      # A call with non-object (or no) args, or one Grok cut to a string, is still MCP (GrokIsMcpCallShape).
+      $isMcp = (GrokIsMcpWrapper $ti) -or (GrokIsMcpCallShape $ti) -or ($tr -is [System.Management.Automation.PSCustomObject] -and [string](Field $tr 'type') -ceq 'MCP')
+      if ($isMcp) { $script:GrokMcp = $true }
       $Text = GrokResultText $tr
-      if ((GrokIsMcpWrapper $ti) -or ($tr -is [System.Management.Automation.PSCustomObject] -and [string](Field $tr 'type') -ceq 'MCP')) {
-        $script:GrokMcp = $true
+      if ($isMcp) {
         $mn = if ($ToolName) { $ToolName } elseif (GrokIsMcpWrapper $ti) { [string](Field $ti 'tool_name') } else { '' }
         $ta = if (GrokIsMcpWrapper $ti) { Field $ti 'tool_input' } else { $ti }
         $InText = ToolInputText "mcp__$mn" $ta
@@ -487,7 +515,7 @@ switch ($IEvent) {
         $InText = ToolInputText $ToolName $ti
         ToolIdentity $ToolName $ti
       }
-      $tt = Field $In 'toolResultTruncated'; if ($tt -is [bool] -and $tt) { $script:GrokCut = 'truncated' }
+      if (GrokFlag 'toolResultTruncated' 'tool_result_truncated') { $script:GrokCut = 'truncated' }
     } else {
       $Text = (Get-AllStrings $tr) -join "`n"
       $InText = ToolInputText $ToolName $ti
@@ -550,7 +578,18 @@ if ($script:OverDepth) {
   elseif ($Vendor -eq 'grok' -and $FailMode -eq 'closed') { Render 'block' "Content nesting exceeds the AIRS scan depth - content NOT scanned" }
   else { Render 'warn' "Content nesting exceeds the AIRS scan depth - NOT fully scanned" }
 }
-if ([string]::IsNullOrWhiteSpace($Text)) { Dbg "no scannable content for $Label - allowing"; Render 'allow' '' }
+if ([string]::IsNullOrWhiteSpace($Text)) {
+  # grok: a payload Grok flagged as cut is still cut when its visible head holds nothing to scan - the
+  # tool runs with (or the model reads) the unseen tail - so it is the event's block (as GrokCutBlock
+  # below, which is not defined yet at this point), never "nothing to scan".
+  if ($Vendor -eq 'grok' -and $script:GrokCut) {
+    Log $Label "$($script:GrokCut) - tail unscanned (empty head)"
+    $script:Category = $script:GrokCut; $script:ScanId = ''
+    if ($Side -eq 'input') { Render 'block' "Tool input exceeds Grok's hook payload cap - unscanned tail blocked" }
+    Render 'block' "Tool output exceeds Grok's hook payload cap - tail NOT scanned"
+  }
+  Dbg "no scannable content for $Label - allowing"; Render 'allow' ''
+}
 
 # oversized content -> PowerShell can't chunk, so the tail is UNSCANNABLE. Block on input
 # (regardless of fail-mode), warn on output. Never silently allowed.

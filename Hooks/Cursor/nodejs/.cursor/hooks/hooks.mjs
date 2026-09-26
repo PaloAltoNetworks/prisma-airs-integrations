@@ -472,6 +472,15 @@ function grokMcpIdentity(name, result) {
   const r = isPlain(result) ? result : {};
   return { server: str2(r.server_name) || "unknown", tool: str2(r.tool_name) || name || "unknown" };
 }
+// An UNPARSEABLE payload that still carries Grok's MCP markers (a result tagged "type":"MCP" — Grok's
+// serializer puts the tag first — or an MCP call wrapped as {"tool_name": ...}): its output must be
+// withheld rather than merely flagged. Shared rule with the bash (grok_mcp_markers) and pwsh engines.
+var GROK_MCP_RAW_RE = /"(toolResult|tool_response)"\s*:\s*\{\s*"type"\s*:\s*"MCP"|"(toolInput|tool_input)"\s*:\s*\{\s*"tool_name"\s*:\s*"/;
+// A PostToolUse toolInput that names an MCP call: the wrapper with ANY args (Grok may send none), or the
+// wrapper cut to a string by Grok's payload cap. (Pre-tool unwrapping still needs object args: grokMcpCall.)
+function grokMcpCallShape(ti) {
+  return isPlain(ti) && typeof ti.tool_name === "string" && "tool_input" in ti || typeof ti === "string" && ti.startsWith('{"tool_name":"');
+}
 function grokMcpCall(name, ti) {
   if (!isPlain(ti) || typeof ti.tool_name !== "string" || !isPlain(ti.tool_input)) return null;
   return { name: name || ti.tool_name, args: ti.tool_input };
@@ -479,22 +488,28 @@ function grokMcpCall(name, ti) {
 function grokPreToolContent(input) {
   const call = grokMcpCall(str2(input.tool_name), input.tool_input);
   // toolInputTruncated: Grok cut the input at its hook payload cap; the tool still runs with ALL of it.
-  const plan = call ? null : preToolContent(input);
-  if (plan && input.tool_input_truncated === true) plan.truncated = true;
-  if (!call) return plan;
+  // Grok documents a cut input as a plain string, but the FLAG decides, whatever the shape: an object-form
+  // (e.g. MCP-wrapped) input flagged as cut is held to the same rule, and so is a cut input whose visible
+  // head holds nothing to scan (handle() blocks that instead of reading it as "nothing to scan").
+  const truncated = input.tool_input_truncated === true || void 0;
+  if (!call) {
+    const plan = preToolContent(input);
+    if (plan && truncated) plan.truncated = true;
+    return plan ?? (truncated ? { kind: "toolInput", text: "", truncated } : null);
+  }
   const text = safeJson(call.args);
   const id = grokMcpIdentity(call.name, null);
-  return text.trim().length > 0 ? { kind: "toolInput", server: id.server, tool: id.tool, text, mcp: true } : null;
+  return text.trim().length > 0 || truncated ? { kind: "toolInput", server: id.server, tool: id.tool, text, mcp: true, truncated } : null;
 }
 function grokPostToolContent(input, maxInputChars) {
   const toolName = str2(input.tool_name);
   const result = input.tool_response;
   const text = grokResultText(result);
-  if (text.trim().length === 0) return null;
-  // toolResultTruncated: the model reads the whole output, the hook only got its head.
+  // toolResultTruncated: the model reads the whole output, the hook only got its head (which may be empty).
   const truncated = input.tool_result_truncated === true || void 0;
+  if (text.trim().length === 0 && !truncated) return null;
   const call = grokMcpCall(toolName, input.tool_input);
-  if (call || isPlain(result) && result.type === "MCP") {
+  if (call || isPlain(result) && result.type === "MCP" || grokMcpCallShape(input.tool_input)) {
     const id = grokMcpIdentity(call ? call.name : toolName, result);
     const inputText = clip(call ? safeJson(call.args) : s(input.tool_input), maxInputChars);
     return { kind: "toolOutput", server: id.server, tool: id.tool, inputText, text, mcp: true, truncated };
@@ -637,6 +652,13 @@ async function handle(input, cfg, log, caps, event, side, cfgErr, plan, label) {
   if (!plan) {
     log.debug(`${event}: no scannable content for ${label} \u2014 allowing`);
     return ALLOW;
+  }
+  // Grok: a payload Grok flagged as cut is still cut when its visible head holds nothing to scan (the tool
+  // runs with, or the model reads, the unseen tail), so it is the event's block, never "nothing to scan".
+  if (caps.grokPayload && plan.truncated && !plan.text.trim()) {
+    log.log(`${event} ${label}: truncated \u2014 tail unscanned (empty head)`);
+    const reason = side === "input" ? "Tool input exceeds Grok's hook payload cap \u2014 unscanned tail blocked" : "Tool output exceeds Grok's hook payload cap \u2014 tail NOT scanned";
+    return withToolMeta({ kind: "block", reason, category: "truncated", scanId: "none" }, { action: "unknown", detections: [] });
   }
   const meta = buildMeta(input);
   const scanMeta = { ...meta, extra: { tool_name: String(input.tool_name ?? ""), source: event } };
@@ -1181,8 +1203,9 @@ var grokAdapter = {
       tool_name: raw.toolName ?? raw.tool_name,
       tool_input: raw.toolInput ?? raw.tool_input,
       tool_response: raw.toolResult ?? raw.tool_response,
-      tool_input_truncated: raw.toolInputTruncated,
-      tool_result_truncated: raw.toolResultTruncated,
+      // camelCase or the snake alias, like every other grok field
+      tool_input_truncated: raw.toolInputTruncated === true || raw.tool_input_truncated === true,
+      tool_result_truncated: raw.toolResultTruncated === true || raw.tool_result_truncated === true,
       last_assistant_message: raw.lastAssistantMessage,
       stop_reason: raw.reason
     };
@@ -1327,7 +1350,7 @@ async function main() {
   cfg.appName = cfg.appSuffix ? `${adapter.appName}-${cfg.appSuffix}` : adapter.appName;
   cfg.appUser = cfg.appUser || `${vendorKey}-user`;
   cfg.logPath = cfg.logPath || (vendorKey === "grok" ? resolve(homeDir(), ".grok", "hooks", "prisma-airs.log") : `${CONFIG_DIRS[vendorKey] ?? ".claude"}/hooks/prisma-airs.log`);
-  const failClosed = (why) => {
+  const failClosed = (why, rawInput = "") => {
     process.stderr.write(`[airs-hook] ${why}
 `);
     const ev = args.event ? String(args.event) : "";
@@ -1346,7 +1369,10 @@ async function main() {
     }
     if (internal) {
       try {
-        const outcome = adapter.render(internal, { kind: "block", reason: `Prisma AIRS: ${why} \u2014 ${outputEv ? "content NOT scanned" : "blocking (fail-closed)"}` });
+        // Grok: an unparseable output that still says its tool was MCP is WITHHELD, not just flagged
+        // (same raw-text rule as the bash and pwsh engines; a false positive only withholds more).
+        const mcp = adapter.capabilities.grokPayload && internal === "PostToolUse" && GROK_MCP_RAW_RE.test(rawInput);
+        const outcome = adapter.render(internal, { kind: "block", reason: `Prisma AIRS: ${why} \u2014 ${outputEv ? "content NOT scanned" : "blocking (fail-closed)"}`, ...mcp ? { mcp: true, category: "not scanned", scanId: "none" } : {} });
         if (outcome.stderr) process.stderr.write(outcome.stderr);
         if (outcome.stdout) {
           process.stdout.write(outcome.stdout);
@@ -1367,7 +1393,7 @@ async function main() {
   try {
     parsed = raw.trim() ? JSON.parse(raw) : {};
   } catch {
-    failClosed("hook input is not valid JSON");
+    failClosed("hook input is not valid JSON", raw);
     return;
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -1391,7 +1417,7 @@ async function main() {
 `);
     if (adapter.capabilities.outputFailClosed) {
       // Grok: render the event's block JSON (input and output alike), as for unparseable input.
-      failClosed("internal error");
+      failClosed("internal error", raw);
     } else if (cfg.failMode === "closed" && INPUT_EVENTS.has(String(args.event))) {
       process.stderr.write("[airs-hook] internal error \u2014 blocking (fail-closed)\n");
       process.exitCode = 2;

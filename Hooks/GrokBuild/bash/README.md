@@ -8,7 +8,7 @@
 
 </div>
 
-**Requires:** bash + jq + curl — plus a Prisma AIRS API key + profile (see [`../example.env`](../example.env)).
+**Requires:** bash + jq + curl — plus a Prisma AIRS API key + profile (see [`../example.env`](../example.env)). Validated with jq 1.7.1 (Ubuntu 24.04's default) and 1.8.1. jq 1.7 cannot parse more than 128 nested objects, so a payload nested that deep is treated as unscannable: its tool input is denied, and its MCP output is withheld from the model.
 
 ## Install
 

@@ -321,7 +321,12 @@ render() {
           case "$IEVENT" in
             UserPromptSubmit) out='{"decision":"block","reason":"Prisma AIRS blocked this prompt"}' ;;
             PreToolUse)       out='{"decision":"deny","reason":"Prisma AIRS blocked this tool call","hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Prisma AIRS blocked this tool call"}}' ;;
-            PostToolUse)      out='{"decision":"block","reason":"Prisma AIRS flagged this tool output"}' ;;
+            PostToolUse)
+              if [ "$GROK_MCP" = "1" ]; then
+                out='{"decision":"block","reason":"Prisma AIRS flagged this tool output","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedMCPToolOutput":"[Prisma AIRS] Tool output withheld (not scanned). scan_id: none"}}'
+              else
+                out='{"decision":"block","reason":"Prisma AIRS flagged this tool output"}'
+              fi ;;
             Stop)             out='{"continue":false,"stopReason":"Prisma AIRS flagged this response"}' ;;
           esac
         fi
@@ -386,6 +391,39 @@ log_line() {
   return 0
 }
 
+# grok: does a payload that could NOT be parsed still say its tool was MCP? Only then can an unscannable
+# output be WITHHELD (updatedMCPToolOutput) instead of merely flagged next to the raw content.
+# jq < 1.8 refuses to parse past 256 parser levels — 256 nested arrays but only 128 nested OBJECTS, since
+# each object level costs two (measured, jq 1.7.1 = Ubuntu 24.04's default; jq 1.8 allows ~10000, and fails
+# past that the same way) — so a deep MCP result reaches the gate below as "not valid JSON" and plain jq
+# cannot read its envelope.
+# `jq --stream` has no depth limit and emits the envelope's shallow leaves before any syntax error, so it
+# finds the TOP-LEVEL markers in either key order: a result tagged "type":"MCP", an MCP call wrapper
+# ({"tool_name": <string>, "tool_input": <any>}), or such a wrapper that Grok cut to a string. When jq can
+# read the whole input (only too deep for a normal parse) that structural answer stands. Only input jq
+# cannot tokenize at all falls back to the raw-text match the node and pwsh engines use (Grok's serializer
+# puts "type" first in a result, "tool_name" first in an MCP call). A false positive only withholds more.
+GROK_MCP_RAW_RE='"(toolResult|tool_response)"[[:space:]]*:[[:space:]]*\{[[:space:]]*"type"[[:space:]]*:[[:space:]]*"MCP"|"(toolInput|tool_input)"[[:space:]]*:[[:space:]]*\{[[:space:]]*"tool_name"[[:space:]]*:[[:space:]]*"'
+grok_mcp_markers() {
+  local m rc
+  m="$(jq -rc --stream '
+      select(length == 2) as [$p, $v]
+      | if ($p|length) == 2 and ($p[0] == "toolResult" or $p[0] == "tool_response") and $p[1] == "type" and $v == "MCP" then "mcp-result"
+        elif ($p|length) == 2 and ($p[0] == "toolInput" or $p[0] == "tool_input") and $p[1] == "tool_name" and ($v|type) == "string" then "mcp-name"
+        elif ($p|length) >= 2 and ($p[0] == "toolInput" or $p[0] == "tool_input") and $p[1] == "tool_input" then "mcp-args"
+        elif ($p|length) == 1 and ($p[0] == "toolInput" or $p[0] == "tool_input") and ($v|type) == "string"
+             and ($v|startswith("{\"tool_name\":\"")) then "mcp-cut-call"
+        else empty end' <<<"$INPUT" 2>/dev/null)"; rc=$?
+  case "$m" in *mcp-result*|*mcp-cut-call*) return 0 ;; esac
+  case "$m" in *mcp-name*) case "$m" in *mcp-args*) return 0 ;; esac ;; esac
+  [ "$rc" -eq 0 ] && return 1
+  grep -Eq "$GROK_MCP_RAW_RE" <<<"$INPUT"   # here-strings, not pipes: under pipefail an early grep exit could SIGPIPE printf
+}
+# A PostToolUse toolInput that names an MCP call: the wrapper with ANY args (Grok may send none), or the
+# wrapper cut to a string by Grok's payload cap. (Pre-tool unwrapping still needs object args: JQ_GROK_MCP.)
+JQ_GROK_MCP_CALL='(type=="object" and (.tool_name|type)=="string" and has("tool_input"))
+  or (type=="string" and startswith("{\"tool_name\":\""))'
+
 # ----------------------------------------------------------------------------
 # dependency + input-integrity gate — fail-CLOSED on input, warn on output.
 # jq/curl are hard requirements; without jq every extractor silently yields ""
@@ -403,7 +441,9 @@ if [ -z "$DEP_ERR" ] && [ -n "$(printf '%s' "$INPUT" | tr -d '[:space:]')" ]; th
     if ! printf '%s' "$INPUT" | jq -e 'type=="object"' >/dev/null 2>&1; then
       DEP_ERR="hook input is not a JSON object (primitive/array)"
     elif ! printf '%s' "$INPUT" | jq -e 'def d: if (type=="object" or type=="array") then ([.[]|d]|max // -1)+1 else 0 end; d < 200' >/dev/null 2>&1; then
-      # jq's ENCODER truncates its OUTPUT past ~256 nesting depth (while its parser tolerates ~5000).
+      # jq's ENCODER truncates its OUTPUT past ~256 nesting depth (jq 1.8's parser tolerates ~10000;
+      # jq 1.7.x refuses to parse past 256 levels / 128 nested objects, which lands in the "not valid
+      # JSON" branch below instead — see grok_mcp_markers).
       # A value nested that deep re-serializes (jc '.tool_input') to INVALID JSON at rc=0, then the
       # extractor errors to empty and falls through to a silent allow. Reject past a generous bound
       # (200, safely below the 256 encoder limit) as unscannable — closes the ~257..4999 band without
@@ -420,10 +460,9 @@ if [ -n "$DEP_ERR" ]; then
     PostToolUse|Stop)
       if [ "$VENDOR" = "grok" ] && [ "$FAIL_MODE" = "closed" ]; then
         # Grok never shows a warn (it drops an allowing hook's stderr): render the event's block, and
-        # withhold an MCP output when the (valid but over-deep) payload still says it is one.
-        jq -e '(.toolResult // .tool_response | type=="object" and .type=="MCP")
-          or (.toolInput // .tool_input | type=="object" and (.tool_name|type)=="string" and (.tool_input|type)=="object")' \
-          <<<"$INPUT" >/dev/null 2>&1 && GROK_MCP=1
+        # withhold an MCP output when the payload still says it is one — valid but over-deep, past jq's
+        # parse limit, or malformed (grok_mcp_markers reads the envelope in every one of those cases).
+        [ "$IEVENT" = "PostToolUse" ] && grok_mcp_markers && GROK_MCP=1
         render block "Prisma AIRS could not scan ($DEP_ERR) — content NOT scanned"
       fi
       render warn  "Prisma AIRS could not scan ($DEP_ERR) — content NOT scanned" ;;
@@ -575,14 +614,16 @@ case "$IEVENT" in
       antigravity|gemini) TOOL_NAME="$(j '.tool_name // .toolCall.name // empty')"; TI="$(jc '.tool_input // .toolCall.args // {}')" ;;
       grok)
         # camelCase first, snake alias second. An MCP call arrives WRAPPED — unwrap to its arguments.
-        # (toolInputTruncated=true -> toolInput is a plain string: its head is scanned, and the tail the
-        # tool still runs with is blocked unless AIRS blocks first — see grok_cut_block.)
+        # toolInputTruncated=true: Grok cut the input at its hook payload cap, and the tool still runs with
+        # ALL of it — the head is scanned and the tail is blocked unless AIRS blocks first (grok_cut_block).
+        # Grok documents a cut input as a plain string, but the FLAG decides, whatever the shape: an
+        # object-form (e.g. MCP-wrapped) input flagged as cut is held to the same rule.
         TOOL_NAME="$(j '.toolName // .tool_name // empty')"; TI="$(jc '.toolInput // .tool_input // {}')"
         if jq -e "$JQ_GROK_MCP" <<<"$TI" >/dev/null 2>&1; then
           GROK_MCP=1; [ -z "$TOOL_NAME" ] && TOOL_NAME="$(jq -r '.tool_name' <<<"$TI" 2>/dev/null)"
           TI="$(jq -c '.tool_input' <<<"$TI" 2>/dev/null)"
-        elif [ "$(j '.toolInputTruncated == true')" = "true" ]; then GROK_CUT="truncated"
-        fi ;;
+        fi
+        [ "$(j '.toolInputTruncated == true or .tool_input_truncated == true')" = "true" ] && GROK_CUT="truncated" ;;
       *)        TOOL_NAME="$(j '.tool_name // empty')"; TI="$(jc '.tool_input // {}')" ;;
     esac
     [ -z "$TI" ] && TI="{}"
@@ -602,9 +643,13 @@ case "$IEVENT" in
         if jq -e "$JQ_GROK_MCP" <<<"$TI" >/dev/null 2>&1; then
           GROK_MCP=1; [ -z "$TOOL_NAME" ] && TOOL_NAME="$(jq -r '.tool_name' <<<"$TI" 2>/dev/null)"
           TI="$(jq -c '.tool_input' <<<"$TI" 2>/dev/null)"
+        elif jq -e "$JQ_GROK_MCP_CALL" <<<"$TI" >/dev/null 2>&1; then
+          # an MCP call with non-object (or no) args, or one Grok cut to a string: still MCP, so a flagged
+          # output (e.g. a result also cut to a string) is withheld rather than only flagged
+          GROK_MCP=1
         fi
         jq -e 'type=="object" and .type=="MCP"' <<<"$TR" >/dev/null 2>&1 && GROK_MCP=1
-        [ "$(j '.toolResultTruncated == true')" = "true" ] && GROK_CUT="truncated" ;;
+        [ "$(j '.toolResultTruncated == true or .tool_result_truncated == true')" = "true" ] && GROK_CUT="truncated" ;;
       *)        TOOL_NAME="$(j '.tool_name // empty')"; TI="$(jc '.tool_input // {}')"; TR="$(jc '.tool_response // .tool_result // null')" ;;
     esac
     [ -z "$TI" ] && TI="{}"; [ -z "$TR" ] && TR="null"
@@ -674,6 +719,15 @@ fi
 
 # nothing scannable -> allow silently
 if [ -z "$(printf '%s' "$TEXT" | tr -d '[:space:]')" ]; then
+  if [ "$VENDOR" = "grok" ] && [ -n "$GROK_CUT" ]; then
+    # grok: a payload Grok flagged as cut is still cut when its visible head holds nothing to scan —
+    # the tool runs with (or the model reads) the unseen tail — so it is the event's block, as in
+    # grok_cut_block below, never "nothing to scan".
+    log_line "$LABEL" "$GROK_CUT — tail unscanned (empty head)"
+    CATEGORY="$GROK_CUT"; SCAN_ID=""
+    if [ "$SIDE" = "input" ]; then render block "Tool input exceeds Grok's hook payload cap — unscanned tail blocked"
+    else render block "Tool output exceeds Grok's hook payload cap — tail NOT scanned"; fi
+  fi
   dbg "no scannable content for $LABEL — allowing"; render allow ""
 fi
 
