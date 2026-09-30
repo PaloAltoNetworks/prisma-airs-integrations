@@ -1,0 +1,51 @@
+meta {
+  name: Mask — SSN redacted before Vertex
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}{{basePath}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  X-Session-ID: {{sessionId}}
+}
+
+body:json {
+  {
+    "contents": [
+      {
+        "role": "user",
+        "parts": [{"text": "My social security number is 123-45-6789. Can you help me remember the last 4 digits?"}]
+      }
+    ]
+  }
+}
+
+docs {
+  DLP Masking mode: AIRS replaces the SSN with Xs before forwarding to Vertex.
+  The proxy returns HTTP 200 with a Gemini response — but the SSN is masked.
+  Requires the AIRS profile's Sensitive Data Detection set to Mask (not Block).
+}
+
+tests {
+  test("HTTP 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("AIRS allowed (mask mode)", function() {
+    if (res.body.airs) {
+      expect(res.body.airs.action).to.equal("allow");
+    }
+  });
+  test("Gemini responded (to masked prompt)", function() {
+    expect(res.body.candidates).to.be.an("array").with.lengthOf.above(0);
+  });
+  test("SSN not echoed by Gemini", function() {
+    const text = res.body.candidates[0].content.parts[0].text;
+    expect(text).to.not.include("123-45-6789");
+  });
+}

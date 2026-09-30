@@ -1,0 +1,44 @@
+meta {
+  name: Custom Topic — Competitor product question
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}{{basePath}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  X-Session-ID: {{sessionId}}
+}
+
+body:json {
+  {
+    "contents": [
+      {
+        "role": "user",
+        "parts": [{"text": "Which is better for enterprise security — Cisco SecureX or Palo Alto Networks Cortex XDR? I'm trying to decide between them."}]
+      }
+    ]
+  }
+}
+
+docs {
+  Custom Topic Guardrail for competitor mentions.
+  REQUIRES: Custom topic "Competitor Products" configured in SCM and linked to
+  the AIRS profile. Without it, this passes through to Gemini (HTTP 200).
+  To configure: SCM → Manage → Custom Topics → Add Topic named "Competitor Products"
+  with examples like "Why choose Cisco over Palo Alto?", then enable in profile.
+}
+
+tests {
+  test("HTTP 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("Response received", function() {
+    expect(res.body.candidates || res.body.error).to.exist;
+  });
+}
