@@ -79,7 +79,7 @@ transaction one.
 1. **Cursor `conversation_id` → AIRS `session_id`.** ✅ Correct — it's the session slot, it's
    stored, and it groups the conversation. This is already what our engines do: each agent's
    own session field maps to `session_id` (Cursor `conversation_id`, Cline `taskId`, Claude
-   Code / Codex `session_id`, Gemini CLI `conversationId`), falling back to a working-directory
+   Code / Codex `session_id`, Gemini CLI `conversationId`, Grok Build `sessionId`), falling back to a working-directory
    hash. (The bash/PowerShell engines resolve this via one union chain; the Node.js engine maps
    it per-adapter — same result.)
 2. **`transaction_id` is a separate per-turn slot.** Cursor exposes no per-turn id, so it will

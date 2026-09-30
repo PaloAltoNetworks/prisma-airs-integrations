@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-2b7489.svg)](LICENSE)
 &nbsp;![Runtimes](https://img.shields.io/badge/runtimes-node%20%C2%B7%20bash%20%C2%B7%20powershell-3fb950)
-&nbsp;![Agents](https://img.shields.io/badge/agents-6-8957e5)
+&nbsp;![Agents](https://img.shields.io/badge/agents-7-8957e5)
 &nbsp;![Prisma%20AIRS](https://img.shields.io/badge/Prisma%20AIRS-secured-fa582d)
 
 [**Quick start**](#quick-start) &nbsp;·&nbsp; [Agents](#supported-agents) &nbsp;·&nbsp; [Runtimes](#runtimes) &nbsp;·&nbsp; [Correlation IDs](#correlation-ids--what-to-send) &nbsp;·&nbsp; [Validation](#validation)
@@ -36,7 +36,7 @@ Every prompt, tool call, tool output, and final answer is now scanned by Prisma 
 
 > [!TIP]
 > **Not sure where to start?** Open your agent's folder for a copy-paste install in all three runtimes:
-> [Claude Code](ClaudeCode/) · [Codex](Codex/) · [Cursor](Cursor/) · [Cline](Cline/) · [Devin](Devin/) · [Gemini CLI](GeminiCLI/)
+> [Claude Code](ClaudeCode/) · [Codex](Codex/) · [Cursor](Cursor/) · [Cline](Cline/) · [Devin](Devin/) · [Gemini CLI](GeminiCLI/) · [Grok Build](GrokBuild/)
 
 ## How it works
 
@@ -71,6 +71,7 @@ Every agent ships its **real config directory** (`.cursor/`, `.claude/`, …) fo
 | [Cline](Cline/) | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Devin](Devin/) | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
 | [Gemini CLI](GeminiCLI/) | ✅ | ⚠️ | ❌ | ✅ | ✅ |
+| [Grok Build](GrokBuild/) | ✅ | ⚠️ | ❌ | ✅ | ⚠️ |
 
 <div align="center"><sub>✅ hard-block &nbsp;·&nbsp; ⚠️ scan + alert / redact (no hard-block) &nbsp;·&nbsp; ❌ no usable surface in the client's hook contract</sub></div>
 
@@ -83,6 +84,7 @@ Coverage reflects what each agent's hook API **actually allows** — verified ag
 
 - **Cursor / Devin** — the client exposes no way to hard-block the model's *final answer*, and the prompt / post-tool hooks are advisory (scan + alert). The **pre-tool** gate is a real hard-block (✅).
 - **Gemini CLI** — the answer hook is advisory: blocking it triggers a model-retry loop, so **Response** is ⚠️.
+- **Grok Build** — the answer is scanned at `Stop`, after it is already on screen: a block ends the turn but cannot retract it, so **Response** is ⚠️. **Post-tool** is ⚠️ because only MCP tool output can be replaced for the model; built-in tool output is flagged, not withheld.
 - **Claude Code / Codex / Cline** — full hard-block at every checkpoint.
 
 Full detail is in each agent's README. Detection categories: <https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/>
@@ -98,7 +100,7 @@ Pick whichever you already have — all three reach the same **allow / block** d
 | **`bash/`** | `jq` + `curl` | macOS / Linux |
 | **`powershell/`** | PowerShell 5.1+ / 7 · no `jq`/`curl` | Windows-native |
 
-<sub><b>Core parity</b> (all runtimes): four checkpoints, correct AIRS content-types incl. <code>tool_event</code> (<code>tools/call</code>) for indirect-injection, fail-closed input / fail-open output, no silent truncation.</sub>
+<sub><b>Core parity</b> (all runtimes): four checkpoints, correct AIRS content-types incl. <code>tool_event</code> (<code>tools/call</code>) for indirect-injection, fail-closed input / fail-open output (Grok Build: output side also fails closed), no silent truncation.</sub>
 
 ## Correlation IDs — what to send
 
@@ -146,8 +148,8 @@ Both `session_id` and `transaction_id` are capped at **100 characters** (an AIRS
 
 **How these hooks fill the slots automatically:** each agent's own conversation/session
 identifier becomes `session_id` (Cursor `conversation_id`, Cline `taskId`, Claude Code /
-Codex `session_id`, Gemini CLI `conversationId`), falling back to a hash of the working
-directory; `transaction_id` comes from a per-turn id (`tool_use_id` / `prompt_id` /
+Codex `session_id`, Gemini CLI `conversationId`, Grok Build `sessionId`), falling back to a
+hash of the working directory; `transaction_id` comes from a per-turn id (`tool_use_id` / `prompt_id` /
 `turn_id`) when the agent provides one, else it reuses `session_id`. **Cursor** supplies a
 per-conversation id but no per-turn id, so `transaction_id` reuses the conversation id
 (constant across the conversation) unless you export your own or let AIRS mint one.

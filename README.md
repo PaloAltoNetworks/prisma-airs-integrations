@@ -28,6 +28,7 @@ This repository collects example configurations, sample code, and reference patt
 | [Hooks: Cline](./Hooks/Cline/) | AI Coding Assistant | ✅ | ✅ | ❌ | ✅ | ✅ |
 | [Hooks: Devin](./Hooks/Devin/) | AI Coding Assistant | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
 | [Hooks: Gemini CLI](./Hooks/GeminiCLI/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ✅ |
+| [Hooks: Grok Build](./Hooks/GrokBuild/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ⚠️ |
 | [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ✅ | ❌ | ✅ |
 | [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Google (Apigee SharedFlow)](./Google/apigee/sharedflow/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
