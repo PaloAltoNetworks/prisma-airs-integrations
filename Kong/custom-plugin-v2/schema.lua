@@ -59,6 +59,10 @@ local schema = {
           -- also enforces this max independently, so the bound is belt-and-suspenders.
           { sse_max_scan_chars = { type = "number", required = false, default = 20000, between = { 1, 20000 } }, },
           { sse_set_observability_headers = { type = "boolean", required = false, default = false }, },
+          -- Emit x-airs-* observability headers (verdict, category, scan_id, per-phase +
+          -- total AIRS scan latency) on the proxied/blocked response. Opt-in; lets callers
+          -- see AIRS latency overhead and the block reason, and correlate scan_id to SCM.
+          { set_observability_headers = { type = "boolean", required = false, default = false }, },
           -- Secure default: an over-cap response can't be fully scanned, so block (403)
           -- rather than return it. false = opt into fail-open (scan first N, return all). See README.
           { sse_truncation_fail_closed = { type = "boolean", required = false, default = true }, },
