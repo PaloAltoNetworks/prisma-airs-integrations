@@ -57,12 +57,12 @@ USAGE EXAMPLE:
         <base />
         <set-variable name="scanType" value="prompt" />
         <set-variable name="currentProfile" value="my-profile" />
-        <include-fragment fragment-id="prisma-airs-scan" />
+        <include-fragment fragment-id="panw-airs-scan" />
     </inbound>
     <outbound>
         <base />
         <set-variable name="scanType" value="response" />
-        <include-fragment fragment-id="prisma-airs-scan" />
+        <include-fragment fragment-id="panw-airs-scan" />
     </outbound>
 </policies>
 ```
@@ -91,12 +91,12 @@ TOOL CALL HANDLING:
      PHASE 1: INITIALIZATION & CONFIGURATION
      ============================================================================ -->
 	<!-- Resolve AIRS Endpoint from context variable or use default Change this if you do not want to define a non-default endpoint in your policy. Choices are: -->
-	<!-- US: https://service.api.aisecurity.paloaltonetworks.com -->
-	<!-- EU (Germany): https://service-de.api.aisecurity.paloaltonetworks.com -->
-	<!-- IN: https://service-in.api.aisecurity.paloaltonetworks.com -->
-	<!-- SG: https://service-sg.api.aisecurity.paloaltonetworks.com -->
-	<!-- JP: https://service-jp.api.aisecurity.paloaltonetworks.com -->
-	<!-- AU: https://service-au.api.aisecurity.paloaltonetworks.com -->
+	<!-- US: service.api.aisecurity.paloaltonetworks.com -->
+	<!-- EU (Germany): service-de.api.aisecurity.paloaltonetworks.com -->
+	<!-- IN: service-in.api.aisecurity.paloaltonetworks.com -->
+	<!-- SG: service-sg.api.aisecurity.paloaltonetworks.com -->
+	<!-- JP: service-jp.api.aisecurity.paloaltonetworks.com -->
+	<!-- AU: service-au.api.aisecurity.paloaltonetworks.com -->
 	<set-variable name="airsEndpoint" value="@{&#xA;    string endpoint = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;PrismaAirsEndpoint&quot;, null);&#xA;    return !string.IsNullOrEmpty(endpoint) ? endpoint : &quot;service.api.aisecurity.paloaltonetworks.com&quot;;&#xA;}" />
 	<!-- Default threat descriptions (can be overridden via airsDescriptions variable) -->
 	<set-variable name="threatDescriptions" value="@{&#xA;    return new JObject(&#xA;        new JProperty(&quot;url_cats&quot;, &quot;Malicious or inappropriate URLs detected&quot;),&#xA;        new JProperty(&quot;dlp&quot;, &quot;Sensitive data (PII, credentials, secrets) detected&quot;),&#xA;        new JProperty(&quot;injection&quot;, &quot;Prompt injection or jailbreak attempt detected&quot;),&#xA;        new JProperty(&quot;toxic_content&quot;, &quot;Toxic, hateful, or inappropriate content detected&quot;),&#xA;        new JProperty(&quot;malicious_code&quot;, &quot;Malicious code or command injection detected&quot;),&#xA;        new JProperty(&quot;agent&quot;, &quot;AI agent manipulation attempt detected&quot;),&#xA;        new JProperty(&quot;topic_violation&quot;, &quot;Content violates topic policies&quot;),&#xA;        new JProperty(&quot;db_security&quot;, &quot;Database security violation detected&quot;),&#xA;        new JProperty(&quot;ungrounded&quot;, &quot;Ungrounded or hallucinated content detected&quot;)&#xA;    );&#xA;}" />
@@ -116,7 +116,7 @@ TOOL CALL HANDLING:
 	<set-variable name="FailOpen" value="@{&#xA;	    // Priority 1: Check for failOpen (lowercase - preferred)&#xA;	    object failOpenLower = context.Variables.GetValueOrDefault&lt;object&gt;(&quot;failOpen&quot;, null);&#xA;	    if (failOpenLower != null) { return Convert.ToBoolean(failOpenLower); }&#xA;&#xA;	    // Priority 2: Fall back to FailOpen (uppercase - backward compatibility)&#xA;	    object failOpenUpper = context.Variables.GetValueOrDefault&lt;object&gt;(&quot;FailOpen&quot;, null);&#xA;	    if (failOpenUpper != null) { return Convert.ToBoolean(failOpenUpper); }&#xA;&#xA;	    // Default: false (fail-closed)&#xA;	    return false;&#xA;	}" />
 	<!-- Optional agent metadata -->
 	<set-variable name="agentId" value="@{&#xA;    // Priority 1: Context variable (explicit override)&#xA;    string varAgentId = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;agentID&quot;, null);&#xA;    if (!string.IsNullOrEmpty(varAgentId)) { return varAgentId; }&#xA;&#xA;    // Priority 2: X-Agent-ID header&#xA;    if (context.Request.Headers.ContainsKey(&quot;X-Agent-ID&quot;)) {&#xA;        string[] agentHeaders = context.Request.Headers.GetValueOrDefault(&quot;X-Agent-ID&quot;, new string[0]);&#xA;        if (agentHeaders.Length &gt; 0 &amp;&amp; !string.IsNullOrEmpty(agentHeaders[0])) {&#xA;            return agentHeaders[0];&#xA;        }&#xA;    }&#xA;&#xA;    // Priority 3: Claude Code subagent header&#xA;    if (context.Request.Headers.ContainsKey(&quot;x-claude-code-agent-id&quot;)) {&#xA;        string[] ccAgent = context.Request.Headers.GetValueOrDefault(&quot;x-claude-code-agent-id&quot;, new string[0]);&#xA;        if (ccAgent.Length &gt; 0 &amp;&amp; !string.IsNullOrEmpty(ccAgent[0])) {&#xA;            return ccAgent[0];&#xA;        }&#xA;    }&#xA;&#xA;    return null;&#xA;}" />
-	<set-variable name="agentVersion" value="@(context.Variables.GetValueOrDefault&lt;string&gt;(&quot;agentVersion&quot;, null))" />
+	<set-variable name="agentVersion" value="@{&#xA;	    // Priority 1: agentVersion (lowercase - preferred)&#xA;	    string varLower = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;agentVersion&quot;, null);&#xA;	    if (!string.IsNullOrEmpty(varLower)) { return varLower; }&#xA;&#xA;	    // Priority 2: AgentVersion (uppercase - v2.1.1 backward compatibility)&#xA;	    return context.Variables.GetValueOrDefault&lt;string&gt;(&quot;AgentVersion&quot;, null);&#xA;	}" />
 	<!-- Merge custom descriptions with defaults -->
 	<set-variable name="finalDescriptions" value="@{&#xA;    var defaults = context.Variables.GetValueOrDefault&lt;JObject&gt;(&quot;threatDescriptions&quot;);&#xA;    var custom = context.Variables.GetValueOrDefault&lt;JObject&gt;(&quot;airsDescriptions&quot;, null);&#xA;&#xA;    if (custom != null) {&#xA;        // Merge custom descriptions into defaults&#xA;        foreach (var prop in custom.Properties()) {&#xA;            defaults[prop.Name] = prop.Value;&#xA;        }&#xA;    }&#xA;&#xA;    return defaults;&#xA;}" />
 	<!-- Detect OAuth mode: PrismaAirsAPI == "OAUTH" means the panw-airs-oauth fragment
@@ -164,12 +164,25 @@ TOOL CALL HANDLING:
 	<!-- Some backends (e.g. Azure AI Foundry's Responses API) honor client Accept-Encoding and
 	     return Brotli (br) bodies. APIM's Body.As&lt;string&gt;() transparently decompresses gzip but
 	     not Brotli, so a br-compressed response is read as raw bytes, JSON parsing of it silently
-	     fails, no response text reaches AIRS, and response-side DLP masking never fires. Strip br
-	     from the outbound request so backends fall back to gzip/identity, which APIM can read. -->
+	     fails, no response text reaches AIRS, and response-side DLP masking never fires. Strip only
+	     the br token from the client's own Accept-Encoding (rather than overriding the whole header)
+	     so a client that asked for identity-only is not forced into gzip/deflate it never wanted. -->
 	<choose>
 		<when condition="@((bool)context.Variables[&quot;isInbound&quot;])">
 			<set-header name="Accept-Encoding" exists-action="override">
-				<value>gzip, deflate</value>
+				<value>@{
+            string[] existing = context.Request.Headers.GetValueOrDefault("Accept-Encoding", new string[0]);
+            string raw = existing.Length &gt; 0 ? existing[0] : "";
+            var kept = new System.Collections.Generic.List&lt;string&gt;();
+            foreach (var part in raw.Split(',')) {
+                string token = part.Trim();
+                if (token.Length == 0) { continue; }
+                string codingName = token.Split(';')[0].Trim();
+                if (codingName.Equals("br", StringComparison.OrdinalIgnoreCase)) { continue; }
+                kept.Add(token);
+            }
+            return kept.Count &gt; 0 ? string.Join(", ", kept) : "gzip, deflate";
+        }</value>
 			</set-header>
 		</when>
 	</choose>
@@ -262,6 +275,84 @@ TOOL CALL HANDLING:
 								<set-body>@((string)context.Variables["airsRequestBody"])</set-body>
 							</send-request>
 						</otherwise>
+					</choose>
+					<!-- On a 401/403 in OAuth mode, the cached token was rejected (revoked, rotated,
+					     or expired early server-side). Evict it and retry exactly once with a freshly
+					     fetched token, instead of silently fail-opening (if failOpen=true) or outaging
+					     (if failOpen=false) for up to the full cache TTL. Static-key mode has no cache
+					     to evict, so this only applies to OAuth mode.
+					     NOTE: this inlines panw-airs-oauth's own two-step fetch instead of calling
+					     <include-fragment> on it, because APIM policy fragments cannot nest another
+					     fragment. It reuses the panwClientId/panwClientSecret/panwTsg/panwCustomerApp/
+					     airsApiKeyForOAuth/airsManagementHost variables that panw-airs-oauth already
+					     set in context when it ran earlier in this request (required before this
+					     fragment runs in OAuth mode). This refetch is best-effort: if it also fails,
+					     PrismaAirsToken is left as-is, the retried AIRS call below fails the same way
+					     it would have without this block, and falls through to the normal
+					     FailOpen/FailClosed handling further down, never a worse outcome than today. -->
+					<choose>
+						<when condition="@{&#xA;        if (!(bool)context.Variables[&quot;airsOAuthMode&quot;]) { return false; }&#xA;        var r = context.Variables.GetValueOrDefault&lt;IResponse&gt;(&quot;airsResponse&quot;);&#xA;        int statusCode = r != null ? (int)r.StatusCode : 0;&#xA;        return statusCode == 401 || statusCode == 403;&#xA;    }">
+							<cache-remove-value key="@(&quot;panw-airs-oauth-token-&quot; + (string)context.Variables[&quot;panwTsg&quot;])" />
+							<send-request mode="new" response-variable-name="scmAuthResponseRetry" timeout="15" ignore-error="true">
+								<set-url>https://auth.apps.paloaltonetworks.com/oauth2/access_token</set-url>
+								<set-method>POST</set-method>
+								<set-header name="Content-Type" exists-action="override">
+									<value>application/x-www-form-urlencoded</value>
+								</set-header>
+								<set-header name="Authorization" exists-action="override">
+									<value>@{
+            string id = Uri.EscapeDataString((string)context.Variables["panwClientId"]);
+            string secret = Uri.EscapeDataString((string)context.Variables["panwClientSecret"]);
+            string encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(id + ":" + secret));
+            return "Basic " + encoded;
+        }</value>
+								</set-header>
+								<set-body>@("grant_type=client_credentials&amp;scope=tsg_id:" + Uri.EscapeDataString((string)context.Variables["panwTsg"]))</set-body>
+							</send-request>
+							<set-variable name="scmAccessTokenRetry" value="@{&#xA;            var resp = context.Variables.GetValueOrDefault&lt;IResponse&gt;(&quot;scmAuthResponseRetry&quot;);&#xA;            if (resp == null || resp.StatusCode != 200) { return null; }&#xA;            var body = resp.Body.As&lt;JObject&gt;(preserveContent: true);&#xA;            return body[&quot;access_token&quot;]?.ToString();&#xA;        }" />
+							<choose>
+								<when condition="@(!string.IsNullOrEmpty(context.Variables.GetValueOrDefault&lt;string&gt;(&quot;scmAccessTokenRetry&quot;)))">
+									<send-request mode="new" response-variable-name="airsOauthResponseRetry" timeout="15" ignore-error="true">
+										<set-url>@("https://" + (string)context.Variables["airsManagementHost"] + "/aisec/v1/mgmt/oauth/client_credential/accesstoken?tokenTtlInterval=3&amp;tokenTtlUnit=hours")</set-url>
+										<set-method>POST</set-method>
+										<set-header name="Content-Type" exists-action="override">
+											<value>application/json</value>
+										</set-header>
+										<set-header name="Accept" exists-action="override">
+											<value>application/json</value>
+										</set-header>
+										<set-header name="Authorization" exists-action="override">
+											<value>@("Bearer " + context.Variables.GetValueOrDefault&lt;string&gt;("scmAccessTokenRetry"))</value>
+										</set-header>
+										<set-body>@{
+            return new JObject(
+                new JProperty("client_id", (string)context.Variables["airsApiKeyForOAuth"]),
+                new JProperty("customer_app", (string)context.Variables["panwCustomerApp"])
+            ).ToString(Newtonsoft.Json.Formatting.None);
+        }</set-body>
+									</send-request>
+									<set-variable name="airsOauthBodyRetry" value="@{&#xA;            var r = context.Variables.GetValueOrDefault&lt;IResponse&gt;(&quot;airsOauthResponseRetry&quot;);&#xA;            return (r != null &amp;&amp; r.StatusCode == 200) ? r.Body.As&lt;JObject&gt;(preserveContent: true) : null;&#xA;        }" />
+									<set-variable name="PrismaAirsToken" value="@(context.Variables.GetValueOrDefault&lt;JObject&gt;(&quot;airsOauthBodyRetry&quot;)?[&quot;access_token&quot;]?.ToString())" />
+									<choose>
+										<when condition="@(!string.IsNullOrEmpty(context.Variables.GetValueOrDefault&lt;string&gt;(&quot;PrismaAirsToken&quot;)))">
+											<set-variable name="airsOauthCacheTtlRetry" value="@{&#xA;            const int marginSeconds = 3600;&#xA;            const int requestedTokenLifetimeSeconds = 3 * 3600;&#xA;            string raw = context.Variables.GetValueOrDefault&lt;JObject&gt;(&quot;airsOauthBodyRetry&quot;)?[&quot;expires_in&quot;]?.ToString();&#xA;            int lifetimeSeconds = requestedTokenLifetimeSeconds;&#xA;            if (int.TryParse(raw, out int expiresIn) &amp;&amp; expiresIn &gt; 0) { lifetimeSeconds = expiresIn; }&#xA;            int ttl = lifetimeSeconds - marginSeconds;&#xA;            return ttl &gt; 0 ? ttl : 300;&#xA;        }" />
+											<cache-store-value key="@(&quot;panw-airs-oauth-token-&quot; + (string)context.Variables[&quot;panwTsg&quot;])" value="@(context.Variables.GetValueOrDefault&lt;string&gt;(&quot;PrismaAirsToken&quot;))" duration="@((int)context.Variables[&quot;airsOauthCacheTtlRetry&quot;])" />
+										</when>
+									</choose>
+								</when>
+							</choose>
+							<send-request mode="new" response-variable-name="airsResponse" timeout="10" ignore-error="true">
+								<set-url>@("https://" + (string)context.Variables["airsEndpoint"] + "/v1/scan/sync/request")</set-url>
+								<set-method>POST</set-method>
+								<set-header name="Authorization" exists-action="override">
+									<value>@("Bearer " + context.Variables.GetValueOrDefault&lt;string&gt;("PrismaAirsToken"))</value>
+								</set-header>
+								<set-header name="Content-Type" exists-action="override">
+									<value>application/json</value>
+								</set-header>
+								<set-body>@((string)context.Variables["airsRequestBody"])</set-body>
+							</send-request>
+						</when>
 					</choose>
 					<!-- Parse AIRS response -->
 					<choose>

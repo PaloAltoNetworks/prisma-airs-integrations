@@ -28,9 +28,9 @@ This integration provides the following versions of the policy fragment. Choose 
 
 - **v1** — OpenAI-only. Simpler fragment for environments that only use OpenAI-compatible endpoints.
 - **v2** — Multi-model. Adds Anthropic and Azure AI Foundry Claude support, plus streaming/SSE response scanning.
-- **v2.1** — Claude Code, Gemini, Foundry GPT, and MCP. Builds on v2 with Claude Code session grouping, graceful (non-erroring) blocking, and automatic user/agent attribution — and also where native Google Gemini support, Azure AI Foundry GPT (Responses API), and MCP (Model Context Protocol) `tools/call` scanning were actually introduced. Backward-compatible with existing v2 policies — drop-in, no policy changes required. Ships as the current `panw-airs-scan-v2` fragment.
+- **v2.1** — Claude Code, Gemini, Foundry GPT, and MCP. Builds on v2 with Claude Code session grouping, graceful (non-erroring) blocking, and automatic user/agent attribution — and also where native Google Gemini support, Azure AI Foundry GPT (Responses API), and MCP (Model Context Protocol) `tools/call` scanning were actually introduced. Backward-compatible with existing v2 policies — drop-in, no policy changes required. Ships as `panw-airs-scan-v2.1` in its own directory (not the `v2` directory).
 - **v2.1.1** — Standards and UUID. Adds standards-based `failOpen` variable (lowercase) with backward compatibility for `FailOpen`, plus AIRS profile UUID support (`currentProfileUUID`, `toolProfileUUID`) which takes priority over profile names when defined.
-- **v2.1.2** — OAuth and hardening. Adds Prisma AIRS OAuth bearer-token mode as an alternative to the static API key (see [`policy-oauth-example`](policy-oauth-example)), plus a code-hardening pass replacing brittle direct casts (`(JObject)context.Variables["x"]`) with null-safe lookups throughout, and safer AIRS-call error handling.
+- **v2.1.2** — OAuth and hardening. Adds Prisma AIRS OAuth bearer-token mode as an alternative to the static API key (see [`policy-oauth-example`](policy-oauth-example)), with a 401/403 cache-eviction-and-retry so a revoked/rotated token doesn't go unnoticed for the full cache TTL. Requires APIM's internal cache (cache-lookup-value/cache-store-value), which is unavailable on the Consumption tier and on self-hosted gateways without the cache add-on — on those deployments every request pays the full OAuth token-fetch latency. Also includes a code-hardening pass replacing many brittle direct casts (`(JObject)context.Variables["x"]`) with null-safe lookups, and safer AIRS-call error handling.
 
 ## Coverage
 
@@ -193,9 +193,10 @@ curl -X POST "https://<YOUR-HOSTNAME>/<YOUR API>/chat/completions" \
 
 ## 📁 What's Included
 * `prisma-airs-policy-fragment-v1/panw-airs-scan` : Prisma AIRS policy fragment for OpenAI endpoints (chat/completions, responses).
-* `prisma-airs-policy-fragment-v2/panw-airs-scan-v2` : Prisma AIRS policy fragment with multi-model support (OpenAI, Anthropic, Azure AI Foundry Claude) and streaming/SSE scanning. The current file is the **v2.1** release, which adds Claude Code support, native Google Gemini support, Azure AI Foundry GPT (Responses API), and MCP (Model Context Protocol) `tools/call` scanning — and is backward-compatible with v2 policies.
+* `prisma-airs-policy-fragment-v2/panw-airs-scan-v2` : Prisma AIRS policy fragment with multi-model support (OpenAI, Anthropic, Azure AI Foundry Claude) and streaming/SSE scanning. Does **not** include Gemini, Foundry GPT, or MCP — those were introduced in v2.1 (see `prisma-airs-policy-fragment-v2.1/panw-airs-scan-v2.1`), not here.
+* `prisma-airs-policy-fragment-v2.1/panw-airs-scan-v2.1` : Adds Claude Code support, native Google Gemini support, Azure AI Foundry GPT (Responses API), and MCP `tools/call` scanning on top of v2. Backward-compatible with existing v2 policies.
 * `prisma-airs-policy-fragment-v2.1.1/panw-airs-scan-v2.1.1` : Adds standards-based `failOpen` and AIRS profile UUID support on top of v2.1.
-* `prisma-airs-policy-fragment-v2.1.2/panw-airs-scan-v2.1.2` : Adds Prisma AIRS OAuth bearer-token mode, plus a code-hardening pass, on top of v2.1.1. Not yet deployed; that directory's `tests/` has a deterministic automated test suite used to validate it.
+* `prisma-airs-policy-fragment-v2.1.2/panw-airs-scan-v2.1.2` : Adds Prisma AIRS OAuth bearer-token mode plus a code-hardening pass on top of v2.1.1. Not yet deployed. That directory's `tests/` folder has a test suite used locally to validate it, but `tests/` is gitignored and not committed to this repo.
 * `policy-example` : An example policy for an LLM API.
 * `policy-oauth-example` : The same example policy with Prisma AIRS OAuth bearer-token mode added (v2.1.2+) — see the "Configuration" section below for the variables it sets.
 
@@ -215,9 +216,8 @@ Policy fragment is configured in the policy using the following variables:
 - `toolProfileUUID`: (string, optional) **v2.1.1+** The UUID of the AIRS profile for tool events. **Takes priority over `toolProfile` when defined.**
 
 ### User & Agent Attribution
-- `user`: (string, optional) Authenticated user identifier included in AIRS as `metadata.app_user`. If not set, the fragment falls back to the `x-user-id` request header, then to Claude Code's body `metadata.user_id` (`account_uuid`/`device_id`), then `"anonymous"`.
 - `agent`: (string, optional) Agent or workflow identifier included in AIRS as `metadata.agent_meta.agent_id`. Prefer setting this from trusted APIM policy or backend routing context. If unset, the fragment falls back to Claude Code's `x-claude-code-agent-id` header (subagent attribution only — treat as untrusted client-supplied metadata, not a security boundary).
-- **v2.1+**: the variable names for this are `agentID` and `agentVersion` (not `agent`) — `agentID` populates `metadata.agent_meta.agent_id`, `agentVersion` populates `metadata.agent_meta.agent_version`. `app_user` resolution is header/body-only (no explicit override variable).
+- **v2.1+**: the variable names for this are `agentID` and `agentVersion` (not `agent`) — `agentID` populates `metadata.agent_meta.agent_id`, `agentVersion` populates `metadata.agent_meta.agent_version`. `app_user` has no explicit override variable: it resolves from the `x-user-id` request header, then Claude Code's body `metadata.user_id` (`account_uuid`/`device_id`), then falls back to `"anonymous"`.
 
 ### Error Handling
 - `failOpen`: (boolean) **v2.1.1+** Standards-based variable (lowercase). `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.

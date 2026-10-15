@@ -15,10 +15,9 @@
   PrismaAirsAPI="OAUTH" and PrismaAirsToken already set, with no need to
   repeat either line in <outbound>.
 
-  Required named values (create these before deploying — see
-  prisma-airs-policy-fragment-v2.1.2/README.md's OAuth section, or
-  tests/README.md#prisma-airs-oauth-bearer-token-mode for the automated
-  setup script):
+  Required named values (create these before deploying — see the NAMED
+  VALUES REQUIRED / REUSED NAMED VALUES section at the top of
+  prisma-airs-policy-fragment-v2.1.2/panw-airs-oauth-v1.0.0):
     - panw-client-id      SCM service account Client ID
     - panw-client-secret  SCM service account Client Secret
     - panw-tsg            Strata Cloud Manager TSG ID

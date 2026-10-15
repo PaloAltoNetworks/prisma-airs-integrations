@@ -9,13 +9,23 @@ DESCRIPTION:
 Fetches and caches a Prisma AIRS OAuth bearer token using a two-step flow:
   1. Exchange service account credentials against Strata Cloud Manager (SCM) auth
      to obtain a short-lived (15 min) SCM access token.
-  2. Use the SCM token to call the AIRS management API and obtain a 24-hour
-     AIRS OAuth token.
+  2. Use the SCM token to call the AIRS management API and obtain a 3-hour
+     AIRS OAuth token (requested via tokenTtlInterval=3&tokenTtlUnit=hours).
 
-The AIRS token is cached in APIM's internal cache with a 23-hour TTL so it
-is shared across all requests/sessions without hitting the auth endpoints on
-every call. When the cache entry is missing or expired a fresh token is fetched
-and stored.
+The AIRS token is cached in APIM's internal cache with a TTL derived from the
+token's own expires_in (minus a safety margin) so it is shared across all
+requests/sessions without hitting the auth endpoints on every call. When the
+cache entry is missing, expired, or rejected by AIRS as invalid, a fresh token
+is fetched and stored.
+
+LIMITATION — APIM internal cache availability:
+  cache-lookup-value / cache-store-value require APIM's internal cache, which
+  is NOT available on the Consumption tier, and is not available on
+  self-hosted gateways unless the cache add-on is configured. On those
+  deployments every request pays the full two-hop token-fetch latency, since
+  nothing persists across requests. There is currently no external-cache
+  (e.g. Redis) fallback — if you're on one of these tiers/deployments, either
+  accept the per-request fetch cost or wire in an external cache yourself.
 
 After this fragment executes, the context variable `PrismaAirsToken` holds the
 current AIRS OAuth token. The scan fragment (panw-airs-scan-v2.1.2) reads this
@@ -38,6 +48,20 @@ NOTE ON panw-client-id vs AIRS client_id:
   it is NOT the SCM service account Client ID (panw-client-id). It is the AIRS
   API key (airs-api), which is reused here to avoid duplicating named values.
   panw-customer-app must match the Application name exactly as registered in AIRS.
+  UNVERIFIED: this behavior was observed, not confirmed against an authoritative
+  AIRS reference. The pan.dev management API overview only documents using a
+  client ID/secret to obtain a token, not this reuse of the static API key —
+  confirm against https://pan.dev/ docs or with Palo Alto support before relying
+  on it in a new deployment.
+
+OAUTH FETCH FAILURES VS failOpen:
+  Failures while acquiring the token itself (SCM auth, AIRS OAuth exchange) are
+  treated as infrastructure/configuration errors, not as AIRS-availability
+  errors, so they always return a hard 502 here regardless of the scan
+  fragment's failOpen setting. This is intentional — failOpen governs what
+  happens when AIRS is reachable but the *scan* call fails, not when the
+  deployment is missing or misconfigured. Contrast with panw-airs-scan-v2.1.2,
+  where a failed AIRS scan call does honor failOpen.
 
 USAGE:
   Place this fragment in the inbound section BEFORE the scan fragment:
@@ -53,17 +77,49 @@ CACHING STRATEGY:
   than Named Values. Named Values are static configuration — they cannot be
   written at runtime. The internal cache persists across requests and gateway
   worker processes within an APIM instance, making it suitable for shared token
-  state. TTL is derived from the expires_in field in the AIRS OAuth response,
-  minus a 1-hour safety buffer (falls back to 7200s / 2h if absent).
+  state (subject to the Consumption-tier/self-hosted limitation noted above).
+  TTL is derived from the expires_in field in the AIRS OAuth response, minus a
+  1-hour safety buffer (falls back to the full requested 3-hour interval minus
+  the same buffer if expires_in is absent or unparseable).
+
+  On a 401/403 from AIRS (token revoked, rotated, or expired early), the scan
+  fragment evicts this cache entry and re-includes this fragment once to fetch
+  a fresh token before retrying — see panw-airs-scan-v2.1.2's AIRS call.
 
 -->
 <fragment>
 	<!-- ============================================================================
+     PHASE 0: LOAD SECRETS INTO VARIABLES
+     ============================================================================ -->
+	<!-- Named-value {{...}} substitution happens as plain-text replacement into
+	     this XML before any C# expression below is compiled. Interpolating a
+	     secret directly into a C# string literal (e.g. "{{panw-client-secret}}")
+	     means a secret containing a double-quote or backslash would break policy
+	     compilation or change the expression's meaning. Loading named values into
+	     context.Variables here — via a plain XML attribute, which APIM's
+	     templating safely substitutes into — avoids that: every C# expression
+	     below reads a proper runtime string value instead of interpolated source
+	     text. -->
+	<set-variable name="panwClientId" value="{{panw-client-id}}" />
+	<set-variable name="panwClientSecret" value="{{panw-client-secret}}" />
+	<set-variable name="panwTsg" value="{{panw-tsg}}" />
+	<set-variable name="panwCustomerApp" value="{{panw-customer-app}}" />
+	<set-variable name="airsApiKeyForOAuth" value="{{airs-api}}" />
+	<!-- Optional override for the AIRS management API host, mirroring
+	     PrismaAirsEndpoint in panw-airs-scan-v2.1.2 — needed for non-US regions. -->
+	<set-variable name="airsManagementHost" value="@{
+            string host = context.Variables.GetValueOrDefault&lt;string&gt;(&quot;PrismaAirsManagementHost&quot;, null);
+            return !string.IsNullOrEmpty(host) ? host : &quot;api.sase.paloaltonetworks.com&quot;;
+        }" />
+	<!-- ============================================================================
      PHASE 1: CACHE CHECK
      ============================================================================ -->
-	<!-- Try to load a cached AIRS OAuth token. Key is scoped to TSG so multiple
-	     TSGs on the same gateway don't share tokens. -->
-	<cache-lookup-value key="@(&quot;panw-airs-oauth-token-&quot; + &quot;{{panw-tsg}}&quot;)" variable-name="PrismaAirsToken" />
+	<!-- Try to load a cached AIRS OAuth token. panw-tsg is a single, instance-wide
+	     named value — this key does not support multiple TSGs sharing one
+	     gateway; it only namespaces the cache entry in case other cache keys
+	     exist on the same APIM instance. Multi-TSG-per-gateway would require
+	     per-request TSG input, which this fragment does not support. -->
+	<cache-lookup-value key="@(&quot;panw-airs-oauth-token-&quot; + (string)context.Variables[&quot;panwTsg&quot;])" variable-name="PrismaAirsToken" />
 	<choose>
 		<when condition="@(context.Variables.GetValueOrDefault&lt;string&gt;(&quot;PrismaAirsToken&quot;) != null)">
 			<!-- Cache hit — token is still valid, nothing to do -->
@@ -82,14 +138,18 @@ CACHING STRATEGY:
 					<value>application/x-www-form-urlencoded</value>
 				</set-header>
 				<set-header name="Authorization" exists-action="override">
-					<!-- Basic auth: base64(client_id:client_secret) -->
+					<!-- Basic auth: base64(urlencode(client_id):urlencode(client_secret)),
+					     per RFC 6749 §2.3.1 — form-urlencode each component before joining
+					     with ":" and Base64-encoding, so a secret containing ":" or other
+					     reserved characters can't be misread as a field separator. -->
 					<value>@{
-            string credentials = "{{panw-client-id}}" + ":" + "{{panw-client-secret}}";
-            string encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(credentials));
+            string id = Uri.EscapeDataString((string)context.Variables["panwClientId"]);
+            string secret = Uri.EscapeDataString((string)context.Variables["panwClientSecret"]);
+            string encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(id + ":" + secret));
             return "Basic " + encoded;
         }</value>
 				</set-header>
-				<set-body>@("grant_type=client_credentials&amp;scope=tsg_id:" + "{{panw-tsg}}")</set-body>
+				<set-body>@("grant_type=client_credentials&amp;scope=tsg_id:" + Uri.EscapeDataString((string)context.Variables["panwTsg"]))</set-body>
 			</send-request>
 			<!-- Validate SCM auth response -->
 			<choose>
@@ -126,7 +186,7 @@ CACHING STRATEGY:
 				</when>
 			</choose>
 			<!-- ============================================================================
-             PHASE 3: AIRS OAUTH TOKEN (24-hour token)
+             PHASE 3: AIRS OAUTH TOKEN (3-hour token)
              ============================================================================ -->
 			<!-- Step 2: Use the SCM token to obtain a 3-hour AIRS OAuth token.
 			     airs-api → "client_id" body field (misleadingly named by AIRS; reuses the
@@ -134,7 +194,7 @@ CACHING STRATEGY:
 			     panw-customer-app → "customer_app", must match the Application name exactly
 			     as defined in the AIRS API Application definition. -->
 			<send-request mode="new" response-variable-name="airsOauthResponse" timeout="15" ignore-error="true">
-				<set-url>https://api.sase.paloaltonetworks.com/aisec/v1/mgmt/oauth/client_credential/accesstoken?tokenTtlInterval=3&amp;tokenTtlUnit=hours</set-url>
+				<set-url>@("https://" + (string)context.Variables["airsManagementHost"] + "/aisec/v1/mgmt/oauth/client_credential/accesstoken?tokenTtlInterval=3&amp;tokenTtlUnit=hours")</set-url>
 				<set-method>POST</set-method>
 				<set-header name="Content-Type" exists-action="override">
 					<value>application/json</value>
@@ -147,8 +207,8 @@ CACHING STRATEGY:
 				</set-header>
 				<set-body>@{
             return new JObject(
-                new JProperty("client_id", "{{airs-api}}"),
-                new JProperty("customer_app", "{{panw-customer-app}}")
+                new JProperty("client_id", (string)context.Variables["airsApiKeyForOAuth"]),
+                new JProperty("customer_app", (string)context.Variables["panwCustomerApp"])
             ).ToString(Newtonsoft.Json.Formatting.None);
         }</set-body>
 			</send-request>
@@ -187,17 +247,24 @@ CACHING STRATEGY:
              PHASE 4: CACHE STORE
              ============================================================================ -->
 			<!-- Derive cache TTL from expires_in (returned as a string of seconds), minus a
-			     1-hour safety buffer so the token is never used in its last hour.
-			     Falls back to 7200 (2h) if expires_in is absent or unparseable, which is
-			     conservative for the 3-hour token we requested. -->
+			     1-hour safety margin so the token is never used in its last hour. The
+			     fallback when expires_in is absent/unparseable must not outlive the
+			     token's real life: use the 3-hour interval we requested (10800s) minus
+			     the same margin, rather than a fixed value that could exceed it. If even
+			     that margin doesn't fit (a token shorter than 1h), cache briefly (5min)
+			     instead of not caching at all. -->
 			<set-variable name="airsOauthCacheTtl" value="@{
+            const int marginSeconds = 3600;
+            const int requestedTokenLifetimeSeconds = 3 * 3600;
             string raw = context.Variables.GetValueOrDefault&lt;JObject&gt;(&quot;airsOauthBody&quot;)?[&quot;expires_in&quot;]?.ToString();
-            if (int.TryParse(raw, out int expiresIn) &amp;&amp; expiresIn &gt; 3600) {
-                return expiresIn - 3600;
+            int lifetimeSeconds = requestedTokenLifetimeSeconds;
+            if (int.TryParse(raw, out int expiresIn) &amp;&amp; expiresIn &gt; 0) {
+                lifetimeSeconds = expiresIn;
             }
-            return 7200;
+            int ttl = lifetimeSeconds - marginSeconds;
+            return ttl &gt; 0 ? ttl : 300;
         }" />
-			<cache-store-value key="@(&quot;panw-airs-oauth-token-&quot; + &quot;{{panw-tsg}}&quot;)" value="@(context.Variables.GetValueOrDefault&lt;string&gt;(&quot;PrismaAirsToken&quot;))" duration="@((int)context.Variables[&quot;airsOauthCacheTtl&quot;])" />
+			<cache-store-value key="@(&quot;panw-airs-oauth-token-&quot; + (string)context.Variables[&quot;panwTsg&quot;])" value="@(context.Variables.GetValueOrDefault&lt;string&gt;(&quot;PrismaAirsToken&quot;))" duration="@((int)context.Variables[&quot;airsOauthCacheTtl&quot;])" />
 		</otherwise>
 	</choose>
 </fragment>
