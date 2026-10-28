@@ -97,6 +97,8 @@ case "$MODE" in
     assert_all "stub built-in tool deep field injection -> not allowed" "$HERE/fixtures/pretool-builtin-deep.json" "$PRE_EV" NOT_ALLOW
     assert_all "stub very-deep injection (past jq encoder limit) -> BLOCK"  "$HERE/fixtures/pretool-verydeep.json" "$PRE_EV" BLOCK
     assert_all "stub post-tool deep injection -> not allowed (output collector depth)" "$HERE/fixtures/posttool-injection.json" "PostToolUse" NOT_ALLOW
+    # Verify actual scan-request metadata, not just the final allow/block verdict.
+    python3 "$HERE/test_request_contract.py" || FAILED=1
     ;;
   live)
     : "${PRISMA_AIRS_API_KEY:?set PRISMA_AIRS_API_KEY for live}"; : "${PRISMA_AIRS_PROFILE_NAME:?set PRISMA_AIRS_PROFILE_NAME for live}"
