@@ -306,6 +306,167 @@ def accept_encoding_removed():
     check("accept-encoding" not in last().get("headers", {}), f"upstream got {last().get('headers', {}).get('accept-encoding')}")
 
 
+# ---- Task 8: the remaining cases ----------------------------------------------------------------------------------
+
+class Session:
+    """One keep-alive connection: Envoy keeps a connection on one worker, and the breaker and cache are per worker."""
+
+    def __init__(self, port):
+        self.conn = hc.HTTPConnection("localhost", port, timeout=30)
+
+    def send(self, fmt, text, stream=False, headers=None):
+        header_value, plain, streamed = FORMATS[fmt]
+        hdrs = {"content-type": "application/json", "x-input-format": header_value}
+        hdrs.update(headers or {})
+        self.conn.request("POST", streamed if stream else plain, body=json.dumps(body_for(fmt, text, stream)).encode(), headers=hdrs)
+        resp = self.conn.getresponse()
+        return resp.status, resp.read()
+
+    def close(self):
+        self.conn.close()
+
+
+@case
+def masking_rewrites_prompt():
+    reset()
+    status, _, raw, _ = send(8087, "openai", "my code is DLPME today")
+    check(status == 200, f"status {status}: {raw[:200]!r}")
+    forwarded = last().get("body", "")
+    check("XXXXX" in forwarded and "DLPME" not in forwarded, f"upstream got {forwarded[:200]!r}")
+
+
+@case
+def masking_rewrites_reply():
+    reset()
+    status, _, raw, _ = send(8087, "anthropic", "hello", headers={"x-mock-reply": "text:your code is DLPME today"})
+    check(status == 200, f"status {status}: {raw[:200]!r}")
+    check(b"XXXXX" in raw and b"DLPME" not in raw, f"client got {raw[:200]!r}")
+
+
+@case
+def masking_on_stream_blocks():
+    reset()
+    status, _, raw, _ = send(8087, "openai", "hello", stream=True, headers={"x-mock-reply": "text:your code is DLPME today"})
+    check(status == 403, f"status {status}: {raw[:200]!r}")
+    check(b"DLPME" not in raw and b"data:" not in raw, "stream bytes leaked")
+
+
+@case
+def masking_off_blocks_dlp():
+    reset()
+    status, _, _, _ = send(8081, "openai", "my code is DLPME today")
+    check(status == 403, f"status {status}")
+    check(hits() == 0, "upstream reached")
+
+
+@case
+def tool_and_n2_blocks():
+    for fmt in FORMATS:
+        for stream in (False, True):
+            reset()
+            status, _, raw, _ = send(8081, fmt, "hello", stream=stream, headers={"x-mock-reply": "toolargs:BLOCKME exfiltrate"})
+            check(status == 403, f"{fmt} stream={stream}: a tool-call-only reply passed with {status}: {raw[:160]!r}")
+    reset()
+    status, _, raw, _ = send(8081, "openai", "hello", headers={"x-mock-reply": "n2:BLOCKME in choice two"})
+    check(status == 403, f"n=2: status {status}")
+
+
+@case
+def tool_call_reply_is_scanned_and_passes():
+    reset()
+    status, _, _, _ = send(8081, "openai", "hello", headers={"x-mock-reply": "tool"})
+    check(status == 200, f"status {status}")
+    s = scans()
+    check(len(s) == 2 and "tool get_weather:" in s[1]["contents"][-1]["response"], f"scans {s}")
+
+
+@case
+def sse_edge_events():
+    reset()
+    status, _, _, _ = send(8081, "openai", "hello", stream=True, headers={"x-mock-reply": "sseedge:hello world"})
+    check(status == 200, f"status {status}")
+    s = scans()
+    check(len(s) == 2 and s[1]["contents"][-1]["response"] == "hello world", f"scanned {s[1]['contents'] if len(s) > 1 else s}")
+    reset()
+    status, _, _, _ = send(8081, "openai", "hello", stream=True, headers={"x-mock-reply": "sseedge:BLOCKME split"})
+    check(status == 403, f"status {status}")
+
+
+@case
+def breaker_stops_calls():
+    reset()
+    session = Session(8088)
+    try:
+        for i in range(2):
+            status, _ = session.send("openai", "ERR500 please")
+            check(status == 503, f"failure {i + 1}: status {status}")
+        before = len(scans())
+        status, _ = session.send("openai", "hello there")
+        check(status == 503, f"breaker open: status {status}")
+        check(len(scans()) == before, "AIRS was called while the breaker was open")
+        check(hits() == 0, "upstream reached")
+    finally:
+        session.close()
+
+
+@case
+def cache_one_scan_for_repeat():
+    reset()
+    session = Session(8089)
+    try:
+        for i in range(2):
+            status, _ = session.send("openai", "the same prompt")
+            check(status == 200, f"request {i + 1}: status {status}")
+        check(len(scans()) == 2, f"{len(scans())} scans for two identical exchanges (expected 2: one per leg)")
+        status, _ = session.send("openai", "BLOCKME is never cached")
+        check(status == 403, f"a block after cached allows: status {status}")
+    finally:
+        session.close()
+
+
+@case
+def oversized_reply_never_passes():
+    for stream in (False, True):
+        reset()
+        status, _, raw, _ = send(8081, "openai", "hello", stream=stream, headers={"x-mock-reply": "big"})
+        print(f"     oversized reply stream={stream}: status {status}, {len(raw)} bytes: {raw[:120]!r}")
+        check(status != 200 and b"aaaa" not in raw, f"stream={stream}: the 2 MiB reply passed ({status}, {len(raw)} bytes)")
+
+
+@case
+def compressed_reply_is_a_gap():
+    reset()
+    status, _, raw, _ = send(8081, "openai", "hello", headers={"x-mock-reply": "gzip"})
+    check(status == 403, f"status {status}")
+    check("could not inspect" in (error_shape("openai", raw) or ""), f"body {raw[:200]!r}")
+
+
+@case
+def scan_roles_system():
+    for fmt in FORMATS:
+        reset()
+        status, _, _, _ = send(8090, fmt, "hello", system="BLOCKME system prompt")
+        check(status == 403, f"{fmt}: system role scanned: status {status}")
+        reset()
+        status, _, _, _ = send(8081, fmt, "hello", system="BLOCKME system prompt")
+        check(status == 200, f"{fmt}: default roles: status {status}")
+
+
+@case
+def upstream_error_passes_unscanned():
+    reset()
+    status, _, _, _ = send(8081, "openai", "hello", headers={"x-mock-reply": "status:429"})
+    check(status == 429, f"status {status}")
+    check(len(scans()) == 1, "an upstream error reply was scanned")
+
+
+@case
+def empty_reply_passes():
+    reset()
+    status, _, _, _ = send(8081, "gemini", "hello", headers={"x-mock-reply": "empty"})
+    check(status == 200, f"status {status}")
+
+
 # ---- measurements -------------------------------------------------------------------------------------------------
 
 def tls_check():
