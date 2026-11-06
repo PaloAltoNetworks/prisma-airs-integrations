@@ -16,6 +16,7 @@ This page records every claim the README makes about behavior, with the result a
   | Anthropic | Amazon Bedrock, Claude Haiku 4.5 | Anthropic Messages |
   | OpenAI | Azure OpenAI | Chat Completions and Responses |
   | Gemini | Google Gemini 3.6 Flash | Gemini |
+
 - **Local Mode harness:** Omni Gateway 1.12.12 in Docker, set up with a TLS mock of Prisma AIRS and a mock upstream that replays replies recorded from the live providers (`make itest`).
 - **Unit:** the `core/` crate's tests (`make unit`).
 
@@ -56,6 +57,8 @@ A row where the model would not produce the payload would have counted as inconc
 | **Request body limit** | Over 1 MiB, the request got 413 before any policy ran. |
 | **Prisma AIRS latency from the gateway** | 389 to 426 ms per scan. |
 | **Streamed reply blocked on the reply leg** | 7.7 s (non-streamed) and 12.2 s (streamed) with Gemini: the model's generation time plus one scan. |
+| **The console form** | The basic settings and an Advanced Configuration group render, with every default shown. The API key is masked, with a reveal toggle and a choice of "Enter value" or "Use a stored secret"; the stored-secret path was not tested. A Policy version picker is shown, and the policy is the last inbound policy in the proxy's chain. |
+| **Attribution in Strata Cloud Manager** | The AI Sessions view lists every scan under Application Name "MuleSoft". Requests sent without a session header appear as `pan_<uuid>` sessions. |
 
 ### Fixed during the managed-gateway run
 
@@ -81,6 +84,5 @@ With masking on, the prompt of a request that asked for a **streamed** reply was
 
 These items are open; each needs the console:
 
-- the policy's form in the console: the basic and advanced groups, the hidden key field, the defaults;
 - the evidence line and the policy violation in Anypoint Monitoring;
 - whether a MuleSoft-managed gateway shows **Global connection buffer limit** (the documented way to raise the 1 MiB limit).

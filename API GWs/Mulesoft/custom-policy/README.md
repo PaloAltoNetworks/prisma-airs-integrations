@@ -119,6 +119,8 @@ make release
 
 The policy is added last in the chain. Keep it last.
 
+The key field is masked. The console also offers **Use a stored secret** for it, which this test did not exercise.
+
 Through the API Manager API, the same apply is one call:
 
 ```bash
@@ -209,7 +211,7 @@ curl -sS "https://YOUR_GATEWAY_HOST/YOUR_PROXY_BASE_PATH/chat/completions" \
 
 ## Technical Requirements
 
-1. **`app_name`** is `MuleSoft`, or `MuleSoft-<suffix>` when Application Name Suffix is set.
+1. **`app_name`** is `MuleSoft`, or `MuleSoft-<suffix>` when Application Name Suffix is set. Strata Cloud Manager's AI Sessions view shows it as the Application Name.
 2. **Correlation.** The policy sends:
    - `transaction_id`, from the gateway's `x-correlation-id`, per request;
    - `session_id`, from the session header or a verified claim, per conversation;
