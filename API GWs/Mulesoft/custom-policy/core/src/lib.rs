@@ -4,6 +4,8 @@
 //! build machine's own target. The policy crate only wires these functions to the PDK.
 
 pub mod airs;
+pub mod breaker;
+pub mod cache;
 pub mod decision;
 pub mod errors;
 pub mod extract;
