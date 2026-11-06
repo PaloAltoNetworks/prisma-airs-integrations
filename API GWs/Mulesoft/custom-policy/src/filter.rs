@@ -113,7 +113,8 @@ pub(crate) async fn request(state: RequestState, client: HttpClient, auth: Authe
         },
     };
 
-    let decision = decide(s, Leg::Prompt, &outcome, ctx.record.streamed, matches!(slot, Slot::Single(_)));
+    // A request body is never a stream, even when it asks for a streamed reply, so its prompt can be masked in place.
+    let decision = decide(s, Leg::Prompt, &outcome, false, matches!(slot, Slot::Single(_)));
     leg.outcome = outcome_name(&outcome, &decision);
     ctx.record.legs.push(leg);
     match decision {

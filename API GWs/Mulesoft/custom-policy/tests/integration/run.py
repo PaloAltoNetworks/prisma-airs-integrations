@@ -336,6 +336,17 @@ def masking_rewrites_prompt():
 
 
 @case
+def masking_rewrites_prompt_of_streamed_request():
+    # The request body is never a stream, even when it asks for a streamed reply: its prompt is masked the same way.
+    reset()
+    status, _, raw, _ = send(8087, "openai", "my code is DLPME today", stream=True)
+    check(status == 200, f"status {status}: {raw[:200]!r}")
+    forwarded = last().get("body", "")
+    check("XXXXX" in forwarded and "DLPME" not in forwarded, f"upstream got {forwarded[:200]!r}")
+    check('"stream": true' in forwarded or '"stream":true' in forwarded, f"upstream got {forwarded[:200]!r}")
+
+
+@case
 def masking_rewrites_reply():
     reset()
     status, _, raw, _ = send(8087, "anthropic", "hello", headers={"x-mock-reply": "text:your code is DLPME today"})
