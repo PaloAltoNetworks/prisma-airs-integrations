@@ -1,6 +1,7 @@
 //! Turning request and response bodies into the text Prisma AIRS scans.
 
 pub mod request;
+pub mod response;
 
 use std::fmt;
 

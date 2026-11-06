@@ -1,0 +1,10 @@
+data: {"choices":[],"created":0,"id":"","model":"","object":"","prompt_filter_results":[{"prompt_index":0,"content_filter_results":{"hate":{"filtered":false,"severity":"safe"},"jailbreak":{"detected":false,"filtered":false},"self_harm":{"filtered":false,"severity":"safe"},"sexual":{"filtered":false,"severity":"safe"},"violence":{"filtered":false,"severity":"safe"}}}]}
+
+data: {"choices":[{"content_filter_results":{},"delta":{"content":"","refusal":null,"role":"assistant"},"finish_reason":null,"index":0,"logprobs":null}],"created":1793954398,"id":"chatcmpl-Eh9mImNwYlmZwW37s4oIc31PDPfoX","model":"gpt-6-luna-2026-09-22","obfuscation":"DA","object":"chat.completion.chunk","service_tier":"default","system_fingerprint":null}
+
+data: {"choices":[{"content_filter_results":{"protected_material_text":{"detected":false,"filtered":false}},"delta":{"content":"ready"},"finish_reason":null,"index":0,"logprobs":null}],"created":1793954398,"id":"chatcmpl-Eh9mImNwYlmZwW37s4oIc31PDPfoX","model":"gpt-6-luna-2026-09-22","obfuscation":"mEtt0F3FKv516Wz","object":"chat.completion.chunk","service_tier":"default","system_fingerprint":null}
+
+data: {"choices":[{"content_filter_results":{},"delta":{},"finish_reason":"stop","index":0,"logprobs":null}],"created":1793954398,"id":"chatcmpl-Eh9mImNwYlmZwW37s4oIc31PDPfoX","model":"gpt-6-luna-2026-09-22","obfuscation":"CHt6bUTdp9afAY","object":"chat.completion.chunk","service_tier":"default","system_fingerprint":null}
+
+data: [DONE]
+
