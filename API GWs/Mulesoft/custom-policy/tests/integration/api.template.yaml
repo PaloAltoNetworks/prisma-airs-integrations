@@ -1,0 +1,17 @@
+---
+apiVersion: gateway.mulesoft.com/v1alpha1
+kind: ApiInstance
+metadata:
+  name: itest-__NAME__
+spec:
+  address: http://0.0.0.0:__PORT__
+  services:
+    upstream:
+      address: http://upstream:8080
+      routes:
+        - config:
+            destinationPath: /
+  policies:
+    - policyRef:
+        name: __POLICY_REF__
+      config: __CONFIG__

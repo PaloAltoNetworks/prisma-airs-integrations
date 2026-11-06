@@ -8,6 +8,7 @@ pub mod breaker;
 pub mod cache;
 pub mod decision;
 pub mod errors;
+pub mod evidence;
 pub mod extract;
 pub mod format;
 pub mod identity;

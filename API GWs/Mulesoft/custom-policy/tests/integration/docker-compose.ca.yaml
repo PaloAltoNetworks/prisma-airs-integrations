@@ -1,0 +1,5 @@
+# Adds the harness CA to Flex's trust store, for a Flex that verifies the AIRS certificate.
+services:
+  local-flex:
+    volumes:
+      - ./certs/ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro

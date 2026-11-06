@@ -1,0 +1,25 @@
+# The Local Mode harness: Flex (the policy under test), a TLS mock AIRS and a mock model upstream.
+services:
+  local-flex:
+    image: mulesoft/flex-gateway:1.12.12
+    ports:
+      - "8081-8092:8081-8092"
+    volumes:
+      - ./config:/usr/local/share/mulesoft/flex-gateway/conf.d/
+    depends_on: [airs, upstream]
+  airs:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/app/mock_airs.py"]
+    ports:
+      - "18443:8443"
+    volumes:
+      - ./mock_airs.py:/app/mock_airs.py:ro
+      - ./certs:/certs:ro
+  upstream:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/app/mock_upstream.py"]
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./mock_upstream.py:/app/mock_upstream.py:ro
+      - ../../core/tests/fixtures/response:/fixtures:ro
