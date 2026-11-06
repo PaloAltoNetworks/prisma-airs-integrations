@@ -1,0 +1,5 @@
+implementation:
+  ref: .
+definition:
+  refMode: filesystem
+  ref: definition

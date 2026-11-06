@@ -1,0 +1,238 @@
+---
+apiVersion: gateway.mulesoft.com/v1alpha1
+kind: Extension
+metadata:
+  labels:
+    title: Prisma AIRS Guardrails
+    description: >-
+      Scans LLM traffic with Palo Alto Networks Prisma AIRS (AI Runtime Security, API Intercept) and enforces the
+      verdict inline, on the prompt before it reaches the model and on the reply before it reaches the client. Covers
+      the OpenAI (Chat Completions and Responses), Anthropic Messages and Gemini formats, streamed and not, including
+      tool calls. Fails closed by default.
+    category: LLM
+    metadata/interfaceScope: api
+    metadata/capabilities/assetTypes: llm
+spec:
+  extends:
+    - name: extension-definition
+      namespace: default
+  properties:
+    airsApiKey:
+      type: string
+      title: Prisma AIRS API Key
+      description: >-
+        The API key of a Prisma AIRS API Intercept application, created in Strata Cloud Manager. It is sent only to the
+        Prisma AIRS endpoint, in the x-pan-token header, and never logged. Keys are bound to a region: use the endpoint
+        of the region the key was created in.
+      '@context':
+        '@characteristics':
+          - security:sensitive
+    airsEndpoint:
+      type: string
+      format: service
+      title: Prisma AIRS API Endpoint
+      default: https://service.api.aisecurity.paloaltonetworks.com
+      description: >-
+        The Prisma AIRS API host of your tenant's region, with https. The default is the US host. The policy appends
+        /v1/scan/sync/request. See the policy's README for the regional hosts.
+    profileName:
+      type: string
+      title: AI Security Profile Name
+      description: >-
+        The name of the Prisma AIRS security profile that judges this traffic, exactly as it appears in Strata Cloud
+        Manager. Set this or the profile ID, not both (unless a profile map is used).
+    profileId:
+      type: string
+      title: AI Security Profile ID
+      description: >-
+        The ID of the security profile. An ID survives a profile rename; a name does not. Set this or the profile
+        name, not both.
+    scanRequests:
+      type: boolean
+      default: true
+      title: Scan Prompts
+      description: Scan each prompt before it is forwarded to the model.
+    scanResponses:
+      type: boolean
+      default: true
+      title: Scan Responses
+      description: >-
+        Scan each reply before it reaches the client. Streamed replies are buffered in full and scanned once, so the
+        client receives the stream at the end instead of token by token.
+    enforcementMode:
+      type: string
+      enum:
+        - enforce
+        - monitor
+      default: enforce
+      title: Enforcement Mode
+      description: >-
+        enforce blocks what Prisma AIRS blocks. monitor scans and records every verdict but never changes what the
+        client receives, for an observe-only rollout.
+    onApiError:
+      type: string
+      enum:
+        - block
+        - allow
+      default: block
+      title: When Prisma AIRS Is Unavailable
+      description: >-
+        block (the default) answers 503 when the scan fails, times out or returns an unreadable verdict. allow lets the
+        traffic through unscanned, and every such pass is logged.
+    onScanError:
+      type: string
+      enum:
+        - block
+        - allow
+      default: block
+      title: When Content Cannot Be Inspected
+      description: >-
+        block (the default) answers 403 when the policy cannot read what it should scan: an unknown format, a body
+        that is not JSON, an encoded reply, or content over the scan limit. allow lets it through, logged.
+    advancedConfiguration:
+      type: object
+      title: Advanced Configuration
+      description: Optional tuning. Every setting has a default.
+      properties:
+        timeoutMs:
+          type: integer
+          default: 5000
+          minimum: 100
+          maximum: 60000
+          title: Scan Timeout (ms)
+          description: >-
+            The bound on each Prisma AIRS call. A scan that takes longer is treated as unavailable. Keep it well under
+            the gateway's upstream timeout.
+        scanRetries:
+          type: integer
+          default: 0
+          minimum: 0
+          maximum: 3
+          title: Scan Retries
+          description: >-
+            Extra attempts after a timeout, a transport error, 429 or 5xx. They are immediate, with no backoff, and each
+            one adds up to the timeout to the request.
+        breakerFailures:
+          type: integer
+          default: 0
+          minimum: 0
+          maximum: 100
+          title: Circuit Breaker Threshold
+          description: >-
+            Consecutive scan failures after which the policy stops calling Prisma AIRS for the cooldown. 0 turns the
+            breaker off. An open breaker does not allow traffic: what happens is still decided by "When Prisma AIRS Is
+            Unavailable".
+        breakerCooldownS:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 3600
+          title: Circuit Breaker Cooldown (s)
+          description: How long an open breaker waits before it tries Prisma AIRS again.
+        scanMessageRoles:
+          type: array
+          items:
+            type: string
+            enum:
+              - user
+              - system
+              - assistant
+              - tool
+          default:
+            - user
+          title: Scanned Message Roles
+          description: >-
+            Which conversation roles are scanned on the prompt leg. The newest user turn is always scanned. Adding
+            tool closes the tool-result injection path; adding system closes system-prompt injection.
+        maxScanChars:
+          type: integer
+          default: 20000
+          minimum: 1
+          maximum: 1000000
+          title: Maximum Scanned Characters
+          description: The most characters sent to Prisma AIRS from one leg.
+        truncationFailClosed:
+          type: boolean
+          default: true
+          title: Block Content Over the Limit
+          description: >-
+            true (the default) treats content over the limit as content that could not be inspected. false scans the
+            first part only and lets the rest through, logged.
+        applyDlpMasking:
+          type: boolean
+          default: false
+          title: Apply DLP Masking
+          description: >-
+            Write the masked text Prisma AIRS returns back into the prompt or reply, for verdicts that are only about
+            sensitive data. Non-streamed bodies only; on a stream such a verdict is a block. Masking never overrides
+            any other block.
+        appNameSuffix:
+          type: string
+          title: Application Name Suffix
+          description: >-
+            Appended to MuleSoft in the app_name sent to Prisma AIRS, so scans are attributable in Strata Cloud Manager.
+            HR-Chatbot gives MuleSoft-HR-Chatbot. Letters, digits and punctuation, up to 64 characters.
+        userHeader:
+          type: string
+          title: User Header
+          description: >-
+            A request header that names the end user, sent as app_user. Without it, the calling client application is
+            the user.
+        userClaim:
+          type: string
+          title: User Claim
+          description: >-
+            A claim of a token already verified by a JWT validation policy that runs before this one, sent as app_user.
+            It takes precedence over the user header.
+        sessionHeader:
+          type: string
+          default: x-session-id
+          title: Session Header
+          description: >-
+            A request header that identifies the conversation, sent as session_id. Without a valid value, session_id is
+            left out rather than invented.
+        sessionClaim:
+          type: string
+          title: Session Claim
+          description: A verified token claim that identifies the conversation, used when the session header is absent.
+        profileMap:
+          type: array
+          items:
+            type: object
+            properties:
+              clientName:
+                type: string
+                title: Client Application Name
+              profileName:
+                type: string
+                title: AI Security Profile Name
+            required:
+              - clientName
+              - profileName
+          title: Profile Map
+          description: >-
+            A security profile per calling client application, matched on the client application's name. Needs a
+            fallback profile.
+        fallbackProfileName:
+          type: string
+          title: Fallback Profile Name
+          description: The profile for client applications the profile map does not name. Required with a profile map.
+        verdictCacheTtlS:
+          type: integer
+          default: 0
+          minimum: 0
+          maximum: 300
+          title: Verdict Cache TTL (s)
+          description: >-
+            Caches allow verdicts for identical content for this long. 0 (the default) turns the cache off. A profile
+            change in Strata Cloud Manager takes effect only after cached entries expire. Never used with masking.
+        showCategories:
+          type: boolean
+          default: false
+          title: Show Detection Categories
+          description: >-
+            Include the detection categories in the error body the client receives. Off by default: the client gets a
+            generic message and the scan ID.
+  required:
+    - airsApiKey
+    - airsEndpoint
