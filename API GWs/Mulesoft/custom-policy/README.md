@@ -223,7 +223,8 @@ curl -sS "https://YOUR_GATEWAY_HOST/YOUR_PROXY_BASE_PATH/chat/completions" \
 5. **Body size.** The gateway buffers at most 1 MiB per body.
    - **Larger request:** gets 413 before any policy runs (measured on the managed gateway).
    - **Larger reply:** never reaches the client; it ends as the gateway's own `500` (measured in Local Mode).
-   - **Raising the limit:** MuleSoft documents it as `FLEX_DOWNSTREAM_CONNECTION_BUFFER_LIMIT_BYTES`, also shown as **Global connection buffer limit** under Runtime Manager › Omni Gateways › your gateway › Runtime Configurations ([environment variables](https://docs.mulesoft.com/gateway/latest/conn-env-variables), [stop iteration](https://docs.mulesoft.com/pdk/latest/policies-pdk-configure-features-headers-stop)).
+   - **Raising the limit:** MuleSoft documents it as `FLEX_DOWNSTREAM_CONNECTION_BUFFER_LIMIT_BYTES` ([environment variables](https://docs.mulesoft.com/gateway/latest/conn-env-variables), [stop iteration](https://docs.mulesoft.com/pdk/latest/policies-pdk-configure-features-headers-stop)).
+   - **On a managed gateway,** the setting is Runtime Manager › Managed Omni Gateways › your gateway › Runtime configuration › Properties › Connection Buffer Limits › **Global connection buffer limit**, set to `1048576` by default. Trial accounts cannot change runtime configurations, so a higher limit was not tested.
 6. **Streaming is buffered.** A streamed reply is released only after its verdict. The client therefore waits for the whole reply, plus one scan (about 0.4 seconds from the managed gateway), before it sees the first token.
 7. **Position.** The policy runs last in the chain, where API Manager puts it.
 8. **TLS.** The gateway verifies the Prisma AIRS certificate against its own trust store.

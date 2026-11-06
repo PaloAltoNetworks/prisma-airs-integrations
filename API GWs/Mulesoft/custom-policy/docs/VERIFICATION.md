@@ -58,6 +58,8 @@ A row where the model would not produce the payload would have counted as inconc
 | **Prisma AIRS latency from the gateway** | 389 to 426 ms per scan. |
 | **Streamed reply blocked on the reply leg** | 7.7 s (non-streamed) and 12.2 s (streamed) with Gemini: the model's generation time plus one scan. |
 | **The console form** | The basic settings and an Advanced Configuration group render, with every default shown. The API key is masked, with a reveal toggle and a choice of "Enter value" or "Use a stored secret"; the stored-secret path was not tested. A Policy version picker is shown, and the policy is the last inbound policy in the proxy's chain. |
+| **The body limit setting** | Runtime Manager shows **Global connection buffer limit** `1048576` under the gateway's Runtime configuration › Properties. The page states that Runtime Configurations are not available for trial accounts, so a higher limit was not tested. |
+| **Logs** | The gateway forwards its logs to Anypoint at Info level. When a configuration changes, the agent logs each policy as it is added, ours with "StopIteration Enabled", and the Prisma AIRS endpoint as a gateway service. |
 | **Attribution in Strata Cloud Manager** | The AI Sessions view lists every scan under Application Name "MuleSoft". Requests sent without a session header appear as `pan_<uuid>` sessions. |
 
 ### Fixed during the managed-gateway run
@@ -84,5 +86,4 @@ With masking on, the prompt of a request that asked for a **streamed** reply was
 
 These items are open; each needs the console:
 
-- the evidence line and the policy violation in Anypoint Monitoring;
-- whether a MuleSoft-managed gateway shows **Global connection buffer limit** (the documented way to raise the 1 MiB limit).
+- the policy's evidence line in the gateway's logs, and the policy violation in Anypoint Monitoring.
