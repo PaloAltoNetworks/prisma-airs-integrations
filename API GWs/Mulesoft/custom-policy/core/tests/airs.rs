@@ -1,4 +1,7 @@
-use prisma_airs_core::airs::{clamp_id, parse_verdict, scan_request, Action, Leg, ScanContext, ScanError};
+use prisma_airs_core::airs::{
+    clamp_id, parse_tool_verdict, parse_verdict, scan_request, tool_event_request, Action, Leg, ScanContext, ScanError,
+    ToolEvent, ToolMethod,
+};
 use prisma_airs_core::settings::ProfileRef;
 use serde_json::{json, Value};
 
@@ -207,4 +210,101 @@ fn masked_text_read_from_leg_field() {
 fn errors_never_contain_the_reply_body() {
     let err = parse_verdict(500, b"secret-looking upstream text", Leg::Prompt).unwrap_err();
     assert!(!format!("{err:?} {err}").contains("secret-looking"));
+}
+
+// ---- MCP tool events ---------------------------------------------------------------------------------------------
+
+fn call_event() -> ToolEvent {
+    ToolEvent {
+        method: ToolMethod::Call,
+        server_name: "deepwiki-test".into(),
+        tool_invoked: Some("ask_wiki_question".into()),
+        input: r#"{"question":"hi"}"#.into(),
+        output: String::new(),
+    }
+}
+
+#[test]
+fn tool_event_request_has_the_contract_shape() {
+    let v = tool_event_request(&ctx(), &call_event());
+    assert_eq!(
+        v["contents"],
+        json!([{"tool_event": {
+            "metadata": {"ecosystem": "mcp", "method": "tools/call", "server_name": "deepwiki-test", "tool_invoked": "ask_wiki_question"},
+            "input": "{\"question\":\"hi\"}",
+            "output": ""
+        }}])
+    );
+    let event = &v["contents"][0]["tool_event"];
+    assert!(event["input"].is_string() && event["output"].is_string(), "AIRS refuses a JSON value in input or output");
+    assert_eq!(v["ai_profile"], json!({"profile_name":"my-security-profile"}));
+    assert_eq!(v["metadata"], json!({"app_name":"MuleSoft","app_user":"hr-bot","ai_model":"gpt-test"}));
+    assert_eq!(v["transaction_id"], "5b1e8f3a-2c4d-4e6f-8a9b-0c1d2e3f4a5b");
+    assert_eq!(v["session_id"], "conv-42");
+    assert!(v.get("tr_id").is_none());
+}
+
+#[test]
+fn tool_event_without_a_tool_leaves_tool_invoked_out() {
+    let event = ToolEvent {
+        method: ToolMethod::List,
+        server_name: "deepwiki-test".into(),
+        tool_invoked: None,
+        input: "{}".into(),
+        output: "[]".into(),
+    };
+    let v = tool_event_request(&ctx(), &event);
+    let metadata = v["contents"][0]["tool_event"]["metadata"].as_object().unwrap().clone();
+    assert_eq!(metadata.get("method"), Some(&json!("tools/list")));
+    assert!(!metadata.contains_key("tool_invoked"));
+    let mut keys: Vec<&String> = metadata.keys().collect();
+    keys.sort();
+    assert_eq!(keys, vec!["ecosystem", "method", "server_name"], "tool_event.metadata allows no other fields");
+}
+
+#[test]
+fn tool_verdict_reads_tool_detections() {
+    let call = parse_tool_verdict(200, &fixture("tool_call_block.json")).unwrap();
+    assert_eq!(call.action, Action::Block);
+    assert!(call.scan_id.is_some());
+    assert_eq!(call.detections, vec!["tool_input.agent".to_string(), "tool_input.injection".to_string()]);
+    let list = parse_tool_verdict(200, &fixture("tool_list_block.json")).unwrap();
+    assert_eq!(list.action, Action::Block);
+    assert_eq!(list.detections, vec!["tool_output.agent".to_string(), "tool_output.injection".to_string()]);
+    assert!(list.masked_text.is_none());
+}
+
+#[test]
+fn tool_verdict_allow_has_no_detections() {
+    for name in ["tool_call_allow.json", "tool_list_allow.json"] {
+        let v = parse_tool_verdict(200, &fixture(name)).unwrap();
+        assert_eq!(v.action, Action::Allow, "{name}");
+        assert!(v.detections.is_empty(), "{name}: {:?}", v.detections);
+    }
+}
+
+#[test]
+fn tool_verdict_falls_back_to_the_summary() {
+    let body = json!({
+        "action": "block", "category": "malicious", "scan_id": "s-1",
+        "tool_detected": {"verdict": "malicious", "summary": {"detections": {"agent": false, "injection": true}, "threats": []},
+                          "input_detected": {"detection_entries": null}, "output_detected": {"detection_entries": null}}
+    })
+    .to_string();
+    assert_eq!(parse_tool_verdict(200, body.as_bytes()).unwrap().detections, vec!["tool.injection".to_string()]);
+}
+
+#[test]
+fn tool_verdict_degraded_allow_is_incomplete() {
+    let body = json!({"action": "allow", "category": "benign", "error": true,
+                      "errors": [{"feature": "agent", "status": "timeout"}], "tool_detected": {}})
+    .to_string();
+    assert_eq!(parse_tool_verdict(200, body.as_bytes()), Err(ScanError::Incomplete(vec!["agent:timeout".into()])));
+}
+
+#[test]
+fn tool_verdict_errors_like_any_scan() {
+    assert_eq!(parse_tool_verdict(400, b"{}"), Err(ScanError::Status(400)));
+    assert_eq!(parse_tool_verdict(200, b"<html>"), Err(ScanError::Undecodable));
+    assert_eq!(parse_tool_verdict(200, br#"{"category":"benign"}"#), Err(ScanError::MissingAction));
 }

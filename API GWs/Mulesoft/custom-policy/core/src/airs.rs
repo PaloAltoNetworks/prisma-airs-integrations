@@ -7,7 +7,12 @@
 //!   the one that needs to be scanned, and the previous elements are the context"), so its verdict is about the reply.
 //! - `action` is the gate. `category` is an umbrella value, never a detector; detections are the true flags under
 //!   `prompt_detected` or `response_detected`.
+//! - MCP tool events (`contents[].tool_event`) follow the contract AIRS enforces: `metadata.ecosystem` `mcp`, `metadata.method`
+//!   `tools/call` or `tools/list` only, `metadata` with no other fields than `server_name` and the optional `tool_invoked`,
+//!   and `input`/`output` as JSON text in strings. A `tools/list` output is the bare array of tools: the `{"tools":[..]}`
+//!   result object is a 400 (measured on the lab tenant, 7 Nov 2026). Their detections sit under `tool_detected`.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use serde_json::{json, Map, Value};
@@ -45,6 +50,61 @@ pub struct ScanContext {
 
 /// The scan request body. `prompt_context` is used on the response leg only.
 pub fn scan_request(ctx: &ScanContext, leg: Leg, text: &str, prompt_context: Option<&str>) -> Value {
+    let mut body = envelope(ctx);
+    let contents = match (leg, prompt_context.filter(|p| !p.trim().is_empty())) {
+        (Leg::Prompt, _) => json!([{ "prompt": text }]),
+        (Leg::Response, Some(prompt)) => json!([{ "prompt": prompt }, { "response": text }]),
+        (Leg::Response, None) => json!([{ "response": text }]),
+    };
+    body.insert("contents".into(), contents);
+    Value::Object(body)
+}
+
+/// The tool methods AIRS accepts as tool events: its method allowlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolMethod {
+    Call,
+    List,
+}
+
+impl ToolMethod {
+    pub fn name(self) -> &'static str {
+        match self {
+            ToolMethod::Call => "tools/call",
+            ToolMethod::List => "tools/list",
+        }
+    }
+}
+
+/// An MCP tool event. `input` and `output` are JSON text; a `tools/list` output is the bare array of tools.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolEvent {
+    pub method: ToolMethod,
+    /// The MCP server the event belongs to, so scans of different servers can be told apart.
+    pub server_name: String,
+    /// The tool called; `None` for `tools/list`, whose output names each tool.
+    pub tool_invoked: Option<String>,
+    pub input: String,
+    pub output: String,
+}
+
+/// The scan request body for a tool event, with the same correlation, profile and metadata as [`scan_request`].
+pub fn tool_event_request(ctx: &ScanContext, event: &ToolEvent) -> Value {
+    let mut body = envelope(ctx);
+    let mut metadata = Map::new();
+    metadata.insert("ecosystem".into(), Value::String("mcp".into()));
+    metadata.insert("method".into(), Value::String(event.method.name().into()));
+    metadata.insert("server_name".into(), Value::String(event.server_name.clone()));
+    if let Some(tool) = &event.tool_invoked {
+        metadata.insert("tool_invoked".into(), Value::String(tool.clone()));
+    }
+    let tool_event = json!({ "metadata": metadata, "input": event.input, "output": event.output });
+    body.insert("contents".into(), json!([{ "tool_event": tool_event }]));
+    Value::Object(body)
+}
+
+/// Everything a scan request carries besides its contents.
+fn envelope(ctx: &ScanContext) -> Map<String, Value> {
     let mut body = Map::new();
     if let Some(id) = &ctx.transaction_id {
         body.insert("transaction_id".into(), Value::String(id.clone()));
@@ -64,13 +124,7 @@ pub fn scan_request(ctx: &ScanContext, leg: Leg, text: &str, prompt_context: Opt
         metadata.insert("ai_model".into(), Value::String(model.clone()));
     }
     body.insert("metadata".into(), Value::Object(metadata));
-    let contents = match (leg, prompt_context.filter(|p| !p.trim().is_empty())) {
-        (Leg::Prompt, _) => json!([{ "prompt": text }]),
-        (Leg::Response, Some(prompt)) => json!([{ "prompt": prompt }, { "response": text }]),
-        (Leg::Response, None) => json!([{ "response": text }]),
-    };
-    body.insert("contents".into(), contents);
-    Value::Object(body)
+    body
 }
 
 /// A correlation id as AIRS accepts it: trimmed, printable ASCII, at most [`MAX_ID_CHARS`]. Never truncated: a cut id
@@ -194,6 +248,27 @@ pub fn parse_verdict(status: u16, body: &[u8], leg: Leg) -> Result<Verdict, Scan
         .filter(|s| !s.is_empty())
         .map(str::to_string);
     Ok(Verdict { action, scan_id: text("scan_id"), report_id: text("report_id"), category, detections, masked_text })
+}
+
+/// Reads a tool event's verdict: the same gate and degraded-allow rule as [`parse_verdict`], plus the true flags of
+/// every `tool_detected` detection entry, named `tool_input.<flag>` or `tool_output.<flag>` (or `tool.<flag>` from the
+/// summary when no entry has any).
+pub fn parse_tool_verdict(status: u16, body: &[u8]) -> Result<Verdict, ScanError> {
+    let mut verdict = parse_verdict(status, body, Leg::Prompt)?;
+    let value: Value = serde_json::from_slice(body).map_err(|_| ScanError::Undecodable)?;
+    let tool = value.get("tool_detected");
+    let mut flags = Vec::new();
+    for (side, name) in [("input_detected", "tool_input"), ("output_detected", "tool_output")] {
+        let entries = tool.and_then(|t| t.get(side)).and_then(|s| s.get("detection_entries")).and_then(Value::as_array);
+        let set: BTreeSet<String> = entries.into_iter().flatten().flat_map(|e| true_flags(e.get("detections"))).collect();
+        flags.extend(set.into_iter().map(|f| format!("{name}.{f}")));
+    }
+    if flags.is_empty() {
+        let summary = tool.and_then(|t| t.get("summary")).and_then(|s| s.get("detections"));
+        flags.extend(true_flags(summary).into_iter().map(|f| format!("tool.{f}")));
+    }
+    verdict.detections.extend(flags);
+    Ok(verdict)
 }
 
 fn true_flags(value: Option<&Value>) -> Vec<String> {
