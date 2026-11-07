@@ -9,9 +9,13 @@
 //! A batch is never classified by one member: `[ping, tools/call]` is two members, each with its own kind (Kong v3's
 //! lesson: classifying by the first member let a `ping` carry an unscanned `tools/call`).
 
+pub mod reply;
+pub mod request;
+
 use serde_json::Value;
 
-use crate::extract::is_binary;
+use crate::airs::ToolEvent;
+use crate::extract::{is_binary, truncate, Extracted, Slot};
 
 /// The members of a JSON-RPC message. Anything else at a message's top level is extra content, and is scanned.
 pub const ENVELOPE: [&str; 6] = ["jsonrpc", "id", "method", "params", "result", "error"];
@@ -55,6 +59,23 @@ pub struct Request {
     pub batch: bool,
 }
 
+/// What one scan sends to Prisma AIRS: a tool event, or text, which is sent as a prompt on both legs (MCP text reaches
+/// a model as input).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Scan {
+    Tool(ToolEvent),
+    Text(Extracted),
+}
+
+/// One scan of a leg.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegScan {
+    /// The request member it belongs to; `None` for the messages of a reply that answer no member.
+    pub member: Option<usize>,
+    pub method: Option<String>,
+    pub scan: Scan,
+}
+
 /// The MCP reading of a request body, or `None` when it is not MCP.
 pub fn classify(body: &Value) -> Option<Request> {
     match body {
@@ -94,14 +115,27 @@ pub fn kind_of(method: &str) -> Kind {
     }
 }
 
-/// The text of a value, in a stable order (an array's items in order, an object's members by key): every non-blank string, and every object key that is not a plain
-/// identifier (an injection can sit in a schema's property name). At the top level of the value, `jsonrpc` and `id`
-/// are protocol fields and are skipped; deeper down they are content. Binary payloads (data URIs, long base64 under
-/// data-like keys such as `blob`) are left out.
+/// The text of a value, in a stable order (an array's items in order, an object's members by key): every non-blank
+/// string, and every object key that is not a plain identifier (an injection can sit in a schema's property name).
+/// At the top level of the value, `jsonrpc`, `id` and `method` are protocol and are skipped; deeper down they are
+/// content. Binary payloads (data URIs, long base64 under data-like keys such as `blob`) are left out.
 pub fn text_values(value: &Value) -> Vec<String> {
     let mut out = Vec::new();
     collect(value, None, true, &mut out);
     out
+}
+
+/// One member of an object: its key when it is not a plain identifier, then its value's text, with nothing skipped.
+pub(crate) fn entry_text(key: &str, value: &Value, out: &mut Vec<String>) {
+    if !plain_identifier(key) && !key.trim().is_empty() {
+        out.push(key.to_string());
+    }
+    collect(value, Some(key), false, out);
+}
+
+/// A value's text with nothing skipped.
+pub(crate) fn value_text(value: &Value, out: &mut Vec<String>) {
+    collect(value, None, false, out);
 }
 
 fn collect(value: &Value, key: Option<&str>, top: bool, out: &mut Vec<String>) {
@@ -110,17 +144,35 @@ fn collect(value: &Value, key: Option<&str>, top: bool, out: &mut Vec<String>) {
         Value::Array(items) => items.iter().for_each(|v| collect(v, None, false, out)),
         Value::Object(map) => {
             for (k, v) in map {
-                if top && (k == "jsonrpc" || k == "id") {
+                if top && matches!(k.as_str(), "jsonrpc" | "id" | "method") {
                     continue;
                 }
-                if !plain_identifier(k) && !k.trim().is_empty() {
-                    out.push(k.clone());
-                }
-                collect(v, Some(k), false, out);
+                entry_text(k, v, out);
             }
         }
         _ => {}
     }
+}
+
+/// Texts joined one per line for one scan, keeping the first characters over the limit; `None` when there is none.
+pub(crate) fn text_scan(texts: Vec<String>, max_chars: usize) -> Option<Extracted> {
+    if texts.is_empty() {
+        return None;
+    }
+    let (text, truncated) = truncate(texts.join("\n"), max_chars);
+    Some(Extracted { text, truncated, slot: Slot::Multi })
+}
+
+/// A tool event, or, when its input and output together exceed the limit, the text of `sources` (the values the event
+/// was built from): AIRS cannot take a cut JSON string, so the content is scanned as text, cut only if its text is too.
+pub(crate) fn tool_or_text(event: ToolEvent, sources: &[&Value], max_chars: usize) -> Scan {
+    if event.input.chars().count() + event.output.chars().count() <= max_chars {
+        return Scan::Tool(event);
+    }
+    let mut texts = Vec::new();
+    sources.iter().for_each(|v| value_text(v, &mut texts));
+    let empty = Extracted { text: String::new(), truncated: true, slot: Slot::Multi };
+    Scan::Text(text_scan(texts, max_chars).unwrap_or(empty))
 }
 
 /// Letters, digits and `_ - . $ / :`, 1 to 64 characters: a key that cannot carry a sentence.
