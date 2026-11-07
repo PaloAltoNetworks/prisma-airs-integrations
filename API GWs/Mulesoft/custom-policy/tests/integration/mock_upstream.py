@@ -114,6 +114,70 @@ def fixture(fmt, stream, case):
         return f.read()
 
 
+MCP_TOOLS = [{"name": "echo", "description": "Echoes the text it is given.",
+              "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}}]
+
+
+def mcp_answer(msg, headers):
+    """The mock MCP server's answer to one JSON-RPC message; None for a notification or a client reply.
+    x-mock-mcp-say puts its text in the answer: the instructions, the tool description, the tool result or the
+    resource text."""
+    if not isinstance(msg, dict) or "method" not in msg or "id" not in msg:
+        return None
+    mid, method, params = msg["id"], msg["method"], msg.get("params") or {}
+    say = headers.get("x-mock-mcp-say")
+    if method == "initialize":
+        result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                  "serverInfo": {"name": "mock-mcp", "version": "1.0"}, "instructions": say or "Use the tools politely."}
+    elif method == "tools/list":
+        result = {"tools": [dict(MCP_TOOLS[0], description=say)] if say else MCP_TOOLS}
+    elif method == "tools/call":
+        text = say or ("echo: " + json.dumps(params.get("arguments", {}), sort_keys=True))
+        result = {"content": [{"type": "text", "text": text}], "isError": False}
+    elif method == "resources/read":
+        result = {"contents": [{"uri": params.get("uri", ""), "mimeType": "text/plain", "text": say or "resource text"}]}
+    elif method == "ping":
+        result = {}
+    else:
+        return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "Method not found"}}
+    return {"jsonrpc": "2.0", "id": mid, "result": result}
+
+
+def mcp_post(handler, raw):
+    """Streamable HTTP POST: JSON by default, an event stream with x-mock-mcp-sse: 1 or when x-mock-mcp-note asks for
+    a notification before the answer. initialize issues Mcp-Session-Id. Notifications and client replies get 202."""
+    headers = {k.lower(): v for k, v in handler.headers.items()}
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        return handler.send(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
+    batch = isinstance(body, list)
+    members = body if batch else [body]
+    answers = [a for a in (mcp_answer(m, headers) for m in members) if a is not None]
+    extra = {}
+    if any(isinstance(m, dict) and m.get("method") == "initialize" for m in members):
+        extra["mcp-session-id"] = "mock-session-1"
+    if not answers:
+        return handler.send(202, b"", "application/json", extra)
+    note = headers.get("x-mock-mcp-note")
+    if headers.get("x-mock-mcp-sse") == "1" or note:
+        events = []
+        if note:
+            events.append({"jsonrpc": "2.0", "method": "notifications/message", "params": {"level": "info", "data": note}})
+        events.extend([answers] if batch else answers)
+        data = "".join(f"event: message\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+        return handler.send(200, data, "text/event-stream", extra)
+    return handler.send(200, answers if batch else answers[0], "application/json", extra)
+
+
+def mcp_get(handler):
+    """A server-to-client event stream: one sampling request carrying x-mock-mcp-say's text."""
+    say = handler.headers.get("x-mock-mcp-say", "a server message")
+    event = {"jsonrpc": "2.0", "id": "srv-1", "method": "sampling/createMessage",
+             "params": {"messages": [{"role": "user", "content": {"type": "text", "text": say}}], "maxTokens": 10}}
+    handler.send(200, f"event: message\ndata: {json.dumps(event)}\n\n".encode(), "text/event-stream")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -143,6 +207,8 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 return self.send(200, STATE["last"])
         self.remember(b"")
+        if self.path.startswith("/mcp"):
+            return mcp_get(self)
         self.send(200, {"object": "list", "data": []})
 
     def do_POST(self):
@@ -153,6 +219,8 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["last"] = {}
             return self.send(200, {"reset": True})
         self.remember(raw)
+        if self.path.startswith("/mcp"):
+            return mcp_post(self, raw)
         fmt = fmt_of(self.path)
         try:
             req = json.loads(raw or b"{}")

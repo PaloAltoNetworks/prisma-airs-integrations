@@ -21,6 +21,8 @@ PRESETS = [
     (8090, "roles", {"advancedConfiguration": {"scanMessageRoles": ["user", "system"]}}),
     (8091, "truncopen", {"advancedConfiguration": {"maxScanChars": 50, "truncationFailClosed": False}}),
     (8092, "truncclosed", {"advancedConfiguration": {"maxScanChars": 50}}),
+    (8093, "openstreams", {"advancedConfiguration": {"allowOpenStreams": True}}),
+    (8094, "servername", {"advancedConfiguration": {"mcpServerName": "harness-mcp"}}),
 ]
 # The generated PDK code parses the configuration before the policy runs. 3000.0 is valid JSON Schema for an
 # integer but not for its i64 field: this preset measures what that does, with a fake key that must not be logged.

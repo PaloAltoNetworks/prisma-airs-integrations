@@ -5,13 +5,14 @@ metadata:
   labels:
     title: Prisma AIRS Guardrails
     description: >-
-      Scans LLM traffic with Palo Alto Networks Prisma AIRS (AI Runtime Security, API Intercept) and enforces the
-      verdict inline, on the prompt before it reaches the model and on the reply before it reaches the client. Covers
-      the OpenAI (Chat Completions and Responses), Anthropic Messages and Gemini formats, streamed and not, including
-      tool calls. Fails closed by default.
+      Scans LLM and MCP traffic with Palo Alto Networks Prisma AIRS (AI Runtime Security, API Intercept) and enforces
+      the verdict inline, before a request reaches the model or the MCP server and before a reply reaches the client.
+      Covers the OpenAI (Chat Completions and Responses), Anthropic Messages and Gemini formats, streamed and not,
+      including tool calls, and MCP tool calls, tool catalogues and every other MCP message that carries text. MCP
+      refusals are JSON-RPC errors. Fails closed by default.
     category: LLM
     metadata/interfaceScope: api
-    metadata/capabilities/assetTypes: llm
+    metadata/capabilities/assetTypes: llm,mcp
 spec:
   extends:
     - name: extension-definition
@@ -236,6 +237,28 @@ spec:
           description: >-
             Include the detection categories in the error body the client receives. Off by default: the client gets a
             generic message and the scan ID.
+        mcpServerName:
+          type: string
+          title: MCP Server Name
+          description: >-
+            The server_name that Prisma AIRS records for MCP tool events, so scans of different MCP servers can be told
+            apart. Empty (the default) uses the API instance's name. Up to 64 printable characters.
+        mcpBatchLimit:
+          type: integer
+          default: 8
+          minimum: 1
+          maximum: 100
+          title: MCP Batch Limit
+          description: >-
+            The most JSON-RPC messages one MCP batch may hold. Each message is scanned on its own, so a larger batch is
+            treated as content that could not be inspected. MCP 2025-06-18 has no batches; older clients can send them.
+        allowOpenStreams:
+          type: boolean
+          default: false
+          title: Allow MCP Event Streams
+          description: >-
+            false (the default) answers a GET that asks for an event stream with 405, which MCP allows, because such a
+            stream cannot be scanned before the client reads it. true lets the stream through.
   required:
     - airsApiKey
     - airsEndpoint

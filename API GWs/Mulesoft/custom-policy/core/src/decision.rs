@@ -17,6 +17,8 @@ pub enum Gap {
     Unreadable,
     Truncated,
     Encoded,
+    /// An MCP batch holds more messages than the batch limit allows.
+    BatchLimit,
 }
 
 impl Gap {
@@ -26,6 +28,7 @@ impl Gap {
             Gap::Unreadable => "unreadable",
             Gap::Truncated => "truncated",
             Gap::Encoded => "encoded",
+            Gap::BatchLimit => "batch_limit",
         }
     }
 }

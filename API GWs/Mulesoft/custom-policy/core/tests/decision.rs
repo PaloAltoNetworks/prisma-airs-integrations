@@ -109,3 +109,12 @@ fn names_are_stable_for_evidence() {
     assert_eq!(BlockKind::DlpOnStream.name(), "dlp_on_stream");
     assert_eq!(Gap::Encoded.name(), "encoded");
 }
+
+#[test]
+fn a_batch_over_the_limit_is_a_gap() {
+    assert_eq!(Gap::BatchLimit.name(), "batch_limit");
+    let s = settings("enforce", "block", "block", false);
+    assert_eq!(decide(&s, Leg::Prompt, &ScanOutcome::Gap(Gap::BatchLimit), false, false), block(403, BlockKind::Gap, false));
+    let allow = settings("enforce", "block", "allow", false);
+    assert_eq!(decide(&allow, Leg::Prompt, &ScanOutcome::Gap(Gap::BatchLimit), false, false), Decision::Pass(Outcome::GapAllowed));
+}

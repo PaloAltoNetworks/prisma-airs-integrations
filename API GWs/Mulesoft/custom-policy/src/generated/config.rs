@@ -8,6 +8,8 @@ pub struct ProfileMap0Config {
 }
 #[derive(Deserialize, Clone, Debug)]
 pub struct AdvancedConfigurationConfig {
+    #[serde(alias = "allowOpenStreams")]
+    pub allow_open_streams: Option<bool>,
     #[serde(alias = "appNameSuffix")]
     pub app_name_suffix: Option<String>,
     #[serde(alias = "applyDlpMasking")]
@@ -20,6 +22,10 @@ pub struct AdvancedConfigurationConfig {
     pub fallback_profile_name: Option<String>,
     #[serde(alias = "maxScanChars")]
     pub max_scan_chars: Option<i64>,
+    #[serde(alias = "mcpBatchLimit")]
+    pub mcp_batch_limit: Option<i64>,
+    #[serde(alias = "mcpServerName")]
+    pub mcp_server_name: Option<String>,
     #[serde(alias = "profileMap")]
     pub profile_map: Option<Vec<ProfileMap0Config>>,
     #[serde(alias = "scanMessageRoles")]

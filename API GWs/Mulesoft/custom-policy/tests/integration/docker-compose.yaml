@@ -3,7 +3,7 @@ services:
   local-flex:
     image: mulesoft/flex-gateway:1.12.12
     ports:
-      - "8081-8092:8081-8092"
+      - "8081-8094:8081-8094"
     volumes:
       - ./config:/usr/local/share/mulesoft/flex-gateway/conf.d/
     depends_on: [airs, upstream]
