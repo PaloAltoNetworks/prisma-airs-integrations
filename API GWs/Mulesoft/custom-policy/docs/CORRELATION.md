@@ -23,7 +23,7 @@ An ID value is used only if it meets these rules:
 - After trimming, it is printable ASCII.
 - It is at most 100 characters long.
 
-An unusable value is never shortened, because a cut ID would point at the wrong records. Instead the policy moves on to the next source in the table. If no session value is usable, the evidence line records the reason in `session_id_dropped` (`not_printable_ascii` or `too_long`).
+An unusable value is never shortened, because a cut ID would point at the wrong records. Instead the policy moves on to the next source in the table. When the session header holds an unusable value, the evidence line records why in `session_id_dropped` (`not_printable_ascii` or `too_long`), even if the session claim then supplies `session_id`.
 
 ### Verified claims
 
@@ -35,7 +35,7 @@ Session Claim and User Claim read the claims of a token that a JWT validation po
 
 - A caller's `x-correlation-id` is kept. The reply echoes it back, and AIRS records it as `transaction_id`.
 - When the caller sends none, the gateway generates a UUID. It returns that UUID in the reply's `x-correlation-id` header, and the policy sends the same UUID as `transaction_id`.
-- Either way, a client can match any reply to its AIRS scan through the reply's `x-correlation-id`.
+- Either way, a client can match any reply to its AIRS scan through the reply's `x-correlation-id`, with one exception: when a caller's `x-correlation-id` is unusable (over 100 characters, say), the gateway still echoes it, but the policy sends `x-request-id` instead, so the echoed value matches no AIRS record.
 - A caller can choose its own correlation ID, so treat it as a correlation aid, never as an identity.
 
 ### Session ID
@@ -48,7 +48,8 @@ Session Claim and User Claim read the claims of a token that a JWT validation po
 MuleSoft's JWT Validation policy 0.11.1 ran before this one:
 
 - The token's `sid` claim, configured as Session Claim, became the AIRS `session_id`.
-- When the request also carried `x-session-id`, the header won. A session header comes before the session claim, and a user claim comes before the user header.
+- When the request also carried `x-session-id`, the header won: a session header comes before the session claim.
+- A user claim comes before the user header by design, not by measurement: the AIRS scan APIs do not return `app_user`, so it could not be read back.
 - On this gateway, 0.11.1 was the newest JWT Validation version API Manager offered. Version 1.4.1 was refused, because it has no implementation for Flex 1.12.12.
 
 ## Following a blocked request

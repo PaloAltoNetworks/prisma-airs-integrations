@@ -22,10 +22,10 @@ It fails closed by default.
 
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
-| Prompt | ✅ | The newest user turn is scanned before the request is forwarded. A blocked prompt never reaches the provider: Amazon Bedrock's own invocation count confirmed this (managed gateway). Scanned Message Roles extends the scan to system, assistant and tool messages. |
-| Response | ✅ | The reply is scanned, with the prompt as context, before it reaches the client (managed gateway). When `n > 1`, every choice is scanned (Local Mode harness). |
+| Prompt | ✅ | Every user turn of the request is scanned before it is forwarded, not only the newest, because the caller writes the whole history. Text inside non-text parts is read too: Anthropic documents and search results, Gemini inline text. Images, audio and PDFs are not scanned; their URLs and names are. A blocked prompt never reaches the provider: Amazon Bedrock's own invocation count confirmed this (managed gateway). Scanned Message Roles extends the scan to system, assistant and tool messages. |
+| Response | ✅ | The reply is scanned, with the prompt as context, before it reaches the client (managed gateway). When `n > 1`, every choice is scanned, and so are the sources a Gemini reply cites: grounding, citations and URL context (Local Mode harness and unit tests). |
 | Streaming | ⚠️ | Streamed replies are scanned (managed gateway). The stream is held until the verdict, so the client receives it all at once rather than token by token. |
-| Pre-tool call | ✅ | Tool calls in the model's reply are scanned, arguments included, before the reply reaches the agent that would run them (managed gateway). |
+| Pre-tool call | ✅ | Tool calls in the model's reply are scanned, arguments included, before the reply reaches the agent that would run them (managed gateway: Bedrock and Azure Chat Completions; Responses and Gemini tool calls in the Local Mode harness). |
 | Post-tool call | ⚠️ | Tool results the agent sends back in its next request are scanned only when Scanned Message Roles includes `tool`. That is off by default (managed gateway). |
 
 **Legend:** ✅ Full support | ⚠️ Partial support | ❌ Not supported
@@ -42,9 +42,9 @@ It fails closed by default.
 
 ## How it works
 
-You apply the policy to a Model Proxy as an inbound AI policy. API Manager adds it at the end of the proxy's policy chain, after MuleSoft's own routing and provider policies. From there it sees the caller's request format and the model the request was routed to.
+You apply the policy to a Model Proxy as an inbound AI policy. API Manager adds it at the end of the proxy's inbound policies, after MuleSoft's routing policies. The outbound provider policies (request adaptation and provider authentication) run after it, in the upstream stage. So it sees the caller's request format and the model the request was routed to, before the request is translated for the provider.
 
-1. **Request.** The policy holds the request and reads the prompt according to the request's format, then calls the Prisma AIRS synchronous scan API.
+1. **Request.** The policy holds the request and reads every user turn according to the request's format, plus the roles you add, then calls the Prisma AIRS synchronous scan API once.
    - **Allowed:** the request goes on to the provider.
    - **Blocked:** the client gets a 403 in its own API's error shape, with a scan ID, and the provider is never called.
 2. **Reply.** The policy holds the whole reply, streamed or not, and scans it with the prompt as context.
@@ -149,7 +149,7 @@ On the managed gateway:
 | AI Security Profile ID | `profileId` | | An ID survives a profile rename; a name does not. |
 | Scan Prompts | `scanRequests` | `true` | Scan each prompt before it is forwarded. |
 | Scan Responses | `scanResponses` | `true` | Scan each reply before it reaches the client. |
-| Enforcement Mode | `enforcementMode` | `enforce` | `monitor` scans and records every verdict but never changes what the client receives. |
+| Enforcement Mode | `enforcementMode` | `enforce` | `monitor` scans and records every verdict and never blocks. See Know before you deploy. |
 | When Prisma AIRS Is Unavailable | `onApiError` | `block` | `block` answers 503. `allow` passes the traffic unscanned and logs it. |
 | When Content Cannot Be Inspected | `onScanError` | `block` | `block` answers 403. `allow` passes it and logs it. |
 
@@ -161,15 +161,15 @@ Under **Advanced Configuration** (`advancedConfiguration`):
 | Scan Retries | `scanRetries` | `0` | Extra attempts after a timeout, a transport error, 429 or 5xx (0 to 3). |
 | Circuit Breaker Threshold | `breakerFailures` | `0` (off) | Consecutive failures after which Prisma AIRS is not called for the cooldown. An open breaker does not let traffic through; When Prisma AIRS Is Unavailable still decides what happens. |
 | Circuit Breaker Cooldown (s) | `breakerCooldownS` | `30` | How long an open breaker waits. |
-| Scanned Message Roles | `scanMessageRoles` | `[user]` | Add `system` to close system-prompt injection, and `tool` to scan tool results. The newest user turn is always scanned. |
-| Maximum Scanned Characters | `maxScanChars` | `20000` | The most characters sent from one leg. |
-| Block Content Over the Limit | `truncationFailClosed` | `true` | `false` scans the first part only and logs it. |
-| Apply DLP Masking | `applyDlpMasking` | `false` | Writes the masked text Prisma AIRS returns into the prompt or reply, for verdicts that are only about sensitive data. On a streamed reply, such a verdict is a block. |
+| Scanned Message Roles | `scanMessageRoles` | `[user]` | Add `system` to close system-prompt injection, and `tool` to scan tool results. Every user turn is always scanned. |
+| Maximum Scanned Characters | `maxScanChars` | `100000` | The most characters sent from one leg. A prompt counts every user turn. Prisma AIRS accepts up to 2 MB per scan. |
+| Block Content Over the Limit | `truncationFailClosed` | `true` | `false` scans part of it and logs it: the newest text of a prompt, the first part of a reply. |
+| Apply DLP Masking | `applyDlpMasking` | `false` | Writes the masked text Prisma AIRS returns into the prompt or reply, for verdicts that are only about sensitive data. In a prompt it goes back into every turn it came from, so data in an earlier turn reaches the model masked too. It needs each scanned piece to be a plain text field, and Prisma AIRS to keep the text's length, which it did in every test; otherwise, and on a streamed reply, such a verdict is a block (403). |
 | Application Name Suffix | `appNameSuffix` | | `HR-Chatbot` makes `app_name` `MuleSoft-HR-Chatbot`. |
 | User Header / User Claim | `userHeader` / `userClaim` | | The end user, sent as `app_user`. A claim is read from a token that a JWT validation policy has already verified, and it takes precedence over the header. |
 | Session Header / Session Claim | `sessionHeader` / `sessionClaim` | `x-session-id` / | The conversation, sent as `session_id`. The header takes precedence over the claim. |
-| Profile Map, Fallback Profile Name | `profileMap`, `fallbackProfileName` | | A profile per client application, matched on its exact name, plus a fallback. A map replaces the static profile. |
-| Verdict Cache TTL (s) | `verdictCacheTtlS` | `0` (off) | Caches allow verdicts for identical content (0 to 300). It is never used with masking. |
+| Profile Map, Fallback Profile Name | `profileMap`, `fallbackProfileName` | | A profile per client application, matched on its exact name, plus a fallback. Leave AI Security Profile Name and ID empty: a configuration with a map and a static profile is refused, and every request then gets 503. |
+| Verdict Cache TTL (s) | `verdictCacheTtlS` | `0` (off) | Caches allow verdicts for identical content (0 to 300). It is never used with masking. A profile change in Strata Cloud Manager reaches cached content only when its entry expires, and a request answered from the cache leaves no new Prisma AIRS record. |
 | Show Detection Categories | `showCategories` | `false` | Adds the detection categories to the error body. |
 
 ### Upgrading
@@ -178,8 +178,9 @@ A new version is picked up only when you remove the policy and apply it again, a
 
 Apply again straight after removing, with a complete configuration. On the managed gateway:
 
-- **Back to back:** removing and re-applying left no request unscanned. 48 of 48 requests were blocked, sampled every 2 seconds.
-- **Failed re-apply:** when the new apply was refused because the configuration was incomplete, the proxy served requests without the policy from 9 seconds after the removal.
+- **Back to back:** in one run, sampled every 2 seconds, removing and re-applying left no request unscanned (48 of 48 blocked). One run cannot rule out a short window.
+- **Failed re-apply:** when the new apply was refused because the configuration was incomplete, the proxy served requests without the policy within 14 to 33 seconds of the removal.
+- **Any configuration change** reaches the gateway's workers unevenly: for about 6 seconds, requests alternated between the old and the new configuration.
 
 ---
 
@@ -190,11 +191,12 @@ make unit
 make itest
 ```
 
-- **`make unit`** runs 152 unit tests on the scanning logic in `core/`, a plain Rust crate with no gateway dependency. They cover format detection, prompt and reply extraction for every format, stream reassembly, the AIRS request and verdict contract, the decision table, error bodies, the breaker and the cache. The reply fixtures were recorded from the live providers.
-- **`make itest`** runs the Local Mode harness: 48 cases against Omni Gateway 1.12.12 in Docker. The gateway is set up with a TLS mock of Prisma AIRS and a mock upstream that replays the recorded replies. The harness needs Docker on Linux x86. The cases cover:
+- **`make unit`** runs 165 unit tests on the scanning logic in `core/`, a plain Rust crate with no gateway dependency. They cover format detection, prompt and reply extraction for every format, stream reassembly, the AIRS request and verdict contract, the decision table, error bodies, the breaker and the cache. The reply fixtures were recorded from the live providers.
+- **`make itest`** runs the Local Mode harness: 51 cases against Omni Gateway 1.12.12 in Docker. The gateway is set up with a TLS mock of Prisma AIRS and a mock upstream that replays the recorded replies. The harness needs Docker on Linux x86. The cases cover:
   - blocks on both legs in every format, streamed and not;
   - fail-closed behavior and every preset;
-  - masking;
+  - masking, across turns too;
+  - an injection in an earlier user turn or in a document block;
   - tool calls and `n > 1`;
   - the size limits.
 
@@ -225,9 +227,10 @@ curl -sS "https://YOUR_GATEWAY_HOST/YOUR_PROXY_BASE_PATH/chat/completions" \
    - **Larger reply:** never reaches the client; it ends as the gateway's own `500` (measured in Local Mode).
    - **Raising the limit:** MuleSoft documents it as `FLEX_DOWNSTREAM_CONNECTION_BUFFER_LIMIT_BYTES` ([environment variables](https://docs.mulesoft.com/gateway/latest/conn-env-variables), [stop iteration](https://docs.mulesoft.com/pdk/latest/policies-pdk-configure-features-headers-stop)).
    - **On a managed gateway,** the setting is Runtime Manager › Managed Omni Gateways › your gateway › Runtime configuration › Properties › Connection Buffer Limits › **Global connection buffer limit**, set to `1048576` by default. Trial accounts cannot change runtime configurations, so a higher limit was not tested.
-6. **Streaming is buffered.** A streamed reply is released only after its verdict. The client therefore waits for the whole reply, plus one scan (about 0.4 seconds from the managed gateway), before it sees the first token.
+   - **Scan size:** Maximum Scanned Characters, 100,000 by default, counts every user turn of a prompt. Content over it gets 403 by default.
+6. **Streaming is buffered.** A streamed reply is released only after its verdict. The client therefore waits for the prompt scan, the whole reply and the reply scan before it sees the first token. On the managed gateway, a blocked prompt, one scan included, took 0.21 to 0.58 seconds end to end.
 7. **Position.** The policy runs last in the chain, where API Manager puts it.
-8. **TLS.** The gateway verifies the Prisma AIRS certificate against its own trust store.
+8. **TLS.** The gateway verifies the Prisma AIRS certificate against its own trust store. In the Local Mode harness, an untrusted certificate gave 503 and no scan.
 9. **Retries are immediate,** with no backoff. Each retry can add up to the timeout to the request.
 10. **Regional endpoints** (from the pan.dev scan API specification):
 
@@ -242,9 +245,18 @@ curl -sS "https://YOUR_GATEWAY_HOST/YOUR_PROXY_BASE_PATH/chat/completions" \
 
 - **System prompts and tool results are not scanned by default.** Add `system` and `tool` to Scanned Message Roles to scan them. On the managed gateway, a tool result carrying a prompt injection passed with the default roles and was blocked with `tool` added.
 - **Local Mode only:** if a policy's configuration does not match its definition, for example a string where a number belongs, a self-managed gateway in Local Mode logs the error and keeps serving the API without the policy. Validate configurations before you deploy them.
-- **What API Manager validates.** On the managed gateway, API Manager refused a wrong type, a wrong option value and a missing key on a new apply. It did **accept an edit that removed the API key**. The gateway kept enforcing with the previous configuration, but the stored configuration no longer had a key. Review edits to the key.
+- **What API Manager validates.** On the managed gateway, API Manager refused a wrong type and a wrong option value on an edit, and a missing key on a new apply. It did **accept an edit that removed the API key**. The gateway kept enforcing with the previous configuration, but the stored configuration no longer had a key. What the gateway does with it at its next reload was not tested; in Local Mode, a configuration that breaks the definition makes the gateway drop the policy. After such an edit, apply a complete configuration straight away.
 - **Compressed replies.** When replies are scanned, the policy removes the client's `Accept-Encoding`, so providers answer uncompressed. A compressed reply that arrives anyway cannot be inspected, so it gets 403 by default.
-- **Monitor mode** never changes what the client receives, but the provider's own filters still act. On the managed gateway, Azure's content filter refused the test injection itself with a 400.
+- **Monitor mode** never blocks, but it is not fully hands-off:
+  - the provider's own filters still act (on the managed gateway, Azure's content filter refused the test injection itself with a 400);
+  - the request still loses `Accept-Encoding`, so replies come back uncompressed;
+  - a configuration the policy rejects still answers 503;
+  - no policy violation is counted, and a managed gateway does not show the policy's log lines, so the would-be blocks can be read only in Strata Cloud Manager.
+- **Text only.** Images, audio and PDFs cannot be scanned. The policy scans each such part's JSON without its bytes, so its URL and name, not its content.
+- **Long conversations.** Every user turn is scanned on every request, so a long chat sends more text per scan. Over Maximum Scanned Characters (100,000 by default) the request gets 403; raise the limit if your conversations are longer.
+- **Gemini streaming** is covered with `streamGenerateContent?alt=sse`, which the Google SDKs use. Without `alt=sse`, Gemini streams a JSON array, which the policy cannot read: 403 by default.
+- **SDK retries.** The OpenAI and Anthropic SDKs retry a 503 twice by default, so a fail-closed 503 can mean three requests to the gateway and to Prisma AIRS. Lower `max_retries` if that matters. The SDK tests ran with retries off.
+- **Not scanned, by design:** a reply with a status other than 2xx, an empty reply, and a request without a body (a model list, say).
 - **A managed gateway does not show the policy's log lines** in Runtime Manager, its error lines included. To read them you need Anypoint Monitoring's log search (Titanium) or a log export; see [Troubleshooting](#troubleshooting).
 
 ---
@@ -253,8 +265,9 @@ curl -sS "https://YOUR_GATEWAY_HOST/YOUR_PROXY_BASE_PATH/chat/completions" \
 
 | Symptom | Cause |
 |---|---|
-| 503, "Prisma AIRS could not scan this request" | Prisma AIRS was unreachable or timed out, or the key, region or profile is wrong. A profile name that does not exist in your tenant gives this. So does a configuration the policy rejects, for example one with both a profile name and a profile ID: then every request gets it. On a self-managed gateway, the request's evidence line or the policy's error line names the cause. A managed gateway does not show those lines (see below), so check the endpoint, key, region and profile in the policy's settings against Strata Cloud Manager. |
-| 403, "Prisma AIRS could not inspect this request" | The request's format is unknown, its body is not JSON, or its content is over Maximum Scanned Characters. |
+| 503, "Prisma AIRS could not scan this request" | Prisma AIRS was unreachable or timed out, or the key, region or profile is wrong. A profile name that does not exist in your tenant gives this. The evidence line records only that the scan failed, not why, so check the endpoint, key, region and profile in the policy's settings against Strata Cloud Manager. |
+| 503, "Prisma AIRS Guardrails is not configured correctly" | The policy rejected its configuration, so every request gets this. For example: both a profile name and a profile ID; a profile map with a profile name or ID; a profile map without a fallback profile. On a self-managed gateway, the policy's error line names the field. |
+| 403, "Prisma AIRS could not inspect this request" (or "response") | The format is unknown, the body is not JSON, a reply is compressed, or the content is over Maximum Scanned Characters (a prompt counts every user turn). |
 | 413 | The request body is over the gateway's 1 MiB buffer. |
 | A streamed reply arrives all at once | Expected: the stream is held until the verdict. |
 | A new version has no effect | Remove the policy and apply it again (see Upgrading). |
