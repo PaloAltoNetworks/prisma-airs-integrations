@@ -59,6 +59,8 @@ MuleSoft's JWT Validation policy 0.11.1 ran before this one:
    - one entry in `legs` per scan, with `outcome`, `action`, `scan_id`, `report_id`, `ms` and `detections`.
 
    The line never contains the API key or the scanned content.
+
+   A managed gateway does not show these lines in Runtime Manager (see the README's Troubleshooting section). There, go from the client's scan ID straight to step 3.
 3. **Prisma AIRS.**
    - `GET /v1/scan/results?scan_ids=<scan_id>` returns the verdict, with `session_id` and `report_id`.
    - `GET /v1/scan/reports?report_ids=<report_id>` returns `transaction_id`, `session_id` and the detection results.

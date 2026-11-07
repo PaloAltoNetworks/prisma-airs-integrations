@@ -245,6 +245,7 @@ curl -sS "https://YOUR_GATEWAY_HOST/YOUR_PROXY_BASE_PATH/chat/completions" \
 - **What API Manager validates.** On the managed gateway, API Manager refused a wrong type, a wrong option value and a missing key on a new apply. It did **accept an edit that removed the API key**. The gateway kept enforcing with the previous configuration, but the stored configuration no longer had a key. Review edits to the key.
 - **Compressed replies.** When replies are scanned, the policy removes the client's `Accept-Encoding`, so providers answer uncompressed. A compressed reply that arrives anyway cannot be inspected, so it gets 403 by default.
 - **Monitor mode** never changes what the client receives, but the provider's own filters still act. On the managed gateway, Azure's content filter refused the test injection itself with a 400.
+- **A managed gateway does not show the policy's log lines** in Runtime Manager, its error lines included. To read them you need Anypoint Monitoring's log search (Titanium) or a log export; see [Troubleshooting](#troubleshooting).
 
 ---
 
@@ -252,7 +253,7 @@ curl -sS "https://YOUR_GATEWAY_HOST/YOUR_PROXY_BASE_PATH/chat/completions" \
 
 | Symptom | Cause |
 |---|---|
-| 503, "Prisma AIRS could not scan this request" | Prisma AIRS was unreachable or timed out, or the key, region or profile is wrong. A profile name that does not exist in your tenant gives this. Look up the request's evidence line in the gateway log. |
+| 503, "Prisma AIRS could not scan this request" | Prisma AIRS was unreachable or timed out, or the key, region or profile is wrong. A profile name that does not exist in your tenant gives this. So does a configuration the policy rejects, for example one with both a profile name and a profile ID: then every request gets it. On a self-managed gateway, the request's evidence line or the policy's error line names the cause. A managed gateway does not show those lines (see below), so check the endpoint, key, region and profile in the policy's settings against Strata Cloud Manager. |
 | 403, "Prisma AIRS could not inspect this request" | The request's format is unknown, its body is not JSON, or its content is over Maximum Scanned Characters. |
 | 413 | The request body is over the gateway's 1 MiB buffer. |
 | A streamed reply arrives all at once | Expected: the stream is held until the verdict. |
@@ -264,6 +265,17 @@ Every request writes one line to the gateway log, starting with `prisma-airs-gua
 - one entry per scan: its outcome, verdict, scan ID, report ID, time and detection categories.
 
 It never contains the key or the scanned content.
+
+**Where to read it:**
+
+- **Self-managed gateway:** in the gateway's own output, for example `docker logs`.
+- **Managed gateway:** Runtime Manager › your gateway › **Logs** lists the gateway's own lines but none of the policy's: no evidence lines, and no error line for a rejected configuration (measured, in the console and in the downloaded file). MuleSoft offers per-API log search in Anypoint Monitoring with a Titanium subscription, and log export to an external service over OpenTelemetry (Runtime configuration › Logging). Neither was available on the trial used here, so neither is tested.
+
+Without those lines you can still see:
+
+- **The number of blocks:** API Manager › LLM Proxies › your proxy › **LLM Summary** › Compliance › **Policy violations**, per policy.
+- **Errors per API:** Anypoint Monitoring › **Insights**, where blocked requests count as errors.
+- **Each scan:** in Strata Cloud Manager, from the scan ID in the client's error. See [docs/CORRELATION.md](docs/CORRELATION.md).
 
 ---
 

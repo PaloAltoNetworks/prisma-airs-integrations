@@ -5,7 +5,7 @@ This page records every claim the README makes about behavior, with the result a
 ## Environments
 
 - **Managed gateway:**
-  - a MuleSoft-managed Omni Gateway 1.12.12 running three Model Proxies, on an Anypoint trial organization (Sandbox environment), 5 and 6 November 2026;
+  - a MuleSoft-managed Omni Gateway 1.12.12 running three Model Proxies, on an Anypoint trial organization (Sandbox environment), 5 to 7 November 2026;
   - the policy last in each proxy's chain;
   - Prisma AIRS US region, with a lab security profile that blocks prompt injection, malicious URL categories and sensitive data (with masking).
 
@@ -59,7 +59,9 @@ A row where the model would not produce the payload would have counted as inconc
 | **Streamed reply blocked on the reply leg** | 7.7 s (non-streamed) and 12.2 s (streamed) with Gemini: the model's generation time plus one scan. |
 | **The console form** | The basic settings and an Advanced Configuration group render, with every default shown. The API key is masked, with a reveal toggle and a choice of "Enter value" or "Use a stored secret"; the stored-secret path was not tested. A Policy version picker is shown, and the policy is the last inbound policy in the proxy's chain. |
 | **The body limit setting** | Runtime Manager shows **Global connection buffer limit** `1048576` under the gateway's Runtime configuration › Properties. The page states that Runtime Configurations are not available for trial accounts, so a higher limit was not tested. |
-| **Logs** | The gateway forwards its logs to Anypoint at Info level. When a configuration changes, the agent logs each policy as it is added, ours with "StopIteration Enabled", and the Prisma AIRS endpoint as a gateway service. |
+| **Logs** | Runtime Manager › Logs (logs forwarded to Anypoint at Info) shows the gateway's own lines: its agent adding each policy (ours with "StopIteration Enabled") and the Prisma AIRS endpoint as a service, MuleSoft's external processor, and Envoy's listener updates. It shows **none of the policy's lines**. Two test windows held about 50 blocked requests and four configuration changes, one of them rejected. Neither the per-request evidence lines, nor "settings accepted", nor the "settings rejected" error line appeared, in the console with no search term or in the downloaded log file (192 lines, all from the gateway). |
+| **Per-API logs** | The proxy's Logs page in API Manager says advanced log management needs Anypoint Monitoring with a Titanium subscription, or an external logging service. On the trial, its button opened Anypoint Insights: charts per API, no log search. Insights counted the blocked requests as errors (5 requests, 100% error rate). |
+| **Policy violations** | The proxy's summary page in API Manager (LLM Proxies › the proxy › LLM Summary › Compliance) counted blocks under "Prisma AIRS Guardrails DEV": about 25 in the hour of 25 blocked requests. Copies of the policy removed by earlier re-applies appear under numeric policy IDs. |
 | **Attribution in Strata Cloud Manager** | The AI Sessions view lists every scan under Application Name "MuleSoft". Requests sent without a session header appear as `pan_<uuid>` sessions. |
 
 ### Fixed during the managed-gateway run
@@ -84,6 +86,6 @@ With masking on, the prompt of a request that asked for a **streamed** reply was
 
 ## Not yet verified
 
-These items are open; each needs the console:
+This item is open, because the trial offers neither route:
 
-- the policy's evidence line in the gateway's logs, and the policy violation in Anypoint Monitoring.
+- the policy's log lines in Anypoint Monitoring's log search (Titanium) or in an external log service.
