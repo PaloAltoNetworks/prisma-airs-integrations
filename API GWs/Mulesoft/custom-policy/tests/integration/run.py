@@ -714,6 +714,83 @@ def mcp_bodiless_event_stream_reply_is_scanned():
     check(b"from the server" not in raw, "the server's message reached the client")
 
 
+OPEN_PAUSE = 1.5
+
+
+def open_stream(texts, transaction_id):
+    """GET /mcp on the openstreams preset (8093), the mock sending one event per text OPEN_PAUSE seconds apart.
+    Returns the status, [(seconds after the request when the event's blank line arrived, its text)] and how the
+    stream ended."""
+    conn = hc.HTTPConnection("localhost", 8093, timeout=30)
+    started = time.monotonic()
+    conn.request("GET", "/mcp", headers={"accept": "text/event-stream", "x-correlation-id": transaction_id,
+                                          "x-mock-mcp-events": "|".join(texts), "x-mock-mcp-pause": str(OPEN_PAUSE)})
+    resp = conn.getresponse()
+    got, buf, ended = [], b"", "closed by the server"
+    while True:
+        try:
+            part = resp.read1(65536)
+        except (hc.HTTPException, OSError) as err:
+            ended = f"broken: {err.__class__.__name__}"
+            break
+        if not part:
+            break
+        buf += part
+        while b"\n\n" in buf:
+            event, buf = buf.split(b"\n\n", 1)
+            data = [line[6:] for line in event.decode().splitlines() if line.startswith("data: ")]
+            text = json.loads(data[0]).get("params", {}).get("data") if data else None
+            got.append((round(time.monotonic() - started, 2), text))
+    conn.close()
+    return resp.status, got, ended
+
+
+def open_stream_timing(got, texts):
+    sent = [round(i * OPEN_PAUSE, 1) for i in range(len(texts))]
+    return f"arrived at {[t for t, _ in got]} s; sent at {sent} s, the server ended it at {len(texts) * OPEN_PAUSE} s"
+
+
+def open_stream_on_time(got, texts):
+    """Each event reached the client within a second of the server sending it: the stream was not held."""
+    return len(got) == len(texts) and all(t <= i * OPEN_PAUSE + 1.0 for i, (t, _) in enumerate(got))
+
+
+def open_stream_unscanned(transaction_id):
+    ev = evidence(transaction_id)
+    return ev, bool(ev and ev["decision"] == "pass" and any(
+        leg.get("leg") == "response" and leg.get("outcome") == "event_stream_unscanned" for leg in ev["legs"]))
+
+
+@case
+def mcp_open_stream_passes_clean_events():
+    """allowOpenStreams lets an open stream through as the server sends it, unread. V9, measured with this case: a
+    reader that scanned each event as it passed held the whole stream until the server ended it (events sent at 0,
+    1.5 and 3 s all reached the client at 4.5 s)."""
+    reset()
+    texts = ["first note", "second note", "third note"]
+    status, got, ended = open_stream(texts, "itest-open-clean")
+    print(f"    open stream, clean: {open_stream_timing(got, texts)}; {ended}")
+    check(status == 200 and [t for _, t in got] == texts, f"status {status}, events {got}, {ended}")
+    check(open_stream_on_time(got, texts), f"the stream was held: {open_stream_timing(got, texts)}")
+    check(scans() == [], f"an open stream is not scanned: {scans()}")
+    ev, unscanned = open_stream_unscanned("itest-open-clean")
+    check(unscanned, f"evidence {ev}")
+
+
+@case
+def mcp_open_stream_block():
+    """The policy cannot end an open stream (V9), so it never claims to block one: a message it would refuse is
+    delivered as sent, and the evidence records the stream as unscanned."""
+    reset()
+    texts = ["first note", "BLOCKME second note", "third note"]
+    status, got, ended = open_stream(texts, "itest-open-block")
+    print(f"    open stream, block: {open_stream_timing(got, texts)}; {ended}")
+    check(status == 200 and [t for _, t in got] == texts, f"status {status}, events {got}, {ended}")
+    check(open_stream_on_time(got, texts), f"the stream was held: {open_stream_timing(got, texts)}")
+    ev, unscanned = open_stream_unscanned("itest-open-block")
+    check(unscanned, f"evidence {ev}")
+
+
 @case
 def mcp_session_id_comes_from_mcp_session_id():
     reset()

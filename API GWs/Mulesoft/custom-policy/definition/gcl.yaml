@@ -258,7 +258,10 @@ spec:
           title: Allow MCP Event Streams
           description: >-
             false (the default) answers a GET that asks for an event stream with 405, which MCP allows, because such a
-            stream cannot be scanned before the client reads it. true lets the stream through.
+            stream cannot be scanned before the client reads it. true lets the stream through unscanned, recorded as
+            event_stream_unscanned: the policy cannot end a stream once it has started, and scanning one as it passes
+            would hold every message until the stream ends, so the messages a server sends on it reach the client
+            unchecked.
   required:
     - airsApiKey
     - airsEndpoint

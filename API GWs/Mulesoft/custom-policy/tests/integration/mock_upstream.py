@@ -18,6 +18,7 @@ Standard library only.
 import gzip
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 FIXTURES = "/fixtures"
@@ -170,8 +171,26 @@ def mcp_post(handler, raw):
     return handler.send(200, answers if batch else answers[0], "application/json", extra)
 
 
+def mcp_open_stream(handler, texts, pause):
+    """An open server-to-client stream: one notifications/message per text, written and flushed `pause` seconds
+    apart; the server ends the stream (closes the connection) a pause after the last one."""
+    handler.send_response(200)
+    handler.send_header("content-type", "text/event-stream")
+    handler.send_header("cache-control", "no-cache")
+    handler.end_headers()
+    for text in texts:
+        event = {"jsonrpc": "2.0", "method": "notifications/message", "params": {"level": "info", "data": text}}
+        handler.wfile.write(f"event: message\ndata: {json.dumps(event)}\n\n".encode())
+        handler.wfile.flush()
+        time.sleep(pause)
+
+
 def mcp_get(handler):
-    """A server-to-client event stream: one sampling request carrying x-mock-mcp-say's text."""
+    """A server-to-client event stream: one sampling request carrying x-mock-mcp-say's text, or, with
+    x-mock-mcp-events, an open stream of the |-separated texts, x-mock-mcp-pause seconds apart."""
+    texts = handler.headers.get("x-mock-mcp-events")
+    if texts:
+        return mcp_open_stream(handler, texts.split("|"), float(handler.headers.get("x-mock-mcp-pause", "1.5")))
     say = handler.headers.get("x-mock-mcp-say", "a server message")
     event = {"jsonrpc": "2.0", "id": "srv-1", "method": "sampling/createMessage",
              "params": {"messages": [{"role": "user", "content": {"type": "text", "text": say}}], "maxTokens": 10}}
