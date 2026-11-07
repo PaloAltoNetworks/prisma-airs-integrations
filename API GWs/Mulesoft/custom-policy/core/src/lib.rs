@@ -12,5 +12,6 @@ pub mod evidence;
 pub mod extract;
 pub mod format;
 pub mod identity;
+pub mod mcp;
 pub mod settings;
 pub mod sse;

@@ -185,7 +185,8 @@ pub(crate) fn without_binary(value: &serde_json::Value) -> String {
     serde_json::to_string(&strip(value, None)).unwrap_or_default()
 }
 
-fn is_binary(key: Option<&str>, s: &str) -> bool {
+/// A long data URI, or a long base64 string under a data-like key.
+pub(crate) fn is_binary(key: Option<&str>, s: &str) -> bool {
     const LONG: usize = 256;
     if s.len() < LONG {
         return false;
@@ -193,7 +194,7 @@ fn is_binary(key: Option<&str>, s: &str) -> bool {
     if s.starts_with("data:") {
         return true;
     }
-    let data_key = matches!(key, Some("data" | "file_data" | "b64_json" | "bytes" | "image_data" | "audio_data"));
+    let data_key = matches!(key, Some("data" | "file_data" | "b64_json" | "bytes" | "image_data" | "audio_data" | "blob"));
     data_key && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=' | b'-' | b'_' | b'\n' | b'\r'))
 }
 
