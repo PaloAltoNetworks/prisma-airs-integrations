@@ -20,6 +20,12 @@ pub struct LegRecord {
     pub cached: bool,
     pub truncated: bool,
     pub detections: Vec<String>,
+    /// What an MCP scan sent: `prompt` or `tool_event`. Absent for LLM traffic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// The MCP method the scan belongs to. Absent for LLM traffic and for reply messages that answer no request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -34,6 +40,9 @@ pub struct Record {
     pub decision: String,
     pub status: u16,
     pub routed_model: Option<String>,
+    /// The MCP methods of the request, in order, each cleaned. Absent for LLM traffic.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub methods: Vec<String>,
 }
 
 impl Record {
@@ -57,4 +66,10 @@ impl Record {
     pub fn to_log_line(&self) -> String {
         format!("{PREFIX}{}", serde_json::to_string(self).unwrap_or_default())
     }
+}
+
+/// An MCP method name as evidence: printable ASCII (anything else becomes `?`), at most 64 characters. A method is the
+/// client's choice, so it is never written to a log as sent.
+pub fn clean_method(method: &str) -> String {
+    method.chars().map(|c| if c.is_ascii_graphic() || c == ' ' { c } else { '?' }).take(64).collect()
 }

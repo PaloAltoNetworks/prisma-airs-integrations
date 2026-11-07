@@ -20,8 +20,18 @@ pub fn app_user(claim: Option<&str>, header: Option<&str>, client_name: Option<&
 /// The conversation id from the session header, else the verified claim. An unusable value is dropped and the
 /// first drop's reason is returned; a missing session is left out, never invented.
 pub fn session_id(header: Option<&str>, claim: Option<&str>) -> (Option<String>, Option<&'static str>) {
+    first_usable(&[header, claim])
+}
+
+/// The conversation id of MCP traffic: the `Mcp-Session-Id` header first (MCP defines it), then the session header,
+/// then the verified claim, by the same rules.
+pub fn mcp_session_id(mcp: Option<&str>, header: Option<&str>, claim: Option<&str>) -> (Option<String>, Option<&'static str>) {
+    first_usable(&[mcp, header, claim])
+}
+
+fn first_usable(candidates: &[Option<&str>]) -> (Option<String>, Option<&'static str>) {
     let mut dropped = None;
-    for value in [header, claim].into_iter().flatten() {
+    for value in candidates.iter().copied().flatten() {
         match checked_id(value) {
             Ok(Some(id)) => return (Some(id), dropped),
             Ok(None) => {}

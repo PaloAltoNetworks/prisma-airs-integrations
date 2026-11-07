@@ -275,3 +275,41 @@ fn config_error_never_contains_the_key() {
         assert!(e.to_string().starts_with(e.field), "{field}: {e}");
     }
 }
+
+// ---- MCP settings ------------------------------------------------------------------------------------------------
+
+#[test]
+fn mcp_defaults() {
+    let s = Settings::from_json(&minimal()).unwrap();
+    assert_eq!(s.mcp_server_name, None);
+    assert_eq!(s.mcp_batch_limit, 8);
+    assert!(!s.allow_open_streams);
+}
+
+#[test]
+fn mcp_settings_are_read() {
+    let mut v = minimal();
+    set(&mut v, "mcpServerName", json!("deepwiki-test"));
+    set(&mut v, "mcpBatchLimit", json!(3));
+    set(&mut v, "allowOpenStreams", json!(true));
+    let s = Settings::from_json(&v).unwrap();
+    assert_eq!(s.mcp_server_name.as_deref(), Some("deepwiki-test"));
+    assert_eq!(s.mcp_batch_limit, 3);
+    assert!(s.allow_open_streams);
+}
+
+#[test]
+fn mcp_batch_limit_bounds() {
+    assert_eq!(err(&with("mcpBatchLimit", json!(0))).field, "mcpBatchLimit");
+    assert_eq!(err(&with("mcpBatchLimit", json!(101))).field, "mcpBatchLimit");
+    assert_eq!(Settings::from_json(&with("mcpBatchLimit", json!(100))).unwrap().mcp_batch_limit, 100);
+    assert_eq!(err(&with("allowOpenStreams", json!("yes"))).field, "allowOpenStreams");
+}
+
+#[test]
+fn mcp_server_name_rules() {
+    assert_eq!(Settings::from_json(&with("mcpServerName", json!("   "))).unwrap().mcp_server_name, None, "blank is not set");
+    assert_eq!(err(&with("mcpServerName", json!("x".repeat(65)))).field, "mcpServerName");
+    assert_eq!(err(&with("mcpServerName", json!("tab\there"))).field, "mcpServerName");
+    assert_eq!(Settings::from_json(&with("mcpServerName", json!("My MCP-1"))).unwrap().mcp_server_name.as_deref(), Some("My MCP-1"));
+}

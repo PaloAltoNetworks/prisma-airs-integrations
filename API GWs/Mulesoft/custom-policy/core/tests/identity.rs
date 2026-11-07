@@ -1,4 +1,4 @@
-use prisma_airs_core::identity::{app_user, profile, session_id};
+use prisma_airs_core::identity::{app_user, mcp_session_id, profile, session_id};
 use prisma_airs_core::settings::{ProfileRef, Settings};
 use serde_json::json;
 
@@ -44,4 +44,19 @@ fn profile_map_and_fallback() {
     assert_eq!(profile(&mapped, None), ProfileRef::Name("strict".into()));
     let fixed = settings(json!({"profileName": "my-security-profile"}));
     assert_eq!(profile(&fixed, Some("hr-bot")), ProfileRef::Name("my-security-profile".into()));
+}
+
+#[test]
+fn mcp_session_header_comes_first() {
+    assert_eq!(mcp_session_id(Some("mcp-1"), Some("hdr-1"), Some("claim-1")), (Some("mcp-1".into()), None));
+    assert_eq!(mcp_session_id(None, Some("hdr-1"), Some("claim-1")), (Some("hdr-1".into()), None));
+    assert_eq!(mcp_session_id(None, None, Some("claim-1")), (Some("claim-1".into()), None));
+    assert_eq!(mcp_session_id(None, None, None), (None, None));
+}
+
+#[test]
+fn an_unusable_mcp_session_falls_back() {
+    let long = "s".repeat(101);
+    assert_eq!(mcp_session_id(Some(&long), Some("hdr-1"), None), (Some("hdr-1".into()), Some("too_long")));
+    assert_eq!(mcp_session_id(Some("caf\u{e9}"), None, None), (None, Some("not_printable_ascii")));
 }

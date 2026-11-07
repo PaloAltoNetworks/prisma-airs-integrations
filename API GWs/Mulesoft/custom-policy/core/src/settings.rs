@@ -154,6 +154,12 @@ pub struct Settings {
     pub session_claim: Option<String>,
     pub cache_ttl_s: u32,
     pub show_categories: bool,
+    /// The `server_name` of MCP tool events; `None` means the API instance's own name.
+    pub mcp_server_name: Option<String>,
+    /// The most JSON-RPC messages one batch may hold; a larger batch is content the policy could not inspect.
+    pub mcp_batch_limit: usize,
+    /// Let a GET event stream through, its events scanned as they pass, instead of refusing it with 405.
+    pub allow_open_streams: bool,
 }
 
 impl fmt::Debug for Settings {
@@ -183,6 +189,9 @@ impl fmt::Debug for Settings {
             .field("session_claim", &self.session_claim)
             .field("cache_ttl_s", &self.cache_ttl_s)
             .field("show_categories", &self.show_categories)
+            .field("mcp_server_name", &self.mcp_server_name)
+            .field("mcp_batch_limit", &self.mcp_batch_limit)
+            .field("allow_open_streams", &self.allow_open_streams)
             .finish()
     }
 }
@@ -226,6 +235,9 @@ impl Settings {
         let session_claim = claim(advanced, "sessionClaim")?;
         let cache_ttl_s = whole(advanced, "verdictCacheTtlS", 0, 0, 300)? as u32;
         let show_categories = flag(advanced, "showCategories", false)?;
+        let mcp_server_name = server_name(text(advanced, "mcpServerName")?)?;
+        let mcp_batch_limit = whole(advanced, "mcpBatchLimit", 8, 1, 100)? as usize;
+        let allow_open_streams = flag(advanced, "allowOpenStreams", false)?;
 
         Ok(Settings {
             api_key,
@@ -252,6 +264,9 @@ impl Settings {
             session_claim,
             cache_ttl_s,
             show_categories,
+            mcp_server_name,
+            mcp_batch_limit,
+            allow_open_streams,
         })
     }
 
@@ -414,6 +429,15 @@ fn roles(advanced: Obj<'_>) -> Result<RoleSet, ConfigError> {
         Some(_) => return Err(bad()),
     }
     Ok(set)
+}
+
+/// The MCP server name for tool events, by the same rule as the application name suffix.
+fn server_name(name: Option<String>) -> Result<Option<String>, ConfigError> {
+    match name {
+        None => Ok(None),
+        Some(s) if s.chars().count() <= 64 && s.chars().all(|c| c.is_ascii_graphic() || c == ' ') => Ok(Some(s)),
+        Some(_) => Err(fail("mcpServerName", "must be 1 to 64 printable ASCII characters")),
+    }
 }
 
 fn app_name(suffix: Option<String>) -> Result<String, ConfigError> {
