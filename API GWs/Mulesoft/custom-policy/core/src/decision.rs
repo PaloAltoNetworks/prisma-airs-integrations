@@ -80,6 +80,8 @@ pub enum BlockKind {
     Gap,
     /// Sensitive data on a stream, which cannot be masked in place.
     DlpOnStream,
+    /// The policy's configuration was rejected, so every request is refused.
+    Config,
 }
 
 impl BlockKind {
@@ -89,6 +91,7 @@ impl BlockKind {
             BlockKind::Scanner => "scanner",
             BlockKind::Gap => "gap",
             BlockKind::DlpOnStream => "dlp_on_stream",
+            BlockKind::Config => "config",
         }
     }
 }

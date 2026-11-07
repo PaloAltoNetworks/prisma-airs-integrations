@@ -9,7 +9,7 @@ use prisma_airs_core::errors::client_error;
 use prisma_airs_core::evidence::{LegRecord, Record};
 use prisma_airs_core::extract::request::prompt_text;
 use prisma_airs_core::extract::response::{from_value, scan_text};
-use prisma_airs_core::extract::{ExtractError, Slot};
+use prisma_airs_core::extract::{write_back, ExtractError, Slot};
 use prisma_airs_core::format::{is_streamed, requested_model, Format};
 use prisma_airs_core::{identity, sse};
 use serde_json::Value;
@@ -30,7 +30,7 @@ pub(crate) struct Ctx {
 
 /// The filter of a policy whose configuration could not be used: nothing passes.
 pub(crate) async fn refuse(_request: RequestState) -> Flow<()> {
-    let (content_type, body) = client_error(None, Leg::Prompt, 503, BlockKind::Scanner, None, None);
+    let (content_type, body) = client_error(None, Leg::Prompt, 503, BlockKind::Config, None, None);
     Flow::Break(Response::new(503).with_headers(vec![("content-type".to_string(), content_type.to_string())]).with_body(body))
 }
 
@@ -114,7 +114,7 @@ pub(crate) async fn request(state: RequestState, client: HttpClient, auth: Authe
     };
 
     // A request body is never a stream, even when it asks for a streamed reply, so its prompt can be masked in place.
-    let decision = decide(s, Leg::Prompt, &outcome, false, matches!(slot, Slot::Single(_)));
+    let decision = decide(s, Leg::Prompt, &outcome, false, slot.maskable());
     leg.outcome = outcome_name(&outcome, &decision);
     ctx.record.legs.push(leg);
     match decision {
@@ -132,10 +132,7 @@ pub(crate) async fn request(state: RequestState, client: HttpClient, auth: Authe
             )
         }
         Decision::Mask(masked) => {
-            let written = match &slot {
-                Slot::Single(pointer) => rewrite(&body, pointer, &masked).and_then(|new| set_body(h, &new)),
-                Slot::Multi => None,
-            };
+            let written = write_back(&body, &slot, &masked).and_then(|new| set_body(h, &new));
             if written.is_none() {
                 // Masked text that cannot be written back means the original would be forwarded: block instead.
                 return block_request(ctx, shared, &outcome, 403, BlockKind::Policy);
@@ -243,17 +240,14 @@ pub(crate) async fn response(state: ResponseState, data: RequestData<Ctx>, clien
         }
     };
 
-    let single = !streamed && matches!(slot, Slot::Single(_));
+    let single = !streamed && slot.maskable();
     let decision = decide(s, Leg::Response, &outcome, streamed, single);
     leg.outcome = outcome_name(&outcome, &decision);
     ctx.record.legs.push(leg);
     let block = match decision {
         Decision::Block { status, scan_id, kind } => Some((status, scan_id, kind)),
         Decision::Mask(masked) => {
-            let written = match &slot {
-                Slot::Single(pointer) => rewrite(&body, pointer, &masked).and_then(|new| replace_body(h, &new)),
-                Slot::Multi => None,
-            };
+            let written = write_back(&body, &slot, &masked).and_then(|new| replace_body(h, &new));
             match written {
                 Some(()) => {
                     ctx.record.legs.last_mut().map(|l| l.outcome = "masked".into());
@@ -331,16 +325,6 @@ fn claim_value(properties: &Value, name: &str) -> Option<String> {
 }
 
 /// The body with the string at `pointer` replaced, re-serialized.
-fn rewrite(body: &[u8], pointer: &str, text: &str) -> Option<Vec<u8>> {
-    let mut value: Value = serde_json::from_slice(body).ok()?;
-    let slot = value.pointer_mut(pointer)?;
-    if !slot.is_string() {
-        return None;
-    }
-    *slot = Value::String(text.to_string());
-    serde_json::to_vec(&value).ok()
-}
-
 fn set_body(h: &dyn HeadersBodyHandler, body: &[u8]) -> Option<()> {
     h.remove_header("content-length");
     h.set_body(body).ok()?;

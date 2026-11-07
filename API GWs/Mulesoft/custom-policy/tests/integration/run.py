@@ -261,9 +261,10 @@ def truncation_fail_closed():
 
 
 @case
-def truncation_open_scans_first_n():
+def truncation_open_scans_newest_n():
+    # s03 Task 12: over the limit, a prompt keeps its newest text, the part that must not be cut.
     reset()
-    status, _, _, _ = send(8091, "openai", "b" * 100)
+    status, _, _, _ = send(8091, "openai", "a" * 100 + "b" * 50)
     check(status == 200, f"status {status}")
     s = scans()
     check(s and s[0]["contents"][0]["prompt"] == "b" * 50, f"scanned {s[0]['contents'] if s else None}")
@@ -273,8 +274,9 @@ def truncation_open_scans_first_n():
 def misconfigured_is_503_for_all():
     reset()
     for fmt in FORMATS:
-        status, _, _, _ = send(8086, fmt, "hello")
+        status, _, raw, _ = send(8086, fmt, "hello")
         check(status == 503, f"{fmt}: status {status}")
+        check(b"not configured correctly" in raw, f"{fmt}: the reply does not say why: {raw[:160]!r}")
     check(hits() == 0 and scans() == [], "a misconfigured policy let traffic through")
 
 
@@ -503,6 +505,52 @@ def leak_check():
     print(f"  body: {raw[:200]!r}")
     for l in [l for l in logs.splitlines() if any(w in l.lower() for w in ("prisma", "configuration", "invalid", "error", "reject"))][-8:]:
         print("  log:", l.replace("FAKE-LEAK-KEY-4242", "<FAKE KEY>").replace("424242424242", "<FAKE KEY>")[:240])
+
+
+# ---- s03 Task 12: the phase-gate fixes ----------------------------------------------------------------------------
+
+HISTORY = {
+    "openai": {"model": "gpt-test", "messages": [{"role": "user", "content": "BLOCKME please"},
+               {"role": "assistant", "content": "Noted."}, {"role": "user", "content": "hello"}]},
+    "responses": {"model": "gpt-test", "input": [{"role": "user", "content": "BLOCKME please"},
+                  {"role": "assistant", "content": "Noted."}, {"role": "user", "content": "hello"}]},
+    "anthropic": {"model": "claude-test", "max_tokens": 50, "messages": [{"role": "user", "content": "BLOCKME please"},
+                  {"role": "assistant", "content": "Noted."}, {"role": "user", "content": "hello"}]},
+    "gemini": {"contents": [{"role": "user", "parts": [{"text": "BLOCKME please"}]},
+               {"role": "model", "parts": [{"text": "Noted."}]}, {"role": "user", "parts": [{"text": "hello"}]}]},
+}
+
+
+@case
+def earlier_user_turn_is_scanned():
+    # The caller writes the whole history, so an earlier user turn is scanned like the newest one.
+    reset()
+    for fmt, body in HISTORY.items():
+        status, _, raw, _ = send(8081, fmt, "", body=body)
+        check(status == 403 and error_shape(fmt, raw), f"{fmt}: status {status}: {raw[:160]!r}")
+    check(hits() == 0, "an injection in an earlier user turn reached the upstream")
+
+
+@case
+def document_part_is_scanned():
+    reset()
+    body = {"model": "claude-test", "max_tokens": 50, "messages": [{"role": "user", "content": [
+        {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": "BLOCKME please"}},
+        {"type": "text", "text": "summarise the document"}]}]}
+    status, _, raw, _ = send(8081, "anthropic", "", body=body)
+    check(status == 403 and error_shape("anthropic", raw), f"status {status}: {raw[:160]!r}")
+    check(hits() == 0, "an injection in a document block reached the upstream")
+
+
+@case
+def masking_rewrites_every_user_turn():
+    reset()
+    body = {"model": "gpt-test", "messages": [{"role": "user", "content": "my code is DLPME today"},
+            {"role": "assistant", "content": "Noted."}, {"role": "user", "content": "and DLPME again"}]}
+    status, _, raw, _ = send(8087, "openai", "", body=body)
+    check(status == 200, f"status {status}: {raw[:200]!r}")
+    forwarded = last().get("body", "")
+    check(forwarded.count("XXXXX") == 2 and "DLPME" not in forwarded, f"upstream got {forwarded[:300]!r}")
 
 
 def main():

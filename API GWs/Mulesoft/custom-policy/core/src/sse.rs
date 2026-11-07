@@ -318,6 +318,8 @@ fn anthropic(frames: &Frames) -> Value {
 
 fn gemini(frames: &Frames) -> Value {
     let mut candidates: BTreeMap<u64, Vec<Value>> = BTreeMap::new();
+    // Grounding, citation and URL-context metadata, per candidate: the newest frame's value of each field wins.
+    let mut metadata: BTreeMap<u64, Map<String, Value>> = BTreeMap::new();
     let mut feedback: Option<Value> = None;
     for (_, frame) in frames {
         if frame.get("error").is_some() {
@@ -327,14 +329,28 @@ fn gemini(frames: &Frames) -> Value {
             feedback = Some(pf.clone());
         }
         for candidate in frame.get("candidates").and_then(Value::as_array).into_iter().flatten() {
-            let parts = candidates.entry(index(candidate, "index")).or_default();
+            let at = index(candidate, "index");
+            let parts = candidates.entry(at).or_default();
             let new = candidate.get("content").and_then(|c| c.get("parts")).and_then(Value::as_array);
             parts.extend(new.into_iter().flatten().cloned());
+            for (camel, snake) in crate::extract::response::GEMINI_METADATA {
+                for key in [camel, snake] {
+                    if let Some(meta) = candidate.get(key).filter(|v| !v.is_null()) {
+                        metadata.entry(at).or_default().insert(key.to_string(), meta.clone());
+                    }
+                }
+            }
         }
     }
     let list: Vec<Value> = candidates
         .into_iter()
-        .map(|(i, parts)| json!({"index": i, "content": {"role": "model", "parts": parts}}))
+        .map(|(i, parts)| {
+            let mut candidate = json!({"index": i, "content": {"role": "model", "parts": parts}});
+            for (key, meta) in metadata.remove(&i).unwrap_or_default() {
+                candidate[key] = meta;
+            }
+            candidate
+        })
         .collect();
     let mut out = json!({ "candidates": list });
     if let Some(pf) = feedback {

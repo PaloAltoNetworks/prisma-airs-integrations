@@ -1,5 +1,5 @@
 use prisma_airs_core::extract::request::prompt_text;
-use prisma_airs_core::extract::{ExtractError, Slot};
+use prisma_airs_core::extract::{write_back, ExtractError, Field, Slot};
 use prisma_airs_core::format::{is_streamed, requested_model, Format};
 use prisma_airs_core::settings::{Role, RoleSet};
 use serde_json::{json, Value};
@@ -15,6 +15,18 @@ fn all_roles() -> RoleSet {
 
 fn text(format: Format, body: &Value, roles: &RoleSet) -> String {
     prompt_text(format, body, roles, 20000).unwrap().text
+}
+
+fn field(pointer: &str, chars: usize) -> Field {
+    Field { pointer: pointer.into(), chars }
+}
+
+fn assert_in_order(text: &str, pieces: &[&str]) {
+    let mut at = 0;
+    for piece in pieces {
+        let found = text[at..].find(piece).unwrap_or_else(|| panic!("{piece:?} missing or out of order in {text:?}"));
+        at += found + piece.len();
+    }
 }
 
 // ---- detection -------------------------------------------------------------------------------------------------
@@ -102,13 +114,28 @@ fn model_from_body() {
 // ---- OpenAI Chat Completions ----------------------------------------------------------------------------------
 
 #[test]
-fn openai_newest_user_turn_only_by_default() {
+fn openai_every_user_turn_by_default() {
+    // s03 Task 12: the caller writes the whole history, so an earlier user turn is no more trusted than the newest.
     let b = json!({"messages":[{"role":"user","content":"first"},
         {"role":"assistant","content":"a"},{"role":"user","content":"second"}]});
     let e = prompt_text(Format::OpenAiChat, &b, &RoleSet::user_only(), 20000).unwrap();
-    assert_eq!(e.text, "second");
-    assert_eq!(e.slot, Slot::Single("/messages/2/content".into()));
+    assert_eq!(e.text, "first\n\nsecond");
+    assert_eq!(e.slot, Slot::Fields(vec![field("/messages/0/content", 5), field("/messages/2/content", 6)]));
     assert!(!e.truncated);
+}
+
+#[test]
+fn every_user_turn_in_every_format() {
+    let roles = RoleSet::user_only();
+    let responses = json!({"input":[{"role":"user","content":"first"},{"role":"assistant","content":"a"},
+        {"role":"user","content":"second"}]});
+    assert_eq!(text(Format::OpenAiResponses, &responses, &roles), "first\n\nsecond");
+    let anthropic = json!({"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"a"},
+        {"role":"user","content":"second"}]});
+    assert_eq!(text(Format::AnthropicMessages, &anthropic, &roles), "first\n\nsecond");
+    let gemini = json!({"contents":[{"role":"user","parts":[{"text":"first"}]},{"role":"model","parts":[{"text":"a"}]},
+        {"role":"user","parts":[{"text":"second"}]}]});
+    assert_eq!(text(Format::Gemini, &gemini, &roles), "first\n\nsecond");
 }
 
 #[test]
@@ -118,8 +145,8 @@ fn openai_every_text_part() {
         {"type":"image_url","image_url":{"url":"https://example.com/cat.png"}},
         {"type":"text","text":"b"}]}]});
     let e = prompt_text(Format::OpenAiChat, &b, &RoleSet::user_only(), 20000).unwrap();
-    assert_eq!(e.text, "a\n\nb");
-    assert_eq!(e.slot, Slot::Multi);
+    assert_in_order(&e.text, &["a", "https://example.com/cat.png", "b"]);
+    assert_eq!(e.slot, Slot::Multi, "a serialized part has no field to write masked text back to");
 }
 
 #[test]
@@ -141,22 +168,17 @@ fn openai_no_text_turn_is_serialized() {
 #[test]
 fn openai_tool_role_added_when_configured() {
     let b = fixture("openai_agent_loop.json");
-    assert_eq!(text(Format::OpenAiChat, &b, &RoleSet::user_only()), "And tomorrow?");
+    assert_eq!(text(Format::OpenAiChat, &b, &RoleSet::user_only()), "What is the weather in Paris?\n\nAnd tomorrow?");
     let with_tool = text(Format::OpenAiChat, &b, &RoleSet::user_only().with(Role::Tool));
-    assert_eq!(with_tool, "Sunny, 21C\n\nAnd tomorrow?");
+    assert_eq!(with_tool, "What is the weather in Paris?\n\nSunny, 21C\n\nAnd tomorrow?");
 }
 
 #[test]
 fn openai_all_roles_in_conversation_order() {
     let b = fixture("openai_agent_loop.json");
     let t = text(Format::OpenAiChat, &b, &all_roles());
-    let order = ["You are a weather bot.", "get_weather", "{\"city\":\"Paris\"}", "Sunny, 21C", "And tomorrow?"];
-    let mut at = 0;
-    for piece in order {
-        let found = t[at..].find(piece).unwrap_or_else(|| panic!("{piece:?} missing or out of order in {t:?}"));
-        at += found + piece.len();
-    }
-    assert!(!t.contains("What is the weather in Paris?"), "an older user turn is not the newest one: {t:?}");
+    assert_in_order(&t, &["You are a weather bot.", "What is the weather in Paris?", "get_weather", "{\"city\":\"Paris\"}",
+        "Sunny, 21C", "And tomorrow?"]);
 }
 
 #[test]
@@ -305,4 +327,96 @@ fn wrong_shapes_are_unreadable() {
     assert!(matches!(prompt_text(Format::AnthropicMessages, &json!({"messages": [{"role": "user", "content": 5}]}), &roles, 20000), Err(ExtractError::Unreadable(_))));
     assert!(matches!(prompt_text(Format::Gemini, &json!({"contents": {"parts": []}}), &roles, 20000), Err(ExtractError::Unreadable(_))));
     assert!(matches!(prompt_text(Format::OpenAiChat, &json!([1, 2]), &roles, 20000), Err(ExtractError::Unreadable(_))));
+}
+
+// ---- s03 Task 12: non-text parts, the newest text first to go, masked text written back --------------------------
+
+#[test]
+fn anthropic_text_document_next_to_text_is_scanned() {
+    let b = json!({"messages":[{"role":"user","content":[
+        {"type":"document","source":{"type":"text","media_type":"text/plain","data":"DOCTEXT"},"title":"TITLE","context":"CTX"},
+        {"type":"text","text":"ask"}]}]});
+    let t = text(Format::AnthropicMessages, &b, &RoleSet::user_only());
+    for s in ["DOCTEXT", "TITLE", "CTX", "ask"] {
+        assert!(t.contains(s), "{s} missing: {t:?}");
+    }
+}
+
+#[test]
+fn anthropic_content_document_and_search_result_are_scanned() {
+    let b = json!({"messages":[{"role":"user","content":[
+        {"type":"document","source":{"type":"content","content":[{"type":"text","text":"PART1"},{"type":"text","text":"PART2"}]}},
+        {"type":"search_result","source":"https://example.com/r","title":"RT","content":[{"type":"text","text":"RESULT"}]},
+        {"type":"text","text":"ask"}]}]});
+    let t = text(Format::AnthropicMessages, &b, &RoleSet::user_only());
+    for s in ["PART1", "PART2", "https://example.com/r", "RT", "RESULT", "ask"] {
+        assert!(t.contains(s), "{s} missing: {t:?}");
+    }
+}
+
+#[test]
+fn gemini_inline_text_data_is_decoded_and_scanned() {
+    // "RE9DVEVYVA==" is base64 for DOCTEXT.
+    let b = json!({"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"text/plain","data":"RE9DVEVYVA=="}},{"text":"ask"}]}]});
+    let t = text(Format::Gemini, &b, &RoleSet::user_only());
+    assert!(t.contains("DOCTEXT") && t.contains("ask"), "{t:?}");
+}
+
+#[test]
+fn non_text_parts_are_scanned_without_their_bytes() {
+    let png = "iVBORw0KGgoAAAANSUhEUgAA".repeat(20);
+    let b = json!({"messages":[{"role":"user","content":[
+        {"type":"text","text":"ask"},
+        {"type":"image_url","image_url":{"url":"https://example.com/cat.png"}},
+        {"type":"image_url","image_url":{"url": format!("data:image/png;base64,{png}")}},
+        {"type":"future_part","note":"FUTURE"}]}]});
+    let t = text(Format::OpenAiChat, &b, &RoleSet::user_only());
+    assert!(t.contains("ask") && t.contains("https://example.com/cat.png") && t.contains("FUTURE"), "{t:?}");
+    assert!(!t.contains(&png[..48]), "binary payloads are not scanned: {t:?}");
+    let image = json!({"messages":[{"role":"user","content":[{"type":"text","text":"ask"},
+        {"type":"image","source":{"type":"base64","media_type":"image/png","data": png.clone()}}]}]});
+    let t = text(Format::AnthropicMessages, &image, &RoleSet::user_only());
+    assert!(t.contains("ask") && t.contains("image/png") && !t.contains(&png[..48]), "{t:?}");
+}
+
+#[test]
+fn prompt_over_the_limit_keeps_the_newest_text() {
+    let b = json!({"messages":[{"role":"user","content":"a".repeat(30)},{"role":"user","content":"NEWEST"}]});
+    let e = prompt_text(Format::OpenAiChat, &b, &RoleSet::user_only(), 10).unwrap();
+    assert!(e.truncated);
+    assert!(e.text.ends_with("NEWEST"), "{:?}", e.text);
+    assert_eq!(e.text.chars().count(), 10);
+    assert_eq!(e.slot, Slot::Multi);
+}
+
+#[test]
+fn masked_text_is_written_back_to_every_field() {
+    let body = json!({"messages":[{"role":"user","content":"card 1234"},{"role":"assistant","content":"ok"},
+        {"role":"user","content":"and 5678"}]});
+    let e = prompt_text(Format::OpenAiChat, &body, &RoleSet::user_only(), 20000).unwrap();
+    let bytes = serde_json::to_vec(&body).unwrap();
+    let out = write_back(&bytes, &e.slot, "card XXXX\n\nand XXXX").expect("same length: written back");
+    let v: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["messages"][0]["content"], "card XXXX");
+    assert_eq!(v["messages"][1]["content"], "ok");
+    assert_eq!(v["messages"][2]["content"], "and XXXX");
+}
+
+#[test]
+fn masked_text_that_does_not_line_up_is_not_written_back() {
+    let body = json!({"messages":[{"role":"user","content":"card 1234"},{"role":"user","content":"and 5678"}]});
+    let e = prompt_text(Format::OpenAiChat, &body, &RoleSet::user_only(), 20000).unwrap();
+    let bytes = serde_json::to_vec(&body).unwrap();
+    assert_eq!(write_back(&bytes, &e.slot, "card [MASKED]\n\nand XXXX"), None, "another length");
+    assert_eq!(write_back(&bytes, &e.slot, "card XXXX  and XXXX"), None, "the separator was changed");
+    assert_eq!(write_back(&bytes, &Slot::Multi, "card XXXX\n\nand XXXX"), None);
+}
+
+#[test]
+fn single_field_masked_text_is_written_back() {
+    let body = json!({"messages":[{"role":"user","content":"card 1234"}]});
+    let e = prompt_text(Format::OpenAiChat, &body, &RoleSet::user_only(), 20000).unwrap();
+    let out = write_back(&serde_json::to_vec(&body).unwrap(), &e.slot, "card XXXX").unwrap();
+    let v: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["messages"][0]["content"], "card XXXX");
 }

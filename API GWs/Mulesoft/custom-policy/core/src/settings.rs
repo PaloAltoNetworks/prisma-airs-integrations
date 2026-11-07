@@ -216,7 +216,7 @@ impl Settings {
         let breaker_failures = whole(advanced, "breakerFailures", 0, 0, 100)? as u32;
         let breaker_cooldown_s = whole(advanced, "breakerCooldownS", 30, 1, 3600)? as u32;
         let roles = roles(advanced)?;
-        let max_scan_chars = whole(advanced, "maxScanChars", 20_000, 1, 1_000_000)? as usize;
+        let max_scan_chars = whole(advanced, "maxScanChars", 100_000, 1, 1_000_000)? as usize;
         let truncation_fail_closed = flag(advanced, "truncationFailClosed", true)?;
         let masking = flag(advanced, "applyDlpMasking", false)?;
         let app_name = app_name(text(advanced, "appNameSuffix")?)?;

@@ -3,16 +3,20 @@
 //! Each format is read into the same list of turns (who spoke, their text, their non-text parts). One assembler then
 //! applies the rules for every format:
 //!
-//! - the newest user turn is always scanned, and earlier user turns are not;
+//! - every user turn is scanned, not only the newest: the caller writes the whole history, so an earlier turn is no
+//!   more trusted than the newest (s03 Task 12);
 //! - system, assistant and tool turns are scanned when their role is configured, in conversation order;
-//! - every text part of a turn is read, and a turn with no text is scanned as the JSON of its other parts.
+//! - every text part of a turn is read, text-bearing documents included (an Anthropic text or content document, a
+//!   search result, Gemini inline text data), and every other part is scanned as its JSON without its binary
+//!   payload, so URLs, names and unknown part types are scanned and the bytes of an image are not;
+//! - over the limit, the newest text is kept: it is the part that must not be cut.
 //!
 //! A tool call the model made earlier (`tool_calls`, `tool_use`, `functionCall`) is assistant text, written as
 //! `tool <name>: <arguments>`. A tool result is a tool turn in every format.
 
 use serde_json::{Map, Value};
 
-use super::{assemble, ExtractError, Extracted, Piece};
+use super::{assemble_newest, base64_text, without_binary, ExtractError, Extracted, Piece};
 use crate::format::Format;
 use crate::settings::{Role, RoleSet};
 
@@ -27,18 +31,17 @@ pub fn prompt_text(format: Format, body: &Value, roles: &RoleSet, max_chars: usi
         Format::AnthropicMessages => anthropic(obj)?,
         Format::Gemini => gemini(obj)?,
     };
-    assemble(select(turns, roles), max_chars)
+    assemble_newest(select(turns, roles), max_chars)
 }
 
 struct Turn {
     role: Role,
-    texts: Vec<Piece>,
-    others: Vec<Value>,
+    pieces: Vec<Piece>,
 }
 
 impl Turn {
     fn has_content(&self) -> bool {
-        self.texts.iter().any(|p| !p.text.trim().is_empty()) || !self.others.is_empty()
+        self.pieces.iter().any(|p| !p.text.trim().is_empty())
     }
 }
 
@@ -54,18 +57,19 @@ impl Turns {
     fn current(&mut self, role: Role) -> &mut Turn {
         let reuse = !self.split && self.list.last().is_some_and(|t| t.role == role);
         if !reuse {
-            self.list.push(Turn { role, texts: Vec::new(), others: Vec::new() });
+            self.list.push(Turn { role, pieces: Vec::new() });
         }
         self.split = false;
         self.list.last_mut().expect("a turn was just pushed")
     }
 
     fn text(&mut self, role: Role, text: &str, pointer: Option<String>) {
-        self.current(role).texts.push(Piece { text: text.to_string(), pointer });
+        self.current(role).pieces.push(Piece { text: text.to_string(), pointer });
     }
 
+    /// A part that is not text: scanned as its JSON, without its binary payload.
     fn other(&mut self, role: Role, value: &Value) {
-        self.current(role).others.push(value.clone());
+        self.current(role).pieces.push(Piece { text: without_binary(value), pointer: None });
     }
 
     fn tool_call(&mut self, name: &str, arguments: &str) {
@@ -78,24 +82,20 @@ impl Turns {
 }
 
 fn select(turns: Turns, roles: &RoleSet) -> Vec<Piece> {
-    let turns = turns.list;
-    let newest_user = turns.iter().rposition(|t| t.role == Role::User && t.has_content());
     let mut pieces = Vec::new();
-    for (i, turn) in turns.into_iter().enumerate() {
-        let wanted = match turn.role {
-            Role::User => Some(i) == newest_user,
-            role => roles.contains(role),
-        };
-        if !wanted || !turn.has_content() {
-            continue;
-        }
-        if turn.texts.iter().any(|p| !p.text.trim().is_empty()) {
-            pieces.extend(turn.texts);
-        } else {
-            pieces.push(Piece { text: serialize(&Value::Array(turn.others)), pointer: None });
+    for turn in turns.list {
+        let wanted = turn.role == Role::User || roles.contains(turn.role);
+        if wanted && turn.has_content() {
+            pieces.extend(turn.pieces);
         }
     }
     pieces
+}
+
+/// A media type whose bytes are text a model reads.
+fn is_text_mime(mime: &str) -> bool {
+    let mime = mime.trim().to_ascii_lowercase();
+    mime.starts_with("text/") || mime == "application/json" || mime.ends_with("+json") || mime == "application/xml"
 }
 
 fn unreadable(why: impl Into<String>) -> ExtractError {
@@ -335,6 +335,53 @@ fn anthropic_block(turns: &mut Turns, role: Role, block: &Value, at: &str) {
             }
         }
         Some("redacted_thinking") => {}
+        Some("document") => anthropic_document(turns, role, obj, block, at),
+        Some("search_result") => {
+            for key in ["source", "title"] {
+                if let Some(text) = str_field(obj, key) {
+                    turns.text(role, text, Some(format!("{at}/{key}")));
+                }
+            }
+            for (k, part) in obj.get("content").and_then(Value::as_array).into_iter().flatten().enumerate() {
+                match part_text(part, &["text"]) {
+                    Some((key, text)) => turns.text(role, text, Some(format!("{at}/content/{k}/{key}"))),
+                    None => turns.other(role, part),
+                }
+            }
+        }
+        _ => turns.other(role, block),
+    }
+}
+
+/// A document block: its title and context, and its text when the source holds text. A PDF or a file reference
+/// cannot be read here, so it is scanned as its JSON without its bytes.
+fn anthropic_document(turns: &mut Turns, role: Role, obj: &Obj, block: &Value, at: &str) {
+    for key in ["title", "context"] {
+        if let Some(text) = str_field(obj, key) {
+            turns.text(role, text, Some(format!("{at}/{key}")));
+        }
+    }
+    let source = obj.get("source").and_then(Value::as_object);
+    let kind = source.and_then(|s| str_field(s, "type"));
+    match (kind, source) {
+        (Some("text"), Some(src)) if str_field(src, "data").is_some() => {
+            turns.text(role, str_field(src, "data").unwrap_or_default(), Some(format!("{at}/source/data")));
+        }
+        (Some("content"), Some(src)) => match src.get("content") {
+            Some(Value::String(text)) => turns.text(role, text, Some(format!("{at}/source/content"))),
+            Some(Value::Array(blocks)) => {
+                for (k, inner) in blocks.iter().enumerate() {
+                    anthropic_block(turns, role, inner, &format!("{at}/source/content/{k}"));
+                }
+            }
+            _ => turns.other(role, block),
+        },
+        (Some("base64"), Some(src)) if str_field(src, "media_type").is_some_and(is_text_mime) => {
+            match str_field(src, "data").and_then(base64_text) {
+                Some(text) => turns.text(role, &text, None),
+                None => turns.other(role, block),
+            }
+        }
         _ => turns.other(role, block),
     }
 }
@@ -395,6 +442,13 @@ fn gemini_parts(turns: &mut Turns, role: Role, content: &Obj, at: &str) -> Resul
             turns.text(Role::Assistant, &arguments(code.get("code")), None);
         } else if let Some(result) = field("codeExecutionResult", "code_execution_result") {
             turns.text(Role::Tool, &arguments(result.get("output")), None);
+        } else if let Some(inline) = field("inlineData", "inline_data") {
+            let mime = inline.get("mimeType").or_else(|| inline.get("mime_type")).and_then(Value::as_str).unwrap_or("");
+            let text = inline.get("data").and_then(Value::as_str).filter(|_| is_text_mime(mime)).and_then(base64_text);
+            match text {
+                Some(text) => turns.text(role, &text, None),
+                None => turns.other(role, part),
+            }
         } else {
             turns.other(role, part);
         }

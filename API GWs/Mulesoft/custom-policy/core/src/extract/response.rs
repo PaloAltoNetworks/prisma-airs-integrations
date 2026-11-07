@@ -7,7 +7,7 @@
 
 use serde_json::{Map, Value};
 
-use super::{assemble, ExtractError, Extracted, Piece, Slot};
+use super::{assemble, without_binary, ExtractError, Extracted, Piece, Slot};
 use crate::format::Format;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,6 +235,9 @@ fn gemini(obj: &Map<String, Value>, c: &mut Collect) -> Result<(), ExtractError>
                 c.text(&arguments(code.get("code")), None);
             } else if let Some(result) = field("codeExecutionResult", "code_execution_result") {
                 c.text(&arguments(result.get("output")), None);
+            } else {
+                // Images, files and part types this extractor does not know: scanned, not dropped (R10).
+                c.text(&without_binary(part), None);
             }
         }
         let pointer = match fields.as_slice() {
@@ -242,6 +245,19 @@ fn gemini(obj: &Map<String, Value>, c: &mut Collect) -> Result<(), ExtractError>
             _ => None,
         };
         c.text(&joined, pointer);
+        // Search grounding, citations and URL context carry sources back to the caller: scanned, not dropped.
+        for (camel, snake) in GEMINI_METADATA {
+            if let Some(meta) = candidate.get(camel).or_else(|| candidate.get(snake)).filter(|v| !v.is_null()) {
+                c.text(&without_binary(meta), None);
+            }
+        }
     }
     Ok(())
 }
+
+/// The candidate fields that hold sources a Gemini reply passes to the caller.
+pub const GEMINI_METADATA: [(&str, &str); 3] = [
+    ("groundingMetadata", "grounding_metadata"),
+    ("citationMetadata", "citation_metadata"),
+    ("urlContextMetadata", "url_context_metadata"),
+];

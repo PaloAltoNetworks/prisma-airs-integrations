@@ -20,6 +20,10 @@ pub fn client_error(
 ) -> (&'static str, Vec<u8>) {
     let unavailable = status == 503 || kind == BlockKind::Scanner;
     let mut message = match (kind, leg) {
+        (BlockKind::Config, _) => {
+            "Prisma AIRS Guardrails is not configured correctly, so it refused this request. Check the policy's settings."
+                .to_string()
+        }
         (BlockKind::Scanner, Leg::Prompt) => "Prisma AIRS could not scan this request, so it was not forwarded.".to_string(),
         (BlockKind::Scanner, Leg::Response) => "Prisma AIRS could not scan this response, so it was withheld.".to_string(),
         (BlockKind::Gap, Leg::Prompt) => "Prisma AIRS could not inspect this request, so it was not forwarded.".to_string(),

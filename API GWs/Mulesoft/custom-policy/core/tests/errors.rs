@@ -79,3 +79,14 @@ fn bodies_never_contain_the_key() {
         }
     }
 }
+
+#[test]
+fn rejected_configuration_has_its_own_message() {
+    // s03 Task 12: on a managed gateway the policy's error line is not visible, so the reply says what is wrong.
+    for format in [None, Some(Format::OpenAiChat), Some(Format::AnthropicMessages), Some(Format::Gemini)] {
+        let (_, body) = client_error(format, Leg::Prompt, 503, BlockKind::Config, None, None);
+        let text = String::from_utf8(body).unwrap();
+        assert!(text.contains("Prisma AIRS Guardrails is not configured correctly"), "{format:?}: {text}");
+        assert!(!text.contains("could not scan"), "{format:?}: {text}");
+    }
+}

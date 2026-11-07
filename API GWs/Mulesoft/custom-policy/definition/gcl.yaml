@@ -40,7 +40,8 @@ spec:
       title: AI Security Profile Name
       description: >-
         The name of the Prisma AIRS security profile that judges this traffic, exactly as it appears in Strata Cloud
-        Manager. Set this or the profile ID, not both (unless a profile map is used).
+        Manager. Set this or the profile ID, not both. Leave both empty when you use a profile map: a configuration
+        with a profile map and a profile name or ID is refused, and every request then gets 503.
     profileId:
       type: string
       title: AI Security Profile ID
@@ -146,11 +147,13 @@ spec:
             tool closes the tool-result injection path; adding system closes system-prompt injection.
         maxScanChars:
           type: integer
-          default: 20000
+          default: 100000
           minimum: 1
           maximum: 1000000
           title: Maximum Scanned Characters
-          description: The most characters sent to Prisma AIRS from one leg.
+          description: >-
+            The most characters sent to Prisma AIRS from one leg. A prompt counts every user turn of the request.
+            Prisma AIRS accepts up to 2 MB per scan.
         truncationFailClosed:
           type: boolean
           default: true
@@ -212,7 +215,7 @@ spec:
           title: Profile Map
           description: >-
             A security profile per calling client application, matched on the client application's name. Needs a
-            fallback profile.
+            fallback profile, and the AI Security Profile Name and ID left empty.
         fallbackProfileName:
           type: string
           title: Fallback Profile Name

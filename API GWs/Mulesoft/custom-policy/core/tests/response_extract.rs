@@ -341,3 +341,40 @@ fn scan_text_truncates_by_chars_and_drops_the_slot() {
     assert_eq!(e.text.chars().count(), 10);
     assert_eq!(e.slot, Slot::Multi);
 }
+
+// ---- s03 Task 12: Gemini parts and candidate metadata the extractor used to drop ----------------------------------
+
+#[test]
+fn gemini_unknown_parts_and_metadata_are_scanned() {
+    let v = json!({"candidates":[{"index":0,
+        "content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo"}}]},
+        "groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://BLOCKME.example/a","title":"t"}}]},
+        "citationMetadata":{"citationSources":[{"uri":"https://cite.example/b"}]},
+        "urlContextMetadata":{"urlMetadata":[{"retrievedUrl":"https://ctx.example/c"}]}}]});
+    let p = from_value(Format::Gemini, &v).unwrap();
+    assert!(!p.is_empty(), "a reply of non-text parts and metadata is not empty");
+    let t = scanned(&p);
+    for s in ["BLOCKME", "cite.example", "ctx.example", "image/png"] {
+        assert!(t.contains(s), "{s} missing: {t:?}");
+    }
+}
+
+#[test]
+fn gemini_text_with_grounding_is_scanned_with_its_sources() {
+    let v = json!({"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"See the source."}]},
+        "groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://BLOCKME.example/a"}}],
+        "searchEntryPoint":{"renderedContent":"<a href=\"https://BLOCKME.example/b\">x</a>"}}}]});
+    let t = scanned(&from_value(Format::Gemini, &v).unwrap());
+    assert!(t.contains("See the source.") && t.contains("https://BLOCKME.example/a") && t.contains("https://BLOCKME.example/b"), "{t:?}");
+}
+
+#[test]
+fn gemini_stream_keeps_candidate_metadata() {
+    let body = concat!(
+        "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello\"}]}}]}\r\n\r\n",
+        "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\" world\"}]},",
+        "\"groundingMetadata\":{\"groundingChunks\":[{\"web\":{\"uri\":\"https://BLOCKME.example/a\"}}]}}]}\r\n\r\n",
+    );
+    let t = scanned(&sse_parts_of(Format::Gemini, body.as_bytes()));
+    assert!(t.contains("Hello world") && t.contains("BLOCKME"), "{t:?}");
+}
