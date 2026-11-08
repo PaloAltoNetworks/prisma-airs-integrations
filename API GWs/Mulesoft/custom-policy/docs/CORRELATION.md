@@ -42,7 +42,7 @@ Session Claim and User Claim read the claims of a token that a JWT validation po
 
 - `x-session-id` becomes `session_id`. AIRS also copies it into `tr_id`, the legacy session field.
 - Without a session value, the policy sends no `session_id`, and AIRS assigns `pan_<uuid>`.
-- **MCP** (8 November, an MCP server instance in front of DeepWiki): a refused `tools/call` sent with `Mcp-Session-Id: s04-live-<time>` produced an AIRS record whose `session_id` and `tr_id` both equal that header. DeepWiki is stateless and issues no `Mcp-Session-Id`, so taking the server's session from an `initialize` reply is covered by the Local Mode harness only.
+- **MCP** (8 November, an MCP server instance in front of DeepWiki): a refused `tools/call` sent with an `Mcp-Session-Id` header produced an AIRS record whose `session_id` and `tr_id` both equal the header's value. DeepWiki is stateless and issues no `Mcp-Session-Id`, so taking the server's session from an `initialize` reply is covered by the Local Mode harness only.
 
 ### JWT claims
 

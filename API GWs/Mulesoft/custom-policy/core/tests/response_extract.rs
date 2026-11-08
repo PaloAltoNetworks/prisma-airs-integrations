@@ -345,7 +345,7 @@ fn scan_text_truncates_by_chars_and_drops_the_slot() {
     assert_eq!(e.slot, Slot::Multi);
 }
 
-// ---- s03 Task 12: Gemini parts and candidate metadata the extractor used to drop ----------------------------------
+// ---- Gemini parts and candidate metadata --------------------------------------------------------------------------
 
 #[test]
 fn gemini_unknown_parts_and_metadata_are_scanned() {
@@ -382,7 +382,7 @@ fn gemini_stream_keeps_candidate_metadata() {
     assert!(t.contains("Hello world") && t.contains("BLOCKME"), "{t:?}");
 }
 
-// ---- the phase-2 gate: a provider's inline payload is read as the bytes it declares -------------------------------
+// ---- a provider's inline payload is read as the bytes it declares -------------------------------------------------
 
 /// A Gemini speech part: `samples` samples of audio with no file header, as Gemini's speech generation streams it.
 fn speech_part(samples: usize) -> Value {

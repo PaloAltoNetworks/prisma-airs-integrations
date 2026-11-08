@@ -1,7 +1,7 @@
 use prisma_airs_core::settings::{ConfigError, Mode, OnError, ProfileRef, Role, Settings};
 use serde_json::{json, Value};
 
-/// How a `format: service` value arrives in the policy's raw configuration (Task 1 step 4b).
+/// How a `format: service` value arrives in the policy's raw configuration.
 const ENDPOINT: &str = "https://service.api.aisecurity.paloaltonetworks.com";
 
 fn minimal() -> Value {
@@ -9,7 +9,7 @@ fn minimal() -> Value {
 }
 
 /// Basic settings are top-level properties; everything else sits in one `advancedConfiguration` object, the way
-/// MuleSoft's own CrowdStrike policy groups its settings (Task 1 step 3).
+/// MuleSoft's own CrowdStrike policy groups its settings.
 const BASIC: [&str; 8] = [
     "airsApiKey", "airsEndpoint", "profile", "scanRequests", "scanResponses",
     "enforcementMode", "onApiError", "onScanError",
@@ -45,7 +45,7 @@ fn defaults_from_minimal_config() {
     assert_eq!((s.on_api_error, s.on_scan_error), (OnError::Block, OnError::Block));
     assert_eq!((s.timeout_ms, s.retries, s.breaker_failures), (5000, 0, 0));
     assert_eq!(s.breaker_cooldown_s, 30);
-    assert_eq!(s.max_scan_chars, 100_000, "s03 Task 12: every user turn is scanned, and Prisma AIRS takes 2 MB per scan");
+    assert_eq!(s.max_scan_chars, 100_000, "every user turn is scanned, and Prisma AIRS takes 2 MB per scan");
     assert!(s.truncation_fail_closed && !s.masking && s.scan_requests && s.scan_responses);
     assert_eq!(s.app_name, "MuleSoft");
     assert_eq!(s.session_header, "x-session-id");

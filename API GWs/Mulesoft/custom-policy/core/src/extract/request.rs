@@ -4,7 +4,7 @@
 //! applies the rules for every format:
 //!
 //! - every user turn is scanned, not only the newest: the caller writes the whole history, so an earlier turn is no
-//!   more trusted than the newest (s03 Task 12);
+//!   more trusted than the newest;
 //! - system, assistant and tool turns are scanned when their role is configured, in conversation order;
 //! - every text part of a turn is read, text-bearing documents included (an Anthropic text or content document, a
 //!   search result, Gemini inline text data), and every other part is scanned as its JSON without its binary

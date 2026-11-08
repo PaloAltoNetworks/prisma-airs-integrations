@@ -140,7 +140,7 @@ pub(crate) async fn response(state: ResponseState, mut ctx: Ctx, client: &HttpCl
     if request.is_none() && (!event_stream || ctx.stream_get) {
         // A bodiless request: anything but an unexpected event stream passes as it did before MCP, unread. A stream the
         // client asked for (monitor mode, or allowOpenStreams) is left open, unread: the PDK cannot end a stream once
-        // it has started, and an AIRS call made while reading one holds the stream until it ends (V9, measured).
+        // it has started, and an AIRS call made while reading one holds the stream until it ends (measured).
         if ctx.stream_get && event_stream {
             ctx.record.legs.push(note(Leg::Response, "event_stream_unscanned"));
         }

@@ -136,7 +136,7 @@ def case(fn):
     return fn
 
 
-# ---- Task 7: the main path ----------------------------------------------------------------------------------------
+# ---- the main path ------------------------------------------------------------------------------------------------
 
 def make_allow(fmt):
     def allow_both_legs():
@@ -262,7 +262,7 @@ def truncation_fail_closed():
 
 @case
 def truncation_open_scans_newest_n():
-    # s03 Task 12: over the limit, a prompt keeps its newest text, the part that must not be cut.
+    # Over the limit, a prompt keeps its newest text, the part that must not be cut.
     reset()
     status, _, _, _ = send(8091, "openai", "a" * 100 + "b" * 50)
     check(status == 200, f"status {status}")
@@ -308,7 +308,7 @@ def accept_encoding_removed():
     check("accept-encoding" not in last().get("headers", {}), f"upstream got {last().get('headers', {}).get('accept-encoding')}")
 
 
-# ---- Task 8: the remaining cases ----------------------------------------------------------------------------------
+# ---- the remaining cases ------------------------------------------------------------------------------------------
 
 class Session:
     """One keep-alive connection: Envoy keeps a connection on one worker, and the breaker and cache are per worker."""
@@ -518,7 +518,7 @@ def leak_check():
         print("  log:", l.replace("FAKE-LEAK-KEY-4242", "<FAKE KEY>").replace("424242424242", "<FAKE KEY>")[:240])
 
 
-# ---- s03 Task 12: the phase-gate fixes ----------------------------------------------------------------------------
+# ---- earlier user turns, documents, masking across turns ----------------------------------------------------------
 
 HISTORY = {
     "openai": {"model": "gpt-test", "messages": [{"role": "user", "content": "BLOCKME please"},
@@ -565,7 +565,7 @@ def masking_rewrites_every_user_turn():
 
 
 
-# ---- s04: MCP traffic -------------------------------------------------------------------------------------------
+# ---- MCP traffic ------------------------------------------------------------------------------------------------
 
 def rpc(port, body, headers=None, method="POST", accept="application/json, text/event-stream"):
     hdrs = {"accept": accept} if accept else {}
@@ -817,7 +817,7 @@ def open_stream_unscanned(transaction_id):
 
 @case
 def mcp_open_stream_passes_clean_events():
-    """allowOpenStreams lets an open stream through as the server sends it, unread. V9, measured with this case: a
+    """allowOpenStreams lets an open stream through as the server sends it, unread. Measured with this case: a
     reader that scanned each event as it passed held the whole stream until the server ended it (events sent at 0,
     1.5 and 3 s all reached the client at 4.5 s)."""
     reset()
@@ -833,7 +833,7 @@ def mcp_open_stream_passes_clean_events():
 
 @case
 def mcp_open_stream_block():
-    """The policy cannot end an open stream (V9), so it never claims to block one: a message it would refuse is
+    """The policy cannot end an open stream, so it never claims to block one: a message it would refuse is
     delivered as sent, and the evidence records the stream as unscanned."""
     reset()
     texts = ["first note", "BLOCKME second note", "third note"]

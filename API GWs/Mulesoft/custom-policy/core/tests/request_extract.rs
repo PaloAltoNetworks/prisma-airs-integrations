@@ -109,7 +109,7 @@ fn gemini_model_from_path() {
 
 #[test]
 fn model_from_body() {
-    let b = fixture("s02_openai_chat.json");
+    let b = fixture("managed_openai_chat.json");
     assert_eq!(requested_model(Format::OpenAiChat, "/openai/chat/completions", &b).as_deref(), Some("openai/gpt-6-luna"));
     assert_eq!(requested_model(Format::AnthropicMessages, "/x", &json!({})), None);
 }
@@ -118,7 +118,7 @@ fn model_from_body() {
 
 #[test]
 fn openai_every_user_turn_by_default() {
-    // s03 Task 12: the caller writes the whole history, so an earlier user turn is no more trusted than the newest.
+    // The caller writes the whole history, so an earlier user turn is no more trusted than the newest.
     let b = json!({"messages":[{"role":"user","content":"first"},
         {"role":"assistant","content":"a"},{"role":"user","content":"second"}]});
     let e = prompt_text(Format::OpenAiChat, &b, &RoleSet::user_only(), 20000).unwrap();
@@ -194,7 +194,7 @@ fn openai_developer_counts_as_system() {
 
 #[test]
 fn responses_input_string() {
-    let b = fixture("s02_openai_responses.json");
+    let b = fixture("managed_openai_responses.json");
     let e = prompt_text(Format::OpenAiResponses, &b, &RoleSet::user_only(), 20000).unwrap();
     assert_eq!(e.text, "Reply with the single word: ready");
     assert_eq!(e.slot, Slot::Single("/input".into()));
@@ -277,15 +277,15 @@ fn gemini_content_without_role_is_user() {
     assert_eq!(text(Format::Gemini, &b, &RoleSet::user_only()), "hello");
 }
 
-// ---- the s02 request bodies -------------------------------------------------------------------------------------
+// ---- request bodies as the managed gateway passed them to the policy --------------------------------------------
 
 #[test]
-fn s02_bodies_extract_the_prompt() {
+fn managed_gateway_bodies_extract_the_prompt() {
     let cases = [
-        (Format::AnthropicMessages, "s02_anthropic.json"),
-        (Format::OpenAiChat, "s02_openai_chat.json"),
-        (Format::OpenAiResponses, "s02_openai_responses.json"),
-        (Format::Gemini, "s02_gemini.json"),
+        (Format::AnthropicMessages, "managed_anthropic.json"),
+        (Format::OpenAiChat, "managed_openai_chat.json"),
+        (Format::OpenAiResponses, "managed_openai_responses.json"),
+        (Format::Gemini, "managed_gemini.json"),
     ];
     for (format, name) in cases {
         assert_eq!(text(format, &fixture(name), &RoleSet::user_only()), "Reply with the single word: ready", "{name}");
@@ -332,7 +332,7 @@ fn wrong_shapes_are_unreadable() {
     assert!(matches!(prompt_text(Format::OpenAiChat, &json!([1, 2]), &roles, 20000), Err(ExtractError::Unreadable(_))));
 }
 
-// ---- s03 Task 12: non-text parts, the newest text first to go, masked text written back --------------------------
+// ---- non-text parts, the newest text first to go, masked text written back ---------------------------------------
 
 #[test]
 fn anthropic_text_document_next_to_text_is_scanned() {
@@ -434,7 +434,7 @@ fn a_data_uri_part_is_scanned_as_the_text_it_carries() {
     assert!(t.contains("BLOCKME notes") && t.contains("BLOCKME cleartext"), "{t:?}");
 }
 
-// ---- the phase-2 gate: a provider's inline payload is read as the bytes it declares -------------------------------
+// ---- a provider's inline payload is read as the bytes it declares -------------------------------------------------
 
 #[test]
 fn a_gemini_audio_part_with_no_file_header_is_left_out() {

@@ -70,7 +70,7 @@ fn message(kind: BlockKind, leg: Leg, scan_id: Option<&str>, categories: Option<
 ///
 /// `(HTTP status, content type, body)`. The status is 200 whenever a member has an id: every MCP client SDK turns that
 /// into the server's own JSON-RPC error, while a 4xx leaves a pending request of the Python SDK 1.x waiting forever and
-/// reaches the TypeScript SDK as a transport failure (s04 R2). With no id to answer (notifications and client replies
+/// reaches the TypeScript SDK as a transport failure. With no id to answer (notifications and client replies
 /// only), the MCP spec asks for an HTTP error: 403, or 503 when Prisma AIRS was unavailable.
 pub fn mcp_refusal(
     ids: &[Value],

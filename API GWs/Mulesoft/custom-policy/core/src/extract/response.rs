@@ -236,7 +236,7 @@ fn gemini(obj: &Map<String, Value>, c: &mut Collect) -> Result<(), ExtractError>
             } else if let Some(result) = field("codeExecutionResult", "code_execution_result") {
                 c.text(&arguments(result.get("output")), None);
             } else {
-                // Images, audio, files and part types this extractor does not know: scanned, not dropped (R10), an
+                // Images, audio, files and part types this extractor does not know: scanned, not dropped, an
                 // inline payload read as the bytes it declares.
                 c.text(&without_payload(part), None);
             }
