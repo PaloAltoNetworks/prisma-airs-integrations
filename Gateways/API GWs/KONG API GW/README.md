@@ -12,9 +12,9 @@ The contents of this repository are community examples and reference implementat
 |-------------|:-----------:|:-------------:|:-------------:|:--------------:|----------|
 | [Custom Plugin (v1)](custom-plugin/) | ✅ | ✅ | ❌ | ✅ (via AI Gateway) | LLM-only traffic, full ai-proxy compatibility |
 | [Custom Plugin (v2 — MCP-aware)](custom-plugin-v2/) | ✅ | ✅ | ✅ | ⚠️ (OpenAI + Bedrock Converse native) | LLM + MCP `tools/call` inspection |
-| [Request Callout](request-callout/) | ✅ | ❌ | ❌ | ❌ | Kong Konnect SaaS, OpenAI only |
+| [Request Callout](../../AI%20GWs/KONG%20AI%20GW/request-callout/) | ✅ | ❌ | ❌ | ❌ | Kong Konnect SaaS, OpenAI only |
 | [Custom Plugin (v3)](custom-plugin-v3/) | ✅ | ✅ | ✅ | ✅ (native, 9 shapes) | Full MCP method coverage, buffered SSE, DLP, and a test suite |
-| [AI Gateway 2.x Policies](ai-gateway/) | ✅ | ✅ (buffered) | ⚠️ (MCP `tools/call`, request leg) | ✅ (any AI Model) | Kong **AI Gateway 2.x**, configuration only — no plugin to install |
+| [AI Gateway 2.x Policies](../../AI%20GWs/KONG%20AI%20GW/ai-gateway/) | ✅ | ✅ (buffered) | ⚠️ (MCP `tools/call`, request leg) | ✅ (any AI Model) | Kong **AI Gateway 2.x**, configuration only — no plugin to install |
 
 ### Which Kong product each one targets
 
@@ -58,7 +58,7 @@ On **AI Gateway 2.x** the reachable surface is narrower and the limit is the pla
 AIRS's: no Kong guardrail can be scoped to an AI MCP Server at all, so scanning is done with a
 `request-callout` policy, and every hook that policy offers runs before the upstream call. MCP
 requests are therefore scanned and MCP *responses* are not, which leaves tool-catalogue poisoning
-out of reach there. See [ai-gateway README](ai-gateway/README.md#limitations) for the measured
+out of reach there. See [ai-gateway README](../../AI%20GWs/KONG%20AI%20GW/ai-gateway/README.md#limitations) for the measured
 evidence, including the control plane's own refusal to bind a guardrail at that scope.
 
 ## Quick Start
