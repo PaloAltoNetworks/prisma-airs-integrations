@@ -131,7 +131,7 @@ The official SDKs raise their normal 403 error for these bodies, with the messag
 In `Cargo.toml`, set `group_id` under `[package.metadata.anypoint]` to your Anypoint organization ID. It ships as `YOUR_ANYPOINT_ORG_ID`. Then:
 
 ```bash
-cd "Gateways/Mulesoft/custom-policy"
+cd "Gateways/AI GWs/Mulesoft/custom-policy"
 make setup
 make build
 ```

@@ -8,6 +8,5 @@ The contents of this repository are community examples and reference implementat
 
 | Folder | What it holds |
 |---|---|
-| [AI GWs/](AI%20GWs/) | Integrations that run inside AI gateways |
+| [AI GWs/](AI%20GWs/) | Integrations that run inside AI gateways: MuleSoft AI Gateway |
 | [API GWs/](API%20GWs/) | Integrations that run inside API gateways |
-| [Mulesoft/](Mulesoft/) | MuleSoft AI Gateway (Omni Gateway): Model Proxy traffic (prompts, replies streamed and not, and tool calls, in the OpenAI, Anthropic and Gemini formats) and MCP server traffic (tool calls, tool results and catalogues, and every other MCP message that carries text) |
