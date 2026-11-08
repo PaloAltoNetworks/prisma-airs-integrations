@@ -130,9 +130,13 @@ curl -sS -X POST \
   -d '{"groupId":"YOUR_ORG_ID","assetId":"prisma-airs-guardrails","assetVersion":"1.0.0",
        "configurationData":{"airsApiKey":"YOUR_API_KEY_HERE",
                             "airsEndpoint":"https://service.api.aisecurity.paloaltonetworks.com",
-                            "profile":"YOUR_PROFILE_NAME"},
+                            "profile":"YOUR_PROFILE_NAME",
+                            "scanRequests":true,"scanResponses":true,"enforcementMode":"enforce",
+                            "onApiError":"block","onScanError":"block"},
        "pointcutData":null}'
 ```
+
+Send every setting you rely on, Advanced Configuration included. A setting left out of `configurationData` runs at its default, but the console's **Edit configuration** form then shows it empty or unchecked: Scan Prompts and Scan Responses appear off while both legs are scanned. In the lab, applying that form unchanged kept the defaults, because the console leaves untouched settings out.
 
 On the managed gateway:
 
@@ -163,7 +167,7 @@ Under **Advanced Configuration** (`advancedConfiguration`):
 | Scanned Message Roles | `scanMessageRoles` | `[user]` | Add `system` to close system-prompt injection, and `tool` to scan tool results. Every user turn is always scanned. |
 | Maximum Scanned Characters | `maxScanChars` | `100000` | The most characters sent from one leg. A prompt counts every user turn. Prisma AIRS accepts up to 2 MB per scan. |
 | Block Content Over the Limit | `truncationFailClosed` | `true` | `false` scans part of it and logs it: the newest text of a prompt, the first part of a reply. |
-| Apply DLP Masking | `applyDlpMasking` | `false` | Writes the masked text Prisma AIRS returns into the prompt or reply, for verdicts that are only about sensitive data. In a prompt it goes back into every turn it came from, so data in an earlier turn reaches the model masked too. It needs each scanned piece to be a plain text field, and Prisma AIRS to keep the text's length, which it did in every test; otherwise, and on a streamed reply, such a verdict is a block (403). |
+| Apply DLP Masking | `applyDlpMasking` | `false` | The security profile decides what is sensitive: with data-loss detection set to Block, Prisma AIRS returns its block verdict together with a masked copy of the text, and it cannot change the traffic itself. This setting decides whether the gateway forwards that masked copy instead of blocking, for verdicts that are only about sensitive data; off, they are blocked. In a prompt it goes back into every turn it came from, so data in an earlier turn reaches the model masked too. It needs each scanned piece to be a plain text field, and Prisma AIRS to keep the text's length, which it did in every test; otherwise, and on a streamed reply, such a verdict is a block (403). |
 | Application Name Suffix | `appNameSuffix` | | `HR-Chatbot` makes `app_name` `MuleSoft-HR-Chatbot`. |
 | User Header / User Claim | `userHeader` / `userClaim` | | The end user, sent as `app_user`. A claim is read from a token that a JWT validation policy has already verified, and it takes precedence over the header. |
 | Session Header / Session Claim | `sessionHeader` / `sessionClaim` | `x-session-id` / | The conversation, sent as `session_id`. The header takes precedence over the claim. |
