@@ -1,0 +1,38 @@
+{
+  "name": "request-callout",
+  "service": {
+    "id": "YOUR_SERVICE_ID"
+  },
+  "config": {
+    "callouts": [
+      {
+        "name": "airs_request_scan",
+        "request": {
+          "url": "https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "x-pan-token": "{vault://env/airs-api-key}"
+          }
+        },
+        "timeout": {
+          "connect": 2000,
+          "read": 10000,
+          "write": 10000
+        },
+        "on_error": "exit",
+        "retries": 2
+      }
+    ],
+    "request": {
+      "before": "local body = kong.request.get_raw_body() or ''; kong.ctx.shared.original_request_body = body; local prompt = ''; for c in string.gmatch(body, '\"role\"%s*:%s*\"user\".-\"content\"%s*:%s*\"([^\"]*)\"') do prompt = c end; if prompt == '' then prompt = 'empty' end; local function esc(s) return '\"' .. string.gsub(string.gsub(string.gsub(s or '', '\\\\', '\\\\\\\\'), '\"', '\\\\\"'), '\\n', '\\\\n') .. '\"' end; local json = '{\"tr_id\":' .. esc(ngx.var.request_id or 'unknown') .. ',\"ai_profile\":{\"profile_name\":\"YOUR_PROFILE_NAME\"},\"metadata\":{\"app_name\":\"kong-airs\"},\"contents\":[{\"prompt\":' .. esc(prompt) .. '}]}'; kong.ctx.shared.callouts.airs_request_scan.request.params.body = json"
+    },
+    "response": {
+      "before": "local co = kong.ctx.shared.callouts; if co and co.airs_request_scan and co.airs_request_scan.response then local body = co.airs_request_scan.response.body or ''; if body:match('\"action\"%s*:%s*\"block\"') then kong.ctx.shared.airs_blocked = true; return kong.response.exit(403, {error='Blocked by AI security scan'}) end end"
+    },
+    "upstream": {
+      "before": "if kong.ctx.shared.airs_blocked then return end; local body = kong.ctx.shared.original_request_body; if body then kong.service.request.set_raw_body(body); kong.service.request.set_header('content-length', tostring(#body)) end"
+    }
+  }
+}

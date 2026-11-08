@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Phase 4: multi-format content extraction + inline tool-call scanning.
+     Produces airs.promptText / responseText / toolEvent / model / scanLeg. -->
+<Javascript name="JS-ExtractContent" timeLimit="5000">
+  <DisplayName>JS-ExtractContent</DisplayName>
+  <IncludeURL>jsc://airs-lib.js</IncludeURL>
+  <ResourceURL>jsc://extract-content.js</ResourceURL>
+</Javascript>

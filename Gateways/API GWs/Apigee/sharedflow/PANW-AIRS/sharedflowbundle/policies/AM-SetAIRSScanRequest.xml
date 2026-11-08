@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Materialises the outbound HTTP request (airsScanRequest) for SC-AIRSScan.
+  The body is the pre-built JSON string airsScanRequestBody, interpolated at the
+  message-body level so JSON.stringify's escaping is preserved (never re-escaped).
+  AIRS authenticates via x-pan-token.
+-->
+<AssignMessage continueOnError="false" enabled="true" name="AM-SetAIRSScanRequest">
+  <DisplayName>AM-SetAIRSScanRequest</DisplayName>
+  <Properties/>
+  <AssignTo createNew="true" transport="http" type="request">airsScanRequest</AssignTo>
+  <Set>
+    <Verb>POST</Verb>
+    <Headers>
+      <Header name="Content-Type">application/json</Header>
+      <Header name="x-pan-token">{airs.token}</Header>
+    </Headers>
+    <Payload contentType="application/json">{airsScanRequestBody}</Payload>
+  </Set>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

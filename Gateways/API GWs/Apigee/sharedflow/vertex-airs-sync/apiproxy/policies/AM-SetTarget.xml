@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<AssignMessage continueOnError="false" enabled="true" name="AM-SetTarget">
+  <DisplayName>AM-SetTarget</DisplayName>
+  <Properties/>
+  <AssignVariable>
+    <Name>targetUrl</Name>
+    <Value>https://{region}-aiplatform.googleapis.com/{proxy.pathsuffix}</Value>
+  </AssignVariable>
+  <AssignVariable>
+    <Name>target.url</Name>
+    <Template ref="targetUrl"/>
+  </AssignVariable>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

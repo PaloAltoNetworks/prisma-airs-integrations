@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Phase 6+8: decide outcome (allow/mask/block), handle fail-open/closed, and
+     build the provider-native block body (incl. Claude Code graceful SSE). -->
+<Javascript name="JS-ProcessVerdict" timeLimit="5000">
+  <DisplayName>JS-ProcessVerdict</DisplayName>
+  <IncludeURL>jsc://airs-lib.js</IncludeURL>
+  <ResourceURL>jsc://process-verdict.js</ResourceURL>
+</Javascript>

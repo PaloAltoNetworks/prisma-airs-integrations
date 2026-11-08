@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RaiseFault name="RF-BlockResponse">
+  <FaultResponse>
+    <Set>
+      <StatusCode>400</StatusCode>
+      <ReasonPhrase>Response Blocked</ReasonPhrase>
+      <Payload contentType="application/json">{"error":"Response blocked by Prisma AIRS","category":"{airs.scan.response.category}"}</Payload>
+    </Set>
+  </FaultResponse>
+</RaiseFault>
+
