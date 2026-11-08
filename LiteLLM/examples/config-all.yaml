@@ -1,0 +1,50 @@
+# litellm config.yaml for AWS Bedrock
+
+model_list:
+  - model_name: gpt-4o
+    litellm_params:
+      model: azure/gpt-4o
+      api_base: os.environ/AZURE_API_BASE
+      api_key: "os.environ/AZURE_API_KEY"
+      api_version: "2025-01-01-preview" # [OPTIONAL] litellm uses the latest azure api_version by default
+  - model_name: claude-3-haiku # A friendly alias you'll use in your API calls
+    litellm_params:
+      model: "bedrock/anthropic.claude-3-haiku-20240307-v1:0" # The required provider/model_id string
+      # AWS credentials will be read from environment variables by default
+      aws_access_key_id: "os.environ/AWS_ACCESS_KEY_ID"
+      aws_secret_access_key: "os.environ/AWS_SECRET_ACCESS_KEY"
+      aws_region_name: "os.environ/AWS_REGION_NAME"
+
+  - model_name: titan-text-lite
+    litellm_params:
+      model: "bedrock/amazon.titan-text-lite-v1"
+      aws_access_key_id: "os.environ/AWS_ACCESS_KEY_ID"
+      aws_secret_access_key: "os.environ/AWS_SECRET_ACCESS_KEY"
+      aws_region_name: "os.environ/AWS_REGION_NAME"
+
+# Guardrails
+guardrails:
+  - guardrail_name: "panw-prisma-airs-guardrail"
+    litellm_params:
+      guardrail: panw_prisma_airs
+      mode: "pre_call"                    # Run before LLM call
+      default_on: true
+      api_key: os.environ/AIRS_API_KEY    # Your PANW API key
+      profile_name: "prompt-profile"  # Security profile from Strata Cloud Manager
+      api_base: "https://service.api.aisecurity.paloaltonetworks.com"  # Optional
+
+  - guardrail_name: "panw-prisma-airs-guardrail"
+    litellm_params:
+      guardrail: panw_prisma_airs
+      mode: "post_call"                    # Run before LLM call
+      default_on: true
+      api_key: os.environ/AIRS_API_KEY    # Your PANW API key
+      profile_name: "response-profile"  # Security profile from Strata Cloud Manager
+      api_base: "https://service.api.aisecurity.paloaltonetworks.com"  # Optional
+
+# Optional general settings
+general_settings:
+  admin_key: "os.environ/LITELLM_ADMIN_KEY" # For hot reloading
+
+litellm_settings:
+  drop_params: True
