@@ -16,7 +16,9 @@
 
 use serde_json::{Map, Value};
 
-use super::{assemble_newest, base64_text, without_binary, ExtractError, Extracted, Piece};
+use super::{
+    assemble_newest, base64_text, is_text_mime, without_binary, without_payload, ExtractError, Extracted, Piece,
+};
 use crate::format::Format;
 use crate::settings::{Role, RoleSet};
 
@@ -72,6 +74,12 @@ impl Turns {
         self.current(role).pieces.push(Piece { text: without_binary(value), pointer: None });
     }
 
+    /// A provider's content part that is not text, its inline payload read as the bytes it declares: a file that is
+    /// text is scanned as that text, and audio or an image is left out.
+    fn payload(&mut self, role: Role, part: &Value) {
+        self.current(role).pieces.push(Piece { text: without_payload(part), pointer: None });
+    }
+
     fn tool_call(&mut self, name: &str, arguments: &str) {
         self.text(Role::Assistant, &format!("tool {name}: {arguments}"), None);
     }
@@ -90,12 +98,6 @@ fn select(turns: Turns, roles: &RoleSet) -> Vec<Piece> {
         }
     }
     pieces
-}
-
-/// A media type whose bytes are text a model reads.
-fn is_text_mime(mime: &str) -> bool {
-    let mime = mime.trim().to_ascii_lowercase();
-    mime.starts_with("text/") || mime == "application/json" || mime.ends_with("+json") || mime == "application/xml"
 }
 
 fn unreadable(why: impl Into<String>) -> ExtractError {
@@ -323,7 +325,7 @@ fn anthropic_block(turns: &mut Turns, role: Role, block: &Value, at: &str) {
                 for (k, part) in parts.iter().enumerate() {
                     match part_text(part, &["text"]) {
                         Some((key, text)) => turns.text(Role::Tool, text, Some(format!("{at}/content/{k}/{key}"))),
-                        None => turns.other(Role::Tool, part),
+                        None => turns.payload(Role::Tool, part),
                     }
                 }
             }
@@ -349,7 +351,7 @@ fn anthropic_block(turns: &mut Turns, role: Role, block: &Value, at: &str) {
                 }
             }
         }
-        _ => turns.other(role, block),
+        _ => turns.payload(role, block),
     }
 }
 
@@ -379,10 +381,10 @@ fn anthropic_document(turns: &mut Turns, role: Role, obj: &Obj, block: &Value, a
         (Some("base64"), Some(src)) if str_field(src, "media_type").is_some_and(is_text_mime) => {
             match str_field(src, "data").and_then(base64_text) {
                 Some(text) => turns.text(role, &text, None),
-                None => turns.other(role, block),
+                None => turns.payload(role, block),
             }
         }
-        _ => turns.other(role, block),
+        _ => turns.payload(role, block),
     }
 }
 
@@ -447,7 +449,7 @@ fn gemini_parts(turns: &mut Turns, role: Role, content: &Obj, at: &str) -> Resul
             let text = inline.get("data").and_then(Value::as_str).filter(|_| is_text_mime(mime)).and_then(base64_text);
             match text {
                 Some(text) => turns.text(role, &text, None),
-                None => turns.other(role, part),
+                None => turns.payload(role, part),
             }
         } else {
             turns.other(role, part);

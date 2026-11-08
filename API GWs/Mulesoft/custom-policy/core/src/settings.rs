@@ -159,7 +159,8 @@ pub struct Settings {
     pub mcp_server_name: Option<String>,
     /// The most JSON-RPC messages one batch may hold; a larger batch is content the policy could not inspect.
     pub mcp_batch_limit: usize,
-    /// Let a GET event stream through, its events scanned as they pass, instead of refusing it with 405.
+    /// Let a GET event stream through unscanned instead of refusing it with 405: the policy cannot end a stream once
+    /// it has started, so its events cannot be scanned before the client reads them (design V9).
     pub allow_open_streams: bool,
 }
 

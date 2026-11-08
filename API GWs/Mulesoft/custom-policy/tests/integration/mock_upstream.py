@@ -10,15 +10,20 @@ The reply is chosen by the request's `x-mock-reply` header:
   big               a reply of 2 MiB
   gzip              a gzip-compressed reply with content-encoding gzip
   empty             a reply with no text
+  speech:<SECONDS>  a Gemini speech reply: SECONDS of audio with no file header (half-second chunks when streamed)
   status:<code>     that status with a small JSON error
 A request asks for a stream with "stream": true, or with Gemini's :streamGenerateContent.
 GET /__hits, GET /__last (the last request's path, lower-cased headers and body) and POST /__reset are for the runner.
 Standard library only.
 """
+import base64
 import gzip
 import json
+import math
+import struct
 import threading
 import time
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 FIXTURES = "/fixtures"
@@ -82,6 +87,33 @@ def text_reply(fmt, stream, text):
                 (None, {"candidates": [{"index": 0, "content": {"role": "model", "parts": [{"text": b}]}}]})], crlf=True)
 
 
+def pcm64(seconds, rate=24000):
+    """Audio with no file header, base64: 16-bit little-endian samples of a 440 Hz tone, as Gemini streams speech."""
+    n = int(seconds * rate)
+    samples = [int(math.sin(i * 440 * 2 * math.pi / rate) * 8000) for i in range(n)]
+    return base64.b64encode(struct.pack(f"<{n}h", *samples)).decode()
+
+
+def png64(size=24):
+    """A real PNG, base64: a size x size colour gradient, stored uncompressed."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    rows = b"".join(b"\x00" + b"".join(bytes(((x * 10) % 256, (y * 10) % 256, 160)) for x in range(size))
+                    for y in range(size))
+    png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(rows, 0)) + chunk(b"IEND", b""))
+    return base64.b64encode(png).decode()
+
+
+def speech_reply(stream, seconds):
+    def frame(s):
+        part = {"inlineData": {"mimeType": "audio/L16;codec=pcm;rate=24000", "data": pcm64(s)}}
+        return {"candidates": [{"index": 0, "content": {"role": "model", "parts": [part]}}]}
+    if not stream:
+        return frame(seconds)
+    return sse([(None, frame(0.5)) for _ in range(int(seconds * 2))], crlf=True)
+
+
 def tool_reply(fmt, stream, text):
     args = json.dumps({"body": text})
     if fmt == "openai":
@@ -122,7 +154,7 @@ MCP_TOOLS = [{"name": "echo", "description": "Echoes the text it is given.",
 def mcp_answer(msg, headers):
     """The mock MCP server's answer to one JSON-RPC message; None for a notification or a client reply.
     x-mock-mcp-say puts its text in the answer: the instructions, the tool description, the tool result or the
-    resource text."""
+    resource text. x-mock-mcp-media: 1 adds an image and an audio block to a tool result."""
     if not isinstance(msg, dict) or "method" not in msg or "id" not in msg:
         return None
     mid, method, params = msg["id"], msg["method"], msg.get("params") or {}
@@ -135,6 +167,9 @@ def mcp_answer(msg, headers):
     elif method == "tools/call":
         text = say or ("echo: " + json.dumps(params.get("arguments", {}), sort_keys=True))
         result = {"content": [{"type": "text", "text": text}], "isError": False}
+        if headers.get("x-mock-mcp-media") == "1":
+            result["content"] += [{"type": "image", "mimeType": "image/png", "data": png64()},
+                                  {"type": "audio", "mimeType": "audio/pcm", "data": pcm64(0.1)}]
     elif method == "resources/read":
         result = {"contents": [{"uri": params.get("uri", ""), "mimeType": "text/plain", "text": say or "resource text"}]}
     elif method == "ping":
@@ -279,6 +314,8 @@ class Handler(BaseHTTPRequestHandler):
         if kind == "gzip":
             data = gzip.compress(json.dumps(text_reply(fmt, False, "compressed reply")).encode())
             return self.send(200, data, "application/json", {"content-encoding": "gzip"})
+        if kind == "speech":
+            return self.send(200, speech_reply(stream, float(arg)), ctype)
         if kind == "empty":
             return self.send(200, text_reply(fmt, False, ""))
         self.send(400, {"error": {"message": f"unknown x-mock-reply {variant}"}})

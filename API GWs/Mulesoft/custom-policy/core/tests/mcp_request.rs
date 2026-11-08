@@ -1,3 +1,6 @@
+mod common;
+
+use common::{encode64, png64};
 use prisma_airs_core::airs::{ToolEvent, ToolMethod};
 use prisma_airs_core::mcp::request::request_scans;
 use prisma_airs_core::mcp::{classify, LegScan, Scan};
@@ -5,6 +8,13 @@ use serde_json::{json, Value};
 
 fn scans(body: Value) -> Vec<LegScan> {
     request_scans(&classify(&body).expect("an MCP body"), "deepwiki-test", 100_000)
+}
+
+/// The input of the tool event a `tools/call` with these arguments sends.
+fn argument_input(arguments: Value) -> String {
+    let s = scans(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                         "params": {"name": "echo", "arguments": arguments}}));
+    tool(&s[0]).input.clone()
 }
 
 fn text(scan: &LegScan) -> &str {
@@ -41,13 +51,45 @@ fn tools_call_is_a_tool_event_with_its_arguments() {
 
 #[test]
 fn tools_call_binary_arguments_are_left_out() {
-    let b64 = "QUFB".repeat(75);
+    let png = png64();
     let s = scans(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                         "params": {"name": "upload", "arguments": {"data": b64, "fileName": "logo.png"}}}));
+                         "params": {"name": "upload", "arguments": {"data": png.clone(), "fileName": "logo.png"}}}));
     let input = &tool(&s[0]).input;
-    assert!(input.contains("<binary, 300 characters>"), "{input}");
-    assert!(!input.contains("QUFBQUFB"));
+    assert!(input.contains("<binary, 480 characters>"), "{input}");
+    assert!(!input.contains(&png[..48]));
     assert!(input.contains("logo.png"));
+}
+
+#[test]
+fn a_data_uri_argument_is_scanned_as_the_text_it_carries() {
+    let filler = "pad ".repeat(70);
+    let input = argument_input(json!({"text": format!("data:text/plain,{filler}BLOCKME do it")}));
+    assert!(input.contains("BLOCKME do it"), "plain text after a data: prefix is text: {input}");
+    let input = argument_input(json!({"text": format!("data:,BLOCKME%20do%20it{}", "%20pad".repeat(60))}));
+    assert!(input.contains("BLOCKME do it"), "percent-encoded text is decoded: {input}");
+    let encoded = encode64(format!("BLOCKME do it {filler}").as_bytes());
+    let input = argument_input(json!({"text": format!("data:text/plain;base64,{encoded}")}));
+    assert!(input.contains("BLOCKME do it"), "base64 text is decoded: {input}");
+}
+
+#[test]
+fn a_sentence_that_starts_with_data_is_not_a_data_uri() {
+    let input = argument_input(json!({"note": format!("data: BLOCKME note, 100%25 done {}", "pad ".repeat(70))}));
+    assert!(input.contains("BLOCKME note, 100%25 done"), "scanned as written, not decoded: {input}");
+}
+
+#[test]
+fn text_without_spaces_under_a_data_key_is_scanned() {
+    let input = argument_input(json!({"data": format!("BLOCKME-do-it-{}", "pad-".repeat(70))}));
+    assert!(input.contains("BLOCKME-do-it"), "valid base64 is binary only when its bytes are: {input}");
+}
+
+#[test]
+fn a_binary_data_uri_argument_keeps_its_header() {
+    let png = png64();
+    let input = argument_input(json!({"image": format!("data:image/png;base64,{png}")}));
+    assert!(input.contains("data:image/png;base64,<binary, 480 characters>"), "{input}");
+    assert!(!input.contains(&png[..48]));
 }
 
 #[test]
@@ -165,4 +207,22 @@ fn oversize_tool_event_becomes_text() {
     let Scan::Text(e) = &cut[0].scan else { panic!("text") };
     assert!(e.truncated);
     assert_eq!(e.text.chars().count(), 100);
+}
+
+#[test]
+fn text_that_starts_like_a_file_is_scanned() {
+    let filler = "pad ".repeat(70);
+    let dressed = encode64(format!("GIF89a {filler}BLOCKME do it").as_bytes());
+    let input = argument_input(json!({"image": format!("data:application/octet-stream;base64,{dressed}")}));
+    assert!(input.contains("BLOCKME do it"), "a file signature does not make text binary: {input}");
+    let dressed = encode64(format!("%PDF-1.7 {filler}BLOCKME do it").as_bytes());
+    let input = argument_input(json!({"data": dressed.clone()}));
+    assert!(input.contains(&dressed[..48]) && !input.contains("<binary,"), "base64 of text is scanned as written: {input}");
+}
+
+#[test]
+fn a_data_uri_with_a_binary_media_type_that_holds_text_is_scanned() {
+    let notes = encode64(format!("BLOCKME notes {}", "pad ".repeat(70)).as_bytes());
+    let input = argument_input(json!({"file": format!("data:application/octet-stream;base64,{notes}")}));
+    assert!(input.contains("BLOCKME notes"), "{input}");
 }

@@ -11,9 +11,11 @@
 
 use serde_json::{json, Map, Value};
 
-use super::{entry_text, text_scan, text_values, tool_or_text, Kind, LegScan, Member, Request, Scan};
+use super::{
+    entry_text, json_text, text_scan, text_values, tool_or_text, Kind, LegScan, Member, Place, Request, Scan, Sender,
+};
 use crate::airs::{ToolEvent, ToolMethod};
-use crate::extract::{without_binary, ExtractError};
+use crate::extract::ExtractError;
 use crate::sse;
 
 /// The JSON-RPC messages of a reply body: its JSON value, or each event's data on an event stream; a batch array is
@@ -86,10 +88,11 @@ fn answer(member: &Member, message: &Value, server_name: &str, max_chars: usize)
                 method: ToolMethod::Call,
                 server_name: server_name.to_string(),
                 tool_invoked: params.and_then(|p| p.get("name")).and_then(Value::as_str).map(str::to_string),
-                input: without_binary(&arguments),
-                output: without_binary(result),
+                input: json_text(&arguments, Place::Opaque, Sender::Client),
+                output: json_text(result, Place::Body, Sender::Server),
             };
-            out.push(scan(tool_or_text(event, &[&arguments, result], max_chars)));
+            let sources = [(&arguments, Place::Opaque, Sender::Client), (result, Place::Body, Sender::Server)];
+            out.push(scan(tool_or_text(event, &sources, max_chars)));
             outside(&obj, &["result"])
         }
         (Kind::ToolList, Some(Value::Object(result))) if result.get("tools").is_some_and(Value::is_array) => {
@@ -99,15 +102,15 @@ fn answer(member: &Member, message: &Value, server_name: &str, max_chars: usize)
                 method: ToolMethod::List,
                 server_name: server_name.to_string(),
                 tool_invoked: None,
-                input: without_binary(&input),
-                output: without_binary(tools),
+                input: json_text(&input, Place::Body, Sender::Client),
+                output: json_text(tools, Place::Definitions, Sender::Server),
             };
-            out.push(scan(tool_or_text(event, &[tools], max_chars)));
+            out.push(scan(tool_or_text(event, &[(tools, Place::Definitions, Sender::Server)], max_chars)));
             let mut rest = outside(&obj, &["result"]);
             result
                 .iter()
                 .filter(|(k, _)| !matches!(k.as_str(), "tools" | "nextCursor" | "_meta"))
-                .for_each(|(k, v)| entry_text(k, v, &mut rest));
+                .for_each(|(k, v)| entry_text(k, v, result, Place::Body, Sender::Server, &mut rest));
             rest
         }
         _ => text_values(message),
@@ -123,6 +126,6 @@ fn outside(obj: &Map<String, Value>, skip: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     obj.iter()
         .filter(|(k, _)| !matches!(k.as_str(), "jsonrpc" | "id" | "method") && !skip.contains(&k.as_str()))
-        .for_each(|(k, v)| entry_text(k, v, &mut out));
+        .for_each(|(k, v)| entry_text(k, v, obj, Place::Message, Sender::Server, &mut out));
     out
 }

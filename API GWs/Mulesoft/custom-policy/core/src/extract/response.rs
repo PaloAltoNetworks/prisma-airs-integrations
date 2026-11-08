@@ -7,7 +7,7 @@
 
 use serde_json::{Map, Value};
 
-use super::{assemble, without_binary, ExtractError, Extracted, Piece, Slot};
+use super::{assemble, without_binary, without_payload, ExtractError, Extracted, Piece, Slot};
 use crate::format::Format;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,8 +236,9 @@ fn gemini(obj: &Map<String, Value>, c: &mut Collect) -> Result<(), ExtractError>
             } else if let Some(result) = field("codeExecutionResult", "code_execution_result") {
                 c.text(&arguments(result.get("output")), None);
             } else {
-                // Images, files and part types this extractor does not know: scanned, not dropped (R10).
-                c.text(&without_binary(part), None);
+                // Images, audio, files and part types this extractor does not know: scanned, not dropped (R10), an
+                // inline payload read as the bytes it declares.
+                c.text(&without_payload(part), None);
             }
         }
         let pointer = match fields.as_slice() {

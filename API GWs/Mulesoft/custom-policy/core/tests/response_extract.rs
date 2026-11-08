@@ -1,3 +1,6 @@
+mod common;
+
+use common::{encode64, pcm};
 use prisma_airs_core::extract::response::{from_value, scan_text, ResponseParts, ToolCall};
 use prisma_airs_core::extract::{ExtractError, Slot};
 use prisma_airs_core::format::Format;
@@ -377,4 +380,38 @@ fn gemini_stream_keeps_candidate_metadata() {
     );
     let t = scanned(&sse_parts_of(Format::Gemini, body.as_bytes()));
     assert!(t.contains("Hello world") && t.contains("BLOCKME"), "{t:?}");
+}
+
+// ---- the phase-2 gate: a provider's inline payload is read as the bytes it declares -------------------------------
+
+/// A Gemini speech part: `samples` samples of audio with no file header, as Gemini's speech generation streams it.
+fn speech_part(samples: usize) -> Value {
+    json!({"inlineData": {"mimeType": "audio/L16;codec=pcm;rate=24000", "data": encode64(&pcm(samples))}})
+}
+
+fn head(text: &str) -> String {
+    text.chars().take(300).collect()
+}
+
+#[test]
+fn a_gemini_speech_reply_is_scanned_without_its_bytes() {
+    let part = speech_part(48_000);
+    let data = part["inlineData"]["data"].as_str().unwrap().to_string();
+    let v = json!({"candidates": [{"index": 0, "content": {"role": "model", "parts": [part]}}]});
+    let e = scan_text(&from_value(Format::Gemini, &v).unwrap(), 100_000);
+    assert!(!e.truncated, "two seconds of speech fit the limit once its bytes are left out: {}", head(&e.text));
+    assert!(e.text.contains("audio/L16") && !e.text.contains(&data[..48]), "{}", head(&e.text));
+}
+
+#[test]
+fn a_streamed_gemini_speech_reply_is_scanned_without_its_bytes() {
+    let frames: String = (0..4)
+        .map(|_| {
+            let frame = json!({"candidates": [{"index": 0, "content": {"role": "model", "parts": [speech_part(12_000)]}}]});
+            format!("data: {frame}\r\n\r\n")
+        })
+        .collect();
+    let e = scan_text(&sse_parts_of(Format::Gemini, frames.as_bytes()), 100_000);
+    assert!(!e.truncated, "each streamed chunk is left out: {}", head(&e.text));
+    assert!(e.text.contains("audio/L16") && e.text.contains("<binary,"), "{}", head(&e.text));
 }

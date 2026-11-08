@@ -10,9 +10,8 @@
 
 use serde_json::{json, Map, Value};
 
-use super::{entry_text, text_scan, tool_or_text, Kind, LegScan, Request, Scan};
+use super::{entry_text, json_text, text_scan, tool_or_text, Kind, LegScan, Place, Request, Scan, Sender};
 use crate::airs::{ToolEvent, ToolMethod};
-use crate::extract::without_binary;
 
 /// The scans of a request body, member by member, in order.
 pub fn request_scans(req: &Request, server_name: &str, max_chars: usize) -> Vec<LegScan> {
@@ -37,10 +36,10 @@ fn tool_call(obj: &Map<String, Value>, server_name: &str, max_chars: usize) -> S
         method: ToolMethod::Call,
         server_name: server_name.to_string(),
         tool_invoked: params.and_then(|p| p.get("name")).and_then(Value::as_str).map(str::to_string),
-        input: without_binary(&arguments),
+        input: json_text(&arguments, Place::Opaque, Sender::Client),
         output: String::new(),
     };
-    tool_or_text(event, &[&arguments], max_chars)
+    tool_or_text(event, &[(&arguments, Place::Opaque, Sender::Client)], max_chars)
 }
 
 /// The text a member carries besides its tool event: by kind, its `params` (without `_meta`), any `result` or
@@ -55,14 +54,14 @@ fn other_text(kind: Kind, obj: &Map<String, Value>) -> Vec<String> {
                 (Kind::ToolCall, Value::Object(params)) => params
                     .iter()
                     .filter(|(k, _)| !matches!(k.as_str(), "name" | "arguments" | "_meta"))
-                    .for_each(|(k, v)| entry_text(k, v, &mut out)),
-                (Kind::ToolCall, other) => entry_text(key, other, &mut out),
-                (_, Value::Object(params)) => {
-                    params.iter().filter(|(k, _)| k.as_str() != "_meta").for_each(|(k, v)| entry_text(k, v, &mut out))
-                }
-                (_, other) => entry_text(key, other, &mut out),
+                    .for_each(|(k, v)| entry_text(k, v, params, Place::Body, Sender::Client, &mut out)),
+                (_, Value::Object(params)) => params
+                    .iter()
+                    .filter(|(k, _)| k.as_str() != "_meta")
+                    .for_each(|(k, v)| entry_text(k, v, params, Place::Body, Sender::Client, &mut out)),
+                (_, other) => entry_text(key, other, obj, Place::Message, Sender::Client, &mut out),
             },
-            _ => entry_text(key, value, &mut out),
+            _ => entry_text(key, value, obj, Place::Message, Sender::Client, &mut out),
         }
     }
     out

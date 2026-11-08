@@ -1,3 +1,6 @@
+mod common;
+
+use common::png64;
 use prisma_airs_core::mcp::{classify, kind_of, text_values, Kind};
 use serde_json::{json, Value};
 
@@ -102,16 +105,16 @@ fn the_method_table() {
 
 #[test]
 fn text_values_skip_protocol_fields_and_binary() {
-    let blob = "QUFB".repeat(100);
+    let blob = png64();
     let message = json!({
         "jsonrpc": "2.0",
         "id": "request-id-text",
         "result": {
             "contents": [
                 {"uri": "file:///notes.txt", "text": "the notes", "mimeType": "text/plain"},
-                {"uri": "file:///logo.png", "blob": blob, "mimeType": "image/png"},
-                {"type": "image", "data": format!("data:image/png;base64,{blob}")}
+                {"uri": "file:///logo.png", "blob": blob, "mimeType": "image/png"}
             ],
+            "content": [{"type": "image", "data": format!("data:image/png;base64,{blob}")}],
             "arguments": {"id": "keep-me"},
             "count": 3,
             "ok": true,
@@ -124,7 +127,7 @@ fn text_values_skip_protocol_fields_and_binary() {
     assert!(values.contains(&"keep-me".to_string()), "a nested id is content");
     assert!(values.contains(&"the notes".to_string()));
     assert!(values.contains(&"file:///logo.png".to_string()));
-    assert!(values.iter().all(|v| !v.contains("QUFBQUFB")), "binary payloads are left out: {values:?}");
+    assert!(values.iter().all(|v| !v.contains(&blob[..48])), "binary payloads are left out: {values:?}");
     assert!(values.iter().all(|v| !v.trim().is_empty()), "blank strings are left out");
     let notes = values.iter().position(|v| v == "the notes").unwrap();
     let logo = values.iter().position(|v| v == "file:///logo.png").unwrap();

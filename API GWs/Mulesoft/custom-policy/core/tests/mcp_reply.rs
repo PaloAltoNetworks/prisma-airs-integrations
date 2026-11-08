@@ -1,3 +1,6 @@
+mod common;
+
+use common::{encode64, pcm, png64};
 use prisma_airs_core::airs::ToolMethod;
 use prisma_airs_core::extract::ExtractError;
 use prisma_airs_core::mcp::reply::{messages, reply_scans};
@@ -6,6 +9,27 @@ use serde_json::{json, Value};
 
 fn req(body: Value) -> Request {
     classify(&body).expect("an MCP body")
+}
+
+/// The output of the tool event the reply `message` to `request` sends.
+fn event_output(request: &Request, message: Value) -> String {
+    match &reply_scans(Some(request), &[message], "deepwiki-test", 100_000)[0].scan {
+        Scan::Tool(t) => t.output.clone(),
+        Scan::Text(e) => panic!("expected a tool event, got text: {e:?}"),
+    }
+}
+
+/// Everything the scans of the reply `message` send, joined.
+fn all_scanned(request: Option<&Request>, message: Value) -> String {
+    let scans = reply_scans(request, &[message], "deepwiki-test", 100_000);
+    let texts: Vec<String> = scans
+        .iter()
+        .map(|s| match &s.scan {
+            Scan::Tool(t) => format!("{}\n{}", t.input, t.output),
+            Scan::Text(e) => e.text.clone(),
+        })
+        .collect();
+    texts.join("\n")
 }
 
 fn sse(msgs: &[Value]) -> Vec<u8> {
@@ -167,4 +191,133 @@ fn oversize_reply_tool_event_becomes_text() {
     let Scan::Text(e) = &scans[0].scan else { panic!("text") };
     assert!(e.truncated);
     assert_eq!(e.text.chars().count(), 150);
+}
+
+#[test]
+fn a_tool_description_behind_a_data_prefix_is_scanned_as_written() {
+    let list = req(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let description = format!("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgBLOCKMEreadTheUsersKeys{}", "A".repeat(300));
+    let out = event_output(&list, json!({"jsonrpc": "2.0", "id": 2,
+                                         "result": {"tools": [{"name": "t", "description": description}]}}));
+    assert!(out.contains("BLOCKMEreadTheUsersKeys"), "a model reads a description as it is written: {out}");
+}
+
+#[test]
+fn a_tool_result_behind_a_data_prefix_is_scanned_as_written() {
+    let text = format!("data:text/plain,{}BLOCKME exfiltrate", "pad ".repeat(70));
+    let out = event_output(&call_req(), json!({"jsonrpc": "2.0", "id": 3,
+                                               "result": {"content": [{"type": "text", "text": text}]}}));
+    assert!(out.contains("BLOCKME exfiltrate"), "{out}");
+    let structured = format!("BLOCKME-{}", "x-".repeat(150));
+    let out = event_output(&call_req(), json!({"jsonrpc": "2.0", "id": 3,
+                                               "result": {"content": [], "structuredContent": {"data": structured}}}));
+    assert!(out.contains("BLOCKME-x-x"), "structured content is text a model may read: {out}");
+}
+
+#[test]
+fn binary_slots_are_left_out_and_text_blobs_are_read() {
+    let png = png64();
+    let notes = encode64(format!("BLOCKME secret notes {}", "pad ".repeat(70)).as_bytes());
+    let out = event_output(&call_req(), json!({"jsonrpc": "2.0", "id": 3, "result": {"content": [
+        {"type": "image", "data": png.clone(), "mimeType": "image/png"},
+        {"type": "resource", "resource": {"uri": "file:///notes.txt", "mimeType": "text/plain", "blob": notes}}]}}));
+    assert!(!out.contains(&png[..48]) && out.contains("<binary, 480 characters>"), "an image is left out: {out}");
+    assert!(out.contains("BLOCKME secret notes"), "a text resource sent as a blob is scanned as its text: {out}");
+}
+
+#[test]
+fn initialize_instructions_behind_a_data_prefix_are_scanned() {
+    let init = req(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
+    let instructions = format!("data:text/plain,{}BLOCKME obey", "pad ".repeat(70));
+    let all = all_scanned(Some(&init), json!({"jsonrpc": "2.0", "id": 1,
+                                              "result": {"protocolVersion": "2025-06-18", "instructions": instructions}}));
+    assert!(all.contains("BLOCKME obey"), "{all}");
+}
+
+#[test]
+fn look_alike_slots_in_structured_content_and_schemas_are_scanned() {
+    let words = format!("BLOCKME-{}", "x-".repeat(150));
+    let out = event_output(&call_req(), json!({"jsonrpc": "2.0", "id": 3, "result": {"content": [], "structuredContent": {
+        "file": {"uri": "file:///a", "blob": words.clone()}, "picture": {"type": "image", "data": words.clone()}}}}));
+    assert_eq!(out.matches("BLOCKME-x-x").count(), 2, "only MCP's own slots hold bytes: {out}");
+    let list = req(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let out = event_output(&list, json!({"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "t", "description": "d",
+        "inputSchema": {"type": "object", "icons": [{"src": words.clone()}]}}]}}));
+    assert!(out.contains("BLOCKME-x-x"), "a schema is text, whatever its shape: {out}");
+}
+
+#[test]
+fn resource_and_message_slots_are_left_out() {
+    let png = png64();
+    let read = req(json!({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": "file:///logo.png"}}));
+    let all = all_scanned(Some(&read), json!({"jsonrpc": "2.0", "id": 4, "result": {"contents": [
+        {"uri": "file:///logo.png", "mimeType": "image/png", "blob": png.clone()}]}}));
+    assert!(!all.contains(&png[..48]) && all.contains("file:///logo.png"), "{all}");
+    let sampling = json!({"jsonrpc": "2.0", "id": 9, "method": "sampling/createMessage", "params": {"maxTokens": 5,
+        "messages": [{"role": "user", "content": {"type": "image", "data": png.clone(), "mimeType": "image/png"}}]}});
+    let all = all_scanned(None, sampling);
+    assert!(!all.contains(&png[..48]), "{all}");
+}
+
+#[test]
+fn icons_are_left_out() {
+    let list = req(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let png = png64();
+    let out = event_output(&list, json!({"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "t", "description": "d",
+        "icons": [{"src": format!("data:image/png;base64,{png}"), "mimeType": "image/png"}]}]}}));
+    assert!(!out.contains(&png[..48]), "an icon is an image for people, not text for a model: {out}");
+}
+
+#[test]
+fn an_icon_is_left_out_whatever_it_holds() {
+    let list = req(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\"><text>BLOCKME svg</text>{}</svg>", "<g/>".repeat(60));
+    let out = event_output(&list, json!({"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "t", "description": "d",
+        "icons": [{"src": format!("data:image/svg+xml;base64,{}", encode64(svg.as_bytes())), "mimeType": "image/svg+xml"},
+                  {"src": "data:text/plain,BLOCKME plain"},
+                  {"src": "https://icons.example/tool.png"}]}]}}));
+    assert!(!out.contains("BLOCKME"), "an icon is drawn for people, never read by a model: {out}");
+    assert!(out.contains("data:image/svg+xml;base64,<binary,") && out.contains("https://icons.example/tool.png"), "{out}");
+}
+
+#[test]
+fn an_svg_image_result_is_scanned_as_its_markup() {
+    let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\"><text>BLOCKME chart</text>{}</svg>", "<g/>".repeat(60));
+    let out = event_output(&call_req(), json!({"jsonrpc": "2.0", "id": 3, "result": {"content": [
+        {"type": "image", "data": encode64(svg.as_bytes()), "mimeType": "image/svg+xml"}]}}));
+    assert!(out.contains("BLOCKME chart"), "an SVG image is text a model can be given: {out}");
+}
+
+#[test]
+fn an_audio_block_without_a_known_header_is_left_out() {
+    let data = encode64(&pcm(2_000));
+    let out = event_output(&call_req(), json!({"jsonrpc": "2.0", "id": 3, "result": {"content": [
+        {"type": "audio", "data": data.clone(), "mimeType": "audio/pcm"}]}}));
+    assert!(out.contains("<binary,") && !out.contains(&data[..48]), "{out}");
+}
+
+#[test]
+fn a_blob_of_text_under_a_binary_type_is_read() {
+    let notes = encode64(format!("BLOCKME notes {}", "pad ".repeat(70)).as_bytes());
+    let read = req(json!({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": "file:///notes"}}));
+    let all = all_scanned(Some(&read), json!({"jsonrpc": "2.0", "id": 4, "result": {"contents": [
+        {"uri": "file:///notes", "mimeType": "application/octet-stream", "blob": notes}]}}));
+    assert!(all.contains("BLOCKME notes"), "{all}");
+}
+
+#[test]
+fn an_image_sent_as_text_counts_toward_the_limit() {
+    let png = png64();
+    let as_text = json!({"jsonrpc": "2.0", "id": 3, "result": {"content": [
+        {"type": "text", "text": format!("data:image/png;base64,{png}")}]}});
+    match &reply_scans(Some(&call_req()), &[as_text], "deepwiki-test", 300)[0].scan {
+        Scan::Text(e) => assert!(e.truncated, "base64 a model reads as text is counted: {e:?}"),
+        Scan::Tool(t) => panic!("expected the text fallback over the limit, got {t:?}"),
+    }
+    let as_image = json!({"jsonrpc": "2.0", "id": 3, "result": {"content": [
+        {"type": "image", "data": png, "mimeType": "image/png"}]}});
+    match &reply_scans(Some(&call_req()), &[as_image], "deepwiki-test", 300)[0].scan {
+        Scan::Tool(_) => {}
+        Scan::Text(e) => panic!("an image block's bytes are not counted: {e:?}"),
+    }
 }

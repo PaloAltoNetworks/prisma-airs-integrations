@@ -1,3 +1,6 @@
+mod common;
+
+use common::{encode64, pcm};
 use prisma_airs_core::extract::request::prompt_text;
 use prisma_airs_core::extract::{write_back, ExtractError, Field, Slot};
 use prisma_airs_core::format::{is_streamed, requested_model, Format};
@@ -419,4 +422,53 @@ fn single_field_masked_text_is_written_back() {
     let out = write_back(&serde_json::to_vec(&body).unwrap(), &e.slot, "card XXXX").unwrap();
     let v: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["messages"][0]["content"], "card XXXX");
+}
+
+#[test]
+fn a_data_uri_part_is_scanned_as_the_text_it_carries() {
+    let notes = encode64(format!("BLOCKME notes {}", "pad ".repeat(70)).as_bytes());
+    let b = json!({"messages":[{"role":"user","content":[{"type":"text","text":"ask"},
+        {"type":"file","file":{"filename":"notes.txt","file_data": format!("data:text/plain;base64,{notes}")}},
+        {"type":"image_url","image_url":{"url": format!("data:text/plain,{}BLOCKME cleartext", "pad ".repeat(70))}}]}]});
+    let t = text(Format::OpenAiChat, &b, &RoleSet::user_only());
+    assert!(t.contains("BLOCKME notes") && t.contains("BLOCKME cleartext"), "{t:?}");
+}
+
+// ---- the phase-2 gate: a provider's inline payload is read as the bytes it declares -------------------------------
+
+#[test]
+fn a_gemini_audio_part_with_no_file_header_is_left_out() {
+    let data = encode64(&pcm(48_000));
+    let b = json!({"contents": [{"role": "user", "parts": [{"text": "transcribe this"},
+        {"inlineData": {"mimeType": "audio/L16;codec=pcm;rate=24000", "data": data.clone()}}]}]});
+    let e = prompt_text(Format::Gemini, &b, &RoleSet::user_only(), 100_000).unwrap();
+    assert!(!e.truncated, "the audio's bytes are not counted");
+    assert!(e.text.contains("transcribe this") && e.text.contains("audio/L16") && !e.text.contains(&data[..48]));
+}
+
+#[test]
+fn a_gemini_inline_code_file_is_scanned_as_its_text() {
+    let script = format!("// BLOCKME notes\n{}", "console.log('pad');\n".repeat(20));
+    for mime in ["application/x-javascript", "application/x-sh"] {
+        let b = json!({"contents": [{"role": "user", "parts": [{"text": "review this file"},
+            {"inlineData": {"mimeType": mime, "data": encode64(script.as_bytes())}}]}]});
+        let t = text(Format::Gemini, &b, &RoleSet::user_only());
+        assert!(t.contains("BLOCKME notes"), "{mime}: {t:?}");
+    }
+}
+
+#[test]
+fn an_inline_text_file_that_is_not_utf8_is_scanned() {
+    // Latin-1: the é of "café" is the single byte 0xe9, so the bytes are not UTF-8.
+    let mut latin1 = b"name,note\ncaf\xe9,BLOCKME notes\n".to_vec();
+    latin1.extend(b"row,pad\n".repeat(40));
+    let data = encode64(&latin1);
+    let gemini = json!({"contents": [{"role": "user", "parts": [{"text": "read this"},
+        {"inlineData": {"mimeType": "text/csv", "data": data.clone()}}]}]});
+    let t = text(Format::Gemini, &gemini, &RoleSet::user_only());
+    assert!(t.contains("BLOCKME notes"), "Gemini: {t:?}");
+    let anthropic = json!({"messages": [{"role": "user", "content": [{"type": "text", "text": "read this"},
+        {"type": "document", "source": {"type": "base64", "media_type": "text/plain", "data": data}}]}]});
+    let t = text(Format::AnthropicMessages, &anthropic, &RoleSet::user_only());
+    assert!(t.contains("BLOCKME notes"), "Anthropic: {t:?}");
 }

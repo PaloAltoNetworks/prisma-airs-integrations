@@ -5,7 +5,8 @@
 //! the request (stop iteration) until AIRS has judged the prompt, and the response filter holds the reply, streamed or
 //! not, until AIRS has judged it.
 //!
-//! A configuration the policy cannot use never loads as a working policy: every request is then refused with 503.
+//! A configuration the policy cannot use never loads as a working policy: every request is then refused, with 503,
+//! or with JSON-RPC error -32003 when the body is an MCP message.
 mod filter;
 // The generated configuration is parsed for the AIRS service only; Settings validates everything else.
 #[allow(dead_code)]
@@ -69,7 +70,7 @@ async fn configure(
             launcher.launch(filter).await?;
         }
         Err(reason) => {
-            logger::error!("prisma-airs-guardrails {VERSION}: {reason}; every request is refused with 503");
+            logger::error!("prisma-airs-guardrails {VERSION}: {reason}; every request is refused (503, or -32003 on MCP)");
             launcher.launch(on_request(filter::refuse)).await?;
         }
     }
