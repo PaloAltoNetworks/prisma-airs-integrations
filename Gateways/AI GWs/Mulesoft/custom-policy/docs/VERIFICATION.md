@@ -7,7 +7,8 @@ This page records every claim the README makes about behavior, with the result a
 - **Managed gateway:**
   - a MuleSoft-managed Omni Gateway 1.12.12 running three Model Proxies and one MCP server instance, on an Anypoint trial organization (Sandbox environment), 5 to 8 November 2026;
   - the policy last in each proxy's chain; on the MCP server instance, MuleSoft's MCP Support 1.1.3 first and the policy second, in front of DeepWiki's public MCP server (`https://mcp.deepwiki.com/mcp`);
-  - Prisma AIRS US region, with a lab security profile that blocks prompt injection, malicious URL categories and sensitive data (with masking).
+  - Prisma AIRS US region, with a lab security profile that blocks prompt injection, malicious URL categories and sensitive data (with masking);
+  - from 8 November, also three plain API instances (HTTP API, no Model Proxy) on the same gateway, each with Client ID Enforcement first and the policy second: in front of Azure OpenAI's v1 API, Google Gemini and DeepWiki's MCP server, with no MCP Support policy. The caller sent Azure OpenAI's and Gemini's own keys; DeepWiki's server takes none.
 
   The three proxies:
 
@@ -112,6 +113,28 @@ A review of the MCP support (the code, the live gateway and the documentation), 
 
 Tests: 246 unit tests and 80 harness cases pass. The live rows are in the table above.
 
+### Changed with plain API instances (8 November)
+
+The review of the plain-instance support found one gap in the code. The `x-input-format` header decided the format before the path. On a Model Proxy the gateway sets that header, but on a plain API instance it is the caller's, so a caller could pick the reader, and with it which part of a body in two shapes was scanned.
+
+- **The path now decides first;** the header counts only when the path is none of the four APIs'. Measured on a plain instance in front of Azure OpenAI, with `x-input-format: gemini` and a body carrying both `messages` (the injection) and `contents` (the benign prompt). Before the change the policy scanned the Gemini part and let the request through; only Azure's own check stopped it (400, unknown parameter `contents`). After it: 403 from the policy.
+- **Rechecked after the change:** the `openai` and `anthropic` SDK checks through the Model Proxies (8 of 8), the `mcp` SDK check through the MCP server instance (5 of 5), Gemini's two-request regression through its Model Proxy (2 of 2), and every plain-instance row.
+
+Tests: 247 unit tests and 80 harness cases pass.
+
+## Plain API instances
+
+The three plain API instances on the managed gateway, 8 November, with the definition listing `llm,mcp,http,rest` under `metadata/capabilities/assetTypes`.
+
+| Claim | Result |
+|---|---|
+| **API Manager offers the policy on a plain instance only when the definition allows it** | On the plain instances API Manager offered only the version whose definition lists `http` and `rest`; the versions with `llm,mcp` only were not offered there. On the Model Proxies and the MCP server instance, the same definition was offered next to the older ones, and it was applied there for the recheck after the format-order change. |
+| **A caller's `x-input-format` header does not pick the reader** | A Chat Completions request with `x-input-format: gemini` and a body in both shapes got 403 from the policy: the path decided. Before the change it passed the policy (see [Changed with plain API instances](#changed-with-plain-api-instances-8-november)). |
+| **Prompt injection is blocked before the model** | 403 with a scan ID on Azure Chat Completions (0.28 s) and Responses (0.22 s), and on Gemini (0.40 s) before Google was called. |
+| **The reply is scanned and blocked** | A reply carrying the test URL got 403 "Response blocked" on Azure Chat Completions and Responses, and on Gemini. |
+| **Benign requests pass, streamed and not** | Not streamed: Azure Chat Completions (2.22 s) and Responses (2.02 s), and Gemini (1.26 s), answered. Streamed: Azure Chat Completions and Gemini answered, held until the verdict and released whole, as on a Model Proxy (Azure: first text at 2.09 s, all of it at 2.10 s; Gemini: first and last chunk at 1.81 s). The Responses API was not streamed. |
+| **MCP works without MCP Support** | The `mcp` SDK negotiated MCP 2025-11-25 with DeepWiki. Initialize, tools/list and a tool call passed. A tool call carrying the injection was refused with `-32001` in 0.29 s, and the next call on the session worked. A tool result carrying the test URL was withheld with `-32001` "Response blocked". |
+
 ## Local Mode harness
 
 | Claim | Result |
@@ -130,6 +153,10 @@ Tests: 246 unit tests and 80 harness cases pass. The live rows are in the table 
 
 ## Not yet verified
 
+- Amazon Bedrock's native APIs (InvokeModel, Converse) through a plain API instance: not supported, by reasoning from the code and MuleSoft's setup. The policy has no reader for these formats or their binary event streams, so such a request would be refused as content it cannot read; called with AWS credentials, Bedrock also needs a SigV4 signature for its host, which MuleSoft adds only on a Model Proxy. Not measured.
+- On a plain API instance: Anthropic Messages (only Azure OpenAI, Gemini and DeepWiki were called), a streamed Responses API request, a streamed reply that gets blocked (only benign requests were streamed), and tool calls in a model's reply. The policy reads them with the same code as on a Model Proxy, with the format taken from the path; not measured on a plain instance.
+- A provider's other endpoints, such as embeddings, through a plain API instance: refused with 403 by reasoning from the code. Not measured.
+- A REST API instance (asset type `rest`): the definition lists it, but only HTTP API instances were tested.
 - The policy's log lines in Anypoint Monitoring's log search (Titanium) or in an external log service: the trial offers neither.
 - What the gateway does with a stored configuration that has no API key when it next reloads it.
 - The `make release` publish path (only development versions were published) and the console's "Use a stored secret" for the key.

@@ -1,7 +1,9 @@
 //! Which LLM API format a request is in, whether it asks for a stream, and which model it names.
 //!
-//! On Model Proxy the gateway's own `x-input-format` header names the format, so it decides first. Without it, the
-//! path decides, and without a known path, the body's shape, but only when the shape cannot be mistaken.
+//! The path decides first. When the path is not one of the four APIs', the `x-input-format` header decides: on a Model
+//! Proxy the gateway sets it. Without either, the body's shape decides, but only when the shape cannot be mistaken.
+//! The path goes first because on a plain API instance the header comes from the caller, who could otherwise pick the
+//! reader that runs, and with it which part of the body is scanned.
 
 use serde_json::Value;
 
@@ -31,14 +33,16 @@ impl Format {
     /// `None` means the policy cannot tell, which the caller treats as content it could not inspect.
     pub fn detect(input_format: Option<&str>, path: &str, body: &Value) -> Option<Format> {
         let path = without_query(path);
+        if let Some(format) = by_path(path) {
+            return Some(format);
+        }
         match input_format.map(|h| h.trim().to_ascii_lowercase()).as_deref() {
-            Some("openai") if path.ends_with("/responses") => return Some(Format::OpenAiResponses),
             Some("openai") => return Some(Format::OpenAiChat),
             Some("anthropic") => return Some(Format::AnthropicMessages),
             Some("gemini") => return Some(Format::Gemini),
             _ => {}
         }
-        by_path(path).or_else(|| by_body(body))
+        by_body(body)
     }
 }
 

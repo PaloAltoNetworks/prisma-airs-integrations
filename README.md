@@ -37,6 +37,7 @@ This repository collects example configurations, sample code, and reference patt
 | [Kong (Request Callout)](./Kong/request-callout/) | API Gateway | ✅ | ❌ | ❌ | ❌ | ❌ |
 | [Kong (AI Gateway 2.x Policies)](./Kong/ai-gateway/) | API Gateway | ✅ | ✅ | ❌ | ⚠️ | ❌ |
 | [MuleSoft (AI Gateway Custom Policy — LLM + MCP)](./Gateways/AI%20GWs/Mulesoft/custom-policy/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ⚠️ |
+| [MuleSoft (API Gateway — plain API instances)](./Gateways/API%20GWs/MuleSoft%20API%20GW/) | API Gateway | ✅ | ✅ | ⚠️ | ✅ | ⚠️ |
 | [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ❌ |
 | [Bifrost](./Bifrost/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 | [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ |

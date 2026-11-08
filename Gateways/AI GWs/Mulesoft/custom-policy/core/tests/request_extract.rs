@@ -63,6 +63,18 @@ fn detect_unknown_header_value_falls_back_to_path() {
     assert_eq!(Format::detect(Some("cohere"), "/x/v2/chat", &json!({"messages": []})), None);
 }
 
+/// On a plain API instance the header is the caller's: a known path decides before it, so the caller can't pick the
+/// reader (and with it which part of a two-shaped body is scanned).
+#[test]
+fn detect_path_decides_before_header() {
+    let both = json!({"messages": [{"role": "user", "content": "a"}], "contents": [{"parts": [{"text": "b"}]}]});
+    assert_eq!(Format::detect(Some("gemini"), "/openai/v1/chat/completions", &both), Some(Format::OpenAiChat));
+    assert_eq!(Format::detect(Some("openai"), "/v1beta/models/m:generateContent", &both), Some(Format::Gemini));
+    assert_eq!(Format::detect(Some("anthropic"), "/openai/v1/responses", &json!({"input": "x"})), Some(Format::OpenAiResponses));
+    // With no known path, the header still decides, as on a Model Proxy route of its own.
+    assert_eq!(Format::detect(Some("anthropic"), "/custom/route", &json!({"messages": []})), Some(Format::AnthropicMessages));
+}
+
 #[test]
 fn detect_falls_back_to_unambiguous_body_shape() {
     assert_eq!(Format::detect(None, "/x/y", &json!({"contents":[]})), Some(Format::Gemini));
