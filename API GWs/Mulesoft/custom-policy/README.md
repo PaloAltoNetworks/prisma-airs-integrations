@@ -70,7 +70,7 @@ In what the client sends, a data URI is scanned as the text it carries. A long b
 
 Measured on the managed gateway, through MCP Support 1.1.3 to DeepWiki:
 
-- **Refused before the server ran it:** a `tools/call` with a prompt injection in its arguments, and one with sensitive data in its arguments. Each came back in 0.28 to 0.45 seconds as HTTP 200 with JSON-RPC error `-32001`, the caller's id and a scan ID.
+- **Refused before the server ran it:** a `tools/call` with a prompt injection in its arguments, one with the injection behind a `data:text/plain,` prefix, and one with sensitive data in its arguments. Each came back in 0.28 to 0.60 seconds as HTTP 200 with JSON-RPC error `-32001`, the caller's id and a scan ID.
 - **Withheld on the way back:** a `tools/call` whose result carried a blocked payload.
 - **Reply leg scanned:** with Prisma AIRS unreachable, an `initialize` reply was withheld (`-32003`), while a `ping` passed.
 - **Allowed:** `initialize`, `tools/list` and a benign `tools/call`.
