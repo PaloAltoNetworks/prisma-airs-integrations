@@ -36,13 +36,18 @@ fn session_order_and_drop_reason() {
 
 #[test]
 fn profile_map_and_fallback() {
-    let mapped = settings(json!({"advancedConfiguration": {
-        "profileMap": [{"clientName": "hr-bot", "profileName": "hr"}], "fallbackProfileName": "strict"}}));
+    let mapped = settings(json!({"profile": "strict", "advancedConfiguration": {
+        "profileMap": [{"clientName": "hr-bot", "profileName": "hr"}]}}));
     assert_eq!(profile(&mapped, Some("hr-bot")), ProfileRef::Name("hr".into()));
     assert_eq!(profile(&mapped, Some("HR-BOT")), ProfileRef::Name("strict".into()), "client names match exactly");
     assert_eq!(profile(&mapped, Some("other")), ProfileRef::Name("strict".into()));
     assert_eq!(profile(&mapped, None), ProfileRef::Name("strict".into()));
-    let fixed = settings(json!({"profileName": "my-security-profile"}));
+    let id = "0b6c0d2e-1111-2222-3333-444455556666";
+    let by_id = settings(json!({"profile": id, "advancedConfiguration": {
+        "profileMap": [{"clientName": "hr-bot", "profileName": "hr"}]}}));
+    assert_eq!(profile(&by_id, Some("other")), ProfileRef::Id(id.into()), "apps the map does not name get the profile, an ID too");
+    assert_eq!(profile(&by_id, Some("hr-bot")), ProfileRef::Name("hr".into()));
+    let fixed = settings(json!({"profile": "my-security-profile"}));
     assert_eq!(profile(&fixed, Some("hr-bot")), ProfileRef::Name("my-security-profile".into()));
 }
 

@@ -18,8 +18,6 @@ pub struct AdvancedConfigurationConfig {
     pub breaker_cooldown_s: Option<i64>,
     #[serde(alias = "breakerFailures")]
     pub breaker_failures: Option<i64>,
-    #[serde(alias = "fallbackProfileName")]
-    pub fallback_profile_name: Option<String>,
     #[serde(alias = "maxScanChars")]
     pub max_scan_chars: Option<i64>,
     #[serde(alias = "mcpBatchLimit")]
@@ -66,10 +64,8 @@ pub struct Config {
     pub on_api_error: Option<String>,
     #[serde(alias = "onScanError")]
     pub on_scan_error: Option<String>,
-    #[serde(alias = "profileId")]
-    pub profile_id: Option<String>,
-    #[serde(alias = "profileName")]
-    pub profile_name: Option<String>,
+    #[serde(alias = "profile")]
+    pub profile: String,
     #[serde(alias = "scanRequests")]
     pub scan_requests: Option<bool>,
     #[serde(alias = "scanResponses")]

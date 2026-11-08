@@ -5,15 +5,17 @@ use serde_json::{json, Value};
 const ENDPOINT: &str = "https://service.api.aisecurity.paloaltonetworks.com";
 
 fn minimal() -> Value {
-    json!({"airsApiKey": "k", "profileName": "p", "airsEndpoint": ENDPOINT})
+    json!({"airsApiKey": "k", "profile": "p", "airsEndpoint": ENDPOINT})
 }
 
 /// Basic settings are top-level properties; everything else sits in one `advancedConfiguration` object, the way
 /// MuleSoft's own CrowdStrike policy groups its settings (Task 1 step 3).
-const BASIC: [&str; 9] = [
-    "airsApiKey", "airsEndpoint", "profileName", "profileId", "scanRequests", "scanResponses",
+const BASIC: [&str; 8] = [
+    "airsApiKey", "airsEndpoint", "profile", "scanRequests", "scanResponses",
     "enforcementMode", "onApiError", "onScanError",
 ];
+
+const UUID: &str = "0b6c0d2e-1111-2222-3333-444455556666";
 
 fn set(v: &mut Value, field: &str, value: Value) {
     if BASIC.contains(&field) {
@@ -70,56 +72,69 @@ fn rejects_blank_api_key() {
 #[test]
 fn rejects_no_profile() {
     let mut raw = minimal();
-    raw.as_object_mut().unwrap().remove("profileName");
-    assert_eq!(err(&raw).field, "profileName");
+    raw.as_object_mut().unwrap().remove("profile");
+    assert_eq!(err(&raw).field, "profile");
 }
 
 #[test]
-fn rejects_both_profile_name_and_id() {
-    assert_eq!(err(&with("profileId", json!("0b6c0d2e-1111-2222-3333-444455556666"))).field, "profileId");
+fn rejects_blank_profile() {
+    assert_eq!(err(&with("profile", json!("   "))).field, "profile");
+    assert_eq!(err(&with("profile", json!(null))).field, "profile");
 }
 
 #[test]
-fn profile_id_alone_is_accepted() {
-    let mut raw = minimal();
-    raw.as_object_mut().unwrap().remove("profileName");
-    raw["profileId"] = json!("0b6c0d2e-1111-2222-3333-444455556666");
-    let s = Settings::from_json(&raw).unwrap();
-    assert_eq!(s.profile, ProfileRef::Id("0b6c0d2e-1111-2222-3333-444455556666".into()));
+fn a_uuid_is_sent_as_the_profile_id() {
+    // One required field takes a name or an ID (owner, 8 Nov): Strata Cloud Manager's profile IDs are UUIDs.
+    assert_eq!(Settings::from_json(&with("profile", json!(UUID))).unwrap().profile, ProfileRef::Id(UUID.into()));
+    // Sent in lowercase, the form Strata Cloud Manager shows, whatever case it was typed in.
+    let upper = UUID.to_uppercase();
+    assert_eq!(Settings::from_json(&with("profile", json!(upper))).unwrap().profile, ProfileRef::Id(UUID.into()));
+    let padded = format!("  {UUID} ");
+    assert_eq!(Settings::from_json(&with("profile", json!(padded))).unwrap().profile, ProfileRef::Id(UUID.into()));
 }
 
 #[test]
-fn rejects_profile_map_without_fallback() {
-    let raw = with("profileMap", json!([{"clientName": "hr-bot", "profileName": "hr"}]));
-    assert_eq!(err(&raw).field, "fallbackProfileName");
+fn anything_that_is_not_a_uuid_is_a_name() {
+    for name in [
+        "my-security-profile",
+        "0b6c0d2e-1111-2222-3333-44445555666",   // one digit short
+        "0b6c0d2e-1111-2222-3333-4444555566667", // one digit long
+        "0b6c0d2e-1111-2222-3333-44445555666g",  // not hex
+        "0b6c0d2e111122223333444455556666",      // no hyphens
+        "0b6c0d2e-11112-222-3333-444455556666",  // hyphens in the wrong places
+        "{0b6c0d2e-1111-2222-3333-444455556666}",
+    ] {
+        assert_eq!(Settings::from_json(&with("profile", json!(name))).unwrap().profile, ProfileRef::Name(name.into()), "{name}");
+    }
 }
 
 #[test]
-fn profile_map_makes_static_profile_optional() {
-    let mut raw = minimal();
-    raw.as_object_mut().unwrap().remove("profileName");
-    set(&mut raw, "profileMap", json!([{"clientName": "hr-bot", "profileName": "hr"}]));
-    set(&mut raw, "fallbackProfileName", json!("strict"));
-    let s = Settings::from_json(&raw).unwrap();
+fn profile_map_unnamed_apps_get_the_profile() {
+    let s = Settings::from_json(&with("profileMap", json!([{"clientName": "hr-bot", "profileName": "hr"}]))).unwrap();
     let map = s.profile_map.as_ref().unwrap();
     assert_eq!(map.entries, vec![("hr-bot".to_string(), "hr".to_string())]);
-    assert_eq!(map.fallback, "strict");
-    assert_eq!(s.profile, ProfileRef::Name("strict".into()));
+    assert_eq!(map.fallback, ProfileRef::Name("p".into()));
+    assert_eq!(s.profile, ProfileRef::Name("p".into()));
 }
 
 #[test]
-fn rejects_static_profile_with_profile_map() {
+fn profile_map_fallback_can_be_an_id() {
+    let mut raw = with("profile", json!(UUID));
+    set(&mut raw, "profileMap", json!([{"clientName": "hr-bot", "profileName": "hr"}]));
+    let s = Settings::from_json(&raw).unwrap();
+    assert_eq!(s.profile_map.unwrap().fallback, ProfileRef::Id(UUID.into()));
+}
+
+#[test]
+fn profile_map_still_needs_the_profile() {
     let mut raw = with("profileMap", json!([{"clientName": "hr-bot", "profileName": "hr"}]));
-    set(&mut raw, "fallbackProfileName", json!("strict"));
-    assert_eq!(err(&raw).field, "profileName", "a static profile would be silently unused next to a map");
+    raw.as_object_mut().unwrap().remove("profile");
+    assert_eq!(err(&raw).field, "profile");
 }
 
 #[test]
 fn rejects_malformed_profile_map() {
-    let mut raw = with("profileMap", json!([{"clientName": "hr-bot"}]));
-    set(&mut raw, "fallbackProfileName", json!("strict"));
-    raw.as_object_mut().unwrap().remove("profileName");
-    assert_eq!(err(&raw).field, "profileMap");
+    assert_eq!(err(&with("profileMap", json!([{"clientName": "hr-bot"}]))).field, "profileMap");
 }
 
 #[test]
@@ -137,14 +152,12 @@ fn rejects_bad_app_name_suffix() {
 
 #[test]
 fn null_and_blank_optional_fields_are_unset() {
-    let mut raw = with("profileId", json!(null));
-    set(&mut raw, "userHeader", json!(""));
+    let mut raw = with("userHeader", json!(""));
     set(&mut raw, "sessionHeader", json!(null));
     let s = Settings::from_json(&raw).unwrap();
     assert_eq!(s.profile, ProfileRef::Name("p".into()));
     assert_eq!(s.user_header, None);
     assert_eq!(s.session_header, "x-session-id");
-    assert_eq!(Settings::from_json(&with("profileId", json!(""))).unwrap().profile, ProfileRef::Name("p".into()));
 }
 
 #[test]
@@ -163,18 +176,11 @@ fn rejects_endpoint_with_scan_path() {
 
 #[test]
 fn rejects_duplicate_profile_map_entries() {
-    let mut raw = with("profileMap", json!([
+    let raw = with("profileMap", json!([
         {"clientName": "hr-bot", "profileName": "hr"},
         {"clientName": "hr-bot", "profileName": "other"}
     ]));
-    set(&mut raw, "fallbackProfileName", json!("strict"));
-    raw.as_object_mut().unwrap().remove("profileName");
     assert_eq!(err(&raw).field, "profileMap");
-}
-
-#[test]
-fn rejects_fallback_without_profile_map() {
-    assert_eq!(err(&with("fallbackProfileName", json!("strict"))).field, "fallbackProfileName");
 }
 
 #[test]
@@ -259,7 +265,7 @@ fn integers_may_arrive_as_whole_floats() {
 #[test]
 fn config_error_never_contains_the_key() {
     let bad: [(&str, Value); 7] = [
-        ("profileId", json!("x")),
+        ("profile", json!("  ")),
         ("timeoutMs", json!(1)),
         ("enforcementMode", json!("x")),
         ("appNameSuffix", json!("HR\nBot")),

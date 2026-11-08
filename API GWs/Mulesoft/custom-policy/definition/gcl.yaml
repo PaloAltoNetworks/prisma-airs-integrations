@@ -36,19 +36,15 @@ spec:
       description: >-
         The Prisma AIRS API host of your tenant's region, with https. The default is the US host. The policy appends
         /v1/scan/sync/request. See the policy's README for the regional hosts.
-    profileName:
+    profile:
       type: string
-      title: AI Security Profile Name
+      title: AI Security Profile
       description: >-
-        The name of the Prisma AIRS security profile that judges this traffic, exactly as it appears in Strata Cloud
-        Manager. Set this or the profile ID, not both. Leave both empty when you use a profile map: a configuration
-        with a profile map and a profile name or ID is refused, and every request then gets 503.
-    profileId:
-      type: string
-      title: AI Security Profile ID
-      description: >-
-        The ID of the security profile. An ID survives a profile rename; a name does not. Set this or the profile
-        name, not both.
+        The name or the ID of the Prisma AIRS security profile that judges this traffic, exactly as Strata Cloud
+        Manager shows it. A value in UUID form is sent as an ID, anything else as a name. Strata Cloud Manager gives
+        a profile a new ID each time it is edited, so with an ID, enter the new one after each edit; a name changes
+        only when the profile is renamed. With a Profile Map, this is the profile for the client applications the map
+        does not name.
     scanRequests:
       type: boolean
       default: true
@@ -215,12 +211,8 @@ spec:
               - profileName
           title: Profile Map
           description: >-
-            A security profile per calling client application, matched on the client application's name. Needs a
-            fallback profile, and the AI Security Profile Name and ID left empty.
-        fallbackProfileName:
-          type: string
-          title: Fallback Profile Name
-          description: The profile for client applications the profile map does not name. Required with a profile map.
+            A security profile per calling client application, matched on the client application's name. Client
+            applications the map does not name use the AI Security Profile.
         verdictCacheTtlS:
           type: integer
           default: 0
@@ -265,3 +257,4 @@ spec:
   required:
     - airsApiKey
     - airsEndpoint
+    - profile

@@ -110,11 +110,11 @@ make release
 
 ### Step 3: Apply it to a Model Proxy
 
-1. In the console, open **Model Proxies** › your proxy › **AI Policies** › **Add inbound policy**, and choose **Prisma AIRS Guardrails**.
+1. In the console, open **Model Proxies** › your proxy › **AI Policies** › **Add inbound policy**, and choose **Prisma AIRS Guardrails**. The console lists it in the **LLM** group, with a **CUSTOM** badge.
 2. Fill in:
    - **Prisma AIRS API Key**;
    - **Prisma AIRS API Endpoint**, if your tenant is not in the US;
-   - **AI Security Profile Name** or **AI Security Profile ID**.
+   - **AI Security Profile**: the profile's name or its ID.
 3. Click **Apply**.
 
 The policy is added last in the chain. Keep it last.
@@ -130,7 +130,7 @@ curl -sS -X POST \
   -d '{"groupId":"YOUR_ORG_ID","assetId":"prisma-airs-guardrails","assetVersion":"1.0.0",
        "configurationData":{"airsApiKey":"YOUR_API_KEY_HERE",
                             "airsEndpoint":"https://service.api.aisecurity.paloaltonetworks.com",
-                            "profileName":"YOUR_PROFILE_NAME"},
+                            "profile":"YOUR_PROFILE_NAME"},
        "pointcutData":null}'
 ```
 
@@ -145,8 +145,7 @@ On the managed gateway:
 |---|---|---|---|
 | Prisma AIRS API Key | `airsApiKey` | (required) | Sent only to the Prisma AIRS endpoint, in `x-pan-token`. Hidden in the console, never logged. |
 | Prisma AIRS API Endpoint | `airsEndpoint` | US host | Your region's host, from the table under Technical Requirements. |
-| AI Security Profile Name | `profileName` | | The profile that judges the traffic. Set the name or the ID, not both. |
-| AI Security Profile ID | `profileId` | | An ID survives a profile rename; a name does not. |
+| AI Security Profile | `profile` | (required) | The name or the ID of the profile that judges the traffic. A value in UUID form is sent as an ID, anything else as a name. Strata Cloud Manager gives a profile a new ID each time it is edited, so with an ID, enter the new one after each edit; a name changes only when the profile is renamed. |
 | Scan Prompts | `scanRequests` | `true` | Scan each prompt before it is forwarded. |
 | Scan Responses | `scanResponses` | `true` | Scan each reply before it reaches the client. |
 | Enforcement Mode | `enforcementMode` | `enforce` | `monitor` scans and records every verdict and never blocks. See Know before you deploy. |
@@ -168,7 +167,7 @@ Under **Advanced Configuration** (`advancedConfiguration`):
 | Application Name Suffix | `appNameSuffix` | | `HR-Chatbot` makes `app_name` `MuleSoft-HR-Chatbot`. |
 | User Header / User Claim | `userHeader` / `userClaim` | | The end user, sent as `app_user`. A claim is read from a token that a JWT validation policy has already verified, and it takes precedence over the header. |
 | Session Header / Session Claim | `sessionHeader` / `sessionClaim` | `x-session-id` / | The conversation, sent as `session_id`. The header takes precedence over the claim. |
-| Profile Map, Fallback Profile Name | `profileMap`, `fallbackProfileName` | | A profile per client application, matched on its exact name, plus a fallback. Leave AI Security Profile Name and ID empty: a configuration with a map and a static profile is refused, and every request then gets 503. |
+| Profile Map | `profileMap` | | A profile name per client application, matched on its exact name. Client applications the map does not name use AI Security Profile. |
 | Verdict Cache TTL (s) | `verdictCacheTtlS` | `0` (off) | Caches allow verdicts for identical content (0 to 300). It is never used with masking. A profile change in Strata Cloud Manager reaches cached content only when its entry expires, and a request answered from the cache leaves no new Prisma AIRS record. |
 | Show Detection Categories | `showCategories` | `false` | Adds the detection categories to the error body. |
 
@@ -265,8 +264,8 @@ curl -sS "https://YOUR_GATEWAY_HOST/YOUR_PROXY_BASE_PATH/chat/completions" \
 
 | Symptom | Cause |
 |---|---|
-| 503, "Prisma AIRS could not scan this request" | Prisma AIRS was unreachable or timed out, or the key, region or profile is wrong. A profile name that does not exist in your tenant gives this. The evidence line records only that the scan failed, not why, so check the endpoint, key, region and profile in the policy's settings against Strata Cloud Manager. |
-| 503, "Prisma AIRS Guardrails is not configured correctly" | The policy rejected its configuration, so every request gets this. For example: both a profile name and a profile ID; a profile map with a profile name or ID; a profile map without a fallback profile. On a self-managed gateway, the policy's error line names the field. |
+| 503, "Prisma AIRS could not scan this request" | Prisma AIRS was unreachable or timed out, or the key, region or profile is wrong. A profile name or ID that does not exist in your tenant gives this. The evidence line records only that the scan failed, not why, so check the endpoint, key, region and profile in the policy's settings against Strata Cloud Manager. |
+| 503, "Prisma AIRS Guardrails is not configured correctly" | The policy rejected its configuration, so every request gets this. For example: a blank AI Security Profile; a profile map entry without a client application or a profile name; an endpoint that already ends with `/v1/scan/sync/request`. On a self-managed gateway, the policy's error line names the field. |
 | 403, "Prisma AIRS could not inspect this request" (or "response") | The format is unknown, the body is not JSON, a reply is compressed, or the content is over Maximum Scanned Characters (a prompt counts every user turn). |
 | 413 | The request body is over the gateway's 1 MiB buffer. |
 | A streamed reply arrives all at once | Expected: the stream is held until the verdict. |

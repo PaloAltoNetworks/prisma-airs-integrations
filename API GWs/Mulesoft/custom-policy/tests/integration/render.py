@@ -7,14 +7,16 @@ import json
 import os
 import sys
 
-BASE = {"airsApiKey": "FAKE-ITEST-KEY", "airsEndpoint": "https://airs:8443", "profileName": "itest-profile"}
+BASE = {"airsApiKey": "FAKE-ITEST-KEY", "airsEndpoint": "https://airs:8443", "profile": "itest-profile"}
 PRESETS = [
     (8081, "default", {}),
     (8082, "monitor", {"enforcementMode": "monitor"}),
     (8083, "failopen", {"onApiError": "allow"}),
     (8084, "gapallow", {"onScanError": "allow"}),
     (8085, "timeout3s", {"advancedConfiguration": {"timeoutMs": 3000}}),
-    (8086, "misconfigured", {"profileName": None}),
+    # A blank profile: valid for the definition (a string), refused by the policy. A missing one breaks the
+    # definition instead, and Local Mode then drops the policy and serves the API without it, as for a missing key.
+    (8086, "misconfigured", {"profile": "   "}),
     (8087, "masking", {"advancedConfiguration": {"applyDlpMasking": True}}),
     (8088, "breaker", {"advancedConfiguration": {"breakerFailures": 2, "breakerCooldownS": 30}}),
     (8089, "cache", {"advancedConfiguration": {"verdictCacheTtlS": 60}}),

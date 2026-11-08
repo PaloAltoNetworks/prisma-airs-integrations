@@ -105,7 +105,8 @@ impl fmt::Debug for RoleSet {
 pub struct ProfileMap {
     /// `(client application name, profile name)`, in the configured order.
     pub entries: Vec<(String, String)>,
-    pub fallback: String,
+    /// The configured `profile`: the one for every client application the map does not name.
+    pub fallback: ProfileRef,
 }
 
 /// A setting that is missing or wrong. `field` is the setting's configuration name.
@@ -129,7 +130,7 @@ pub struct Settings {
     pub api_key: String,
     /// The AIRS host as `https://host[:port]`, without a trailing slash; [`SCAN_PATH`] is appended per scan.
     pub endpoint: String,
-    /// The profile used when nothing more specific applies: the static profile, or the map's fallback.
+    /// The configured profile; with a profile map, the one for client applications the map does not name.
     pub profile: ProfileRef,
     pub profile_map: Option<ProfileMap>,
     pub scan_requests: bool,
@@ -366,32 +367,27 @@ fn endpoint(value: Option<String>) -> Result<String, ConfigError> {
     Ok(trimmed.to_string())
 }
 
+/// One required setting names the profile, by name or by ID (owner, 8 Nov): the console can mark a single field
+/// required, but not "one of two". Strata Cloud Manager's profile IDs are UUIDs, so a value in that form is an ID,
+/// sent in lowercase; anything else is a name. With a profile map, this profile serves the applications the map
+/// does not name.
 fn profiles(basic: Obj<'_>, advanced: Obj<'_>) -> Result<(ProfileRef, Option<ProfileMap>), ConfigError> {
-    let name = text(basic, "profileName")?;
-    let id = text(basic, "profileId")?;
+    let value = text(basic, "profile")?
+        .ok_or_else(|| fail("profile", "is required: the name or the ID of a Prisma AIRS security profile"))?;
+    let profile = if is_uuid(&value) { ProfileRef::Id(value.to_ascii_lowercase()) } else { ProfileRef::Name(value) };
     let entries = profile_map_entries(advanced)?;
-    let fallback = text(advanced, "fallbackProfileName")?;
+    let map = (!entries.is_empty()).then(|| ProfileMap { entries, fallback: profile.clone() });
+    Ok((profile, map))
+}
 
-    if !entries.is_empty() {
-        let fallback = fallback.ok_or_else(|| fail("fallbackProfileName", "is required when profileMap names client applications"))?;
-        let unused = "is not used when profileMap is set; applications the map does not name get fallbackProfileName";
-        if name.is_some() {
-            return Err(fail("profileName", unused));
-        }
-        if id.is_some() {
-            return Err(fail("profileId", unused));
-        }
-        return Ok((ProfileRef::Name(fallback.clone()), Some(ProfileMap { entries, fallback })));
-    }
-    if fallback.is_some() {
-        return Err(fail("fallbackProfileName", "is only used with profileMap"));
-    }
-    match (name, id) {
-        (None, None) => Err(fail("profileName", "set profileName or profileId")),
-        (Some(_), Some(_)) => Err(fail("profileId", "set profileName or profileId, not both")),
-        (Some(name), None) => Ok((ProfileRef::Name(name), None)),
-        (None, Some(id)) => Ok((ProfileRef::Id(id), None)),
-    }
+/// The canonical 8-4-4-4-12 hexadecimal form, in either case.
+fn is_uuid(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 36
+        && b.iter().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => *c == b'-',
+            _ => c.is_ascii_hexdigit(),
+        })
 }
 
 fn profile_map_entries(advanced: Obj<'_>) -> Result<Vec<(String, String)>, ConfigError> {

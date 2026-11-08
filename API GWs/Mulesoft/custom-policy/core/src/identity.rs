@@ -50,7 +50,7 @@ pub fn profile(settings: &Settings, client_name: Option<&str>) -> ProfileRef {
         Some(map) => client_name
             .and_then(|name| map.entries.iter().find(|(client, _)| client == name))
             .map(|(_, profile)| ProfileRef::Name(profile.clone()))
-            .unwrap_or_else(|| ProfileRef::Name(map.fallback.clone())),
+            .unwrap_or_else(|| map.fallback.clone()),
         None => settings.profile.clone(),
     }
 }

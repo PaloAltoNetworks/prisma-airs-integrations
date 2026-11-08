@@ -5,7 +5,7 @@ use serde_json::json;
 
 fn settings(mode: &str, api_error: &str, scan_error: &str, masking: bool) -> Settings {
     Settings::from_json(&json!({
-        "airsApiKey": "SECRET-123", "profileName": "my-security-profile",
+        "airsApiKey": "SECRET-123", "profile": "my-security-profile",
         "airsEndpoint": "https://service.api.aisecurity.paloaltonetworks.com",
         "enforcementMode": mode, "onApiError": api_error, "onScanError": scan_error,
         "advancedConfiguration": {"applyDlpMasking": masking}
