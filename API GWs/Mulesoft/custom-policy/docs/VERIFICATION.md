@@ -17,7 +17,7 @@ This page records every claim the README makes about behavior, with the result a
   | OpenAI | Azure OpenAI | Chat Completions and Responses |
   | Gemini | Google Gemini 3.6 Flash | Gemini |
 
-- **Local Mode harness:** Omni Gateway 1.12.12 in Docker, set up with a TLS mock of Prisma AIRS and a mock upstream that replays replies recorded from the live providers (`make itest`).
+- **Local Mode harness:** Omni Gateway 1.12.12 in Docker, set up with a TLS mock of Prisma AIRS and a mock upstream that replays replies recorded from the live providers and plays an MCP server (`make itest`).
 - **Unit:** the `core/` crate's tests (`make unit`).
 
 ## Test inputs
@@ -50,17 +50,18 @@ A row where the model would not produce the payload would have counted as inconc
 | **Tool results** | Not scanned by default: an injection in a tool result passed (OpenAI `role: tool`, Anthropic `tool_result`). With `tool` added it got 403. |
 | **Monitor mode** | The payloads were not changed by the policy. Azure's own content filter refused the injection prompt with a 400. |
 | **Prisma AIRS unreachable** | 503 in 0.04 to 0.05 s, streamed and not, with no model call. With `onApiError: allow`, 200. |
-| **Profile map** | An unmapped client application fell back to a profile that does not exist: 503. When mapped to the lab profile, it was allowed (200) and blocked (403) as normal. |
+| **Profile map** | 6 November, with the since-removed Fallback Profile Name set to a profile that does not exist: an unmapped client application got 503; mapped to the lab profile, it was allowed (200) and blocked (403) as normal. Since 8 November, unmapped client applications use AI Security Profile (unit test `profile_map_unnamed_apps_get_the_profile`); not re-run live. |
 | **Correlation** | Read back from the AIRS scan-results and scan-reports APIs. A caller's `x-correlation-id` was echoed and recorded as `transaction_id`. Without one, the gateway generated a UUID, returned it, and the policy sent it. `x-session-id` became `session_id`; without it, AIRS assigned `pan_<uuid>`. |
 | **Verified JWT claims** | MuleSoft JWT Validation 0.11.1 ran before the policy. The token's `sid` claim became `session_id`, and a session header took precedence. Version 1.4.1 has no implementation for this gateway. |
 | **SDKs** | `openai` 3.46.0 and `anthropic` 2.6.0: benign requests, streamed and not, returned normal results; `google-genai` 3.0.0: one benign request, not streamed. Payloads raised each SDK's 403 error class with the message and scan ID. The `openai` and `anthropic` SDKs sent `Accept-Encoding: gzip, deflate`, and replies came back uncompressed. Retries were off. Rerun after the phase-gate fix: 4 of 4 (`openai`, `anthropic`). |
 | **Apply and change timing** | A new apply was enforcing after 25 to 37 s. A configuration change took effect in about 20 s, with no re-apply. |
 | **Upgrade** | A new implementation version was picked up only by removing the policy and applying it again. Back to back, in one run sampled every 2 s, no request was unscanned (48 of 48 blocked). After a failed re-apply, the proxy served requests without the policy within 14 to 33 s of the removal. During any configuration change, requests alternated between the old and the new configuration for about 6 s. |
-| **What API Manager validates** | It refused a wrong type, a wrong option value and a non-string key on edit (400), and a missing key on apply (400). It accepted an edit that removed the key; the gateway kept enforcing with the previous configuration. After AI Security Profile became one required setting (8 November), it refused an edit without `profile`: 400 PolicyValidationError, "must have required property 'profile'"; the stored configuration kept its profile. |
+| **What API Manager validates** | It refused a wrong type, a wrong option value and a non-string key on edit (400), and a missing key on apply (400). It accepted an edit that removed the key; the gateway kept enforcing with the previous configuration. After AI Security Profile became one required setting (8 November), it refused an edit without `profile`: 400 PolicyValidationError, naming the required property `profile`; the stored configuration kept its profile. |
 | **Request body limit** | Over 1 MiB, the request got 413 before any policy ran. |
 | **Scan time from the gateway** | A blocked prompt, one scan included, took 0.21 to 0.58 s end to end (6 and 7 November, every format and both SDKs). Two single scans in the s02 spike took 389 and 426 ms. |
 | **Streamed reply blocked on the reply leg** | 7.7 s (non-streamed) and 12.2 s (streamed) with Gemini: the prompt scan, the model's generation and the reply scan. |
 | **After the phase-gate fix** (7 November) | Version 1.0.0-20261107124355 on all three proxies. Default matrix on Azure and Bedrock: 28 of 28, with 9 Bedrock calls reaching the model and 3 stopped before it. Gemini: the earlier-turn injection got the policy's 403 before reaching Google, and a benign history got 200 (one Google request). |
+| **After phase 2** (7 and 8 November) | 1.0.0-20261107144242: default matrix 28 of 28 on Azure and Bedrock (9 Bedrock calls reached the model, 3 stopped before it); Gemini: an injection got the policy's 403 before Google, then a benign request 200 (one Google request). 1.0.0-20261108074253 and 1.0.0-20261108080545: an injection blocked on Bedrock and on Azure. |
 | **The console form** | The basic settings and an Advanced Configuration group render, with every default shown. The API key is masked, with a reveal toggle and a choice of "Enter value" or "Use a stored secret"; the stored-secret path was not tested. A Policy version picker is shown, and the policy is the last inbound policy in the proxy's chain. |
 | **The body limit setting** | Runtime Manager shows **Global connection buffer limit** `1048576` under the gateway's Runtime configuration › Properties. The page states that Runtime Configurations are not available for trial accounts, so a higher limit was not tested. |
 | **Logs** | Runtime Manager › Logs (logs forwarded to Anypoint at Info) shows the gateway's own lines: its agent adding each policy (ours with "StopIteration Enabled") and the Prisma AIRS endpoint as a service, MuleSoft's external processor, and Envoy's listener updates. It shows **none of the policy's lines**. Two test windows held about 50 blocked requests and four configuration changes, one of them rejected. Neither the per-request evidence lines, nor "settings accepted", nor the "settings rejected" error line appeared, in the console with no search term or in the downloaded log file (192 lines, all from the gateway). |
@@ -68,8 +69,8 @@ A row where the model would not produce the payload would have counted as inconc
 | **Policy violations** | The proxy's summary page in API Manager (LLM Proxies › the proxy › LLM Summary › Compliance) counted blocks under "Prisma AIRS Guardrails DEV": about 25 in the hour of 25 blocked requests. Copies of the policy removed by earlier re-applies appear under numeric policy IDs. |
 | **Attribution in Strata Cloud Manager** | The AI Sessions view lists every scan under Application Name "MuleSoft". Requests sent without a session header appear as `pan_<uuid>` sessions. |
 | **MCP: offered in the console** | On the MCP server instance, Add inbound policy lists the policy in the **LLM** group with a CUSTOM badge (the definition's category), and an apply through the console put it second, after MCP Support (8 November). |
-| **MCP: tool call refused before the server** | `tools/call ask_wiki_question` with the injection in its arguments: HTTP 200, JSON-RPC error `-32001` with the caller's id and a scan ID, in 0.28 to 0.30 s; with sensitive data in its arguments, the same in 0.41 to 0.45 s (four runs, 8 November). |
-| **MCP: tool result withheld** | A question whose answer carried the test URL: the result was replaced with `-32001` "Response blocked" after 8.8 to 9.0 s (DeepWiki's generation included). DeepWiki produced the payload in every run, so no row was inconclusive. |
+| **MCP: tool call refused before the server** | `tools/call ask_wiki_question` with the injection in its arguments: HTTP 200, JSON-RPC error `-32001` with the caller's id and a scan ID, in 0.29 to 0.30 s (0.28 to 0.31 s counting M9, the same call with a session header); with sensitive data in its arguments, the same in 0.43 to 0.45 s. Timed in two of the four runs on 8 November; the other two passed 9 of 9 untimed. |
+| **MCP: tool result withheld** | A question whose answer carried the test URL: the result was replaced with `-32001` "Response blocked" after 8.9 to 9.0 s in the two timed runs (DeepWiki's generation included). DeepWiki produced the payload in every run, so no row was inconclusive. |
 | **MCP: allowed traffic** | `initialize`, `tools/list` and `tools/call read_wiki_structure` passed. DeepWiki answered each POST with a one-message event stream, which reached the client whole. |
 | **MCP: open event stream** | A GET asking for an event stream got 405, with `Allow: POST, DELETE` and a JSON-RPC error body, in 0.04 s. |
 | **MCP: batch** | A batch of a `ping` and a `tools/call` with the injection: one `-32001` per id, the whole batch refused on the request leg. In the Local Mode harness, such a batch never reached the MCP server. |
@@ -104,7 +105,7 @@ Tests: 165 unit tests and 51 harness cases pass. The live rows are in the table 
 
 | Claim | Result |
 |---|---|
-| Every format, both legs, streamed and not | 75 of 75 cases pass: 51 for Model Proxy traffic, including an injection in an earlier user turn (every format), an injection in a document block, and masking across turns, and 24 for MCP traffic |
+| Every format, both legs, streamed and not | 80 of 80 cases pass: 52 for Model Proxy traffic, including an injection in an earlier user turn (every format), an injection in a document block, masking across turns, and a Gemini speech reply (audio with no file header, streamed and not) passing, and 28 for MCP traffic, including text behind a `data:` prefix in a tool argument and in a tool description, a tool result dressed as an image, and a tool result carrying a real image and audio passing |
 | MCP traffic | Refusals in-protocol on both legs, a poisoned tool list, batches (and a batch over the limit), control messages passing unscanned, event-stream replies scanned whole, a GET stream refused with 405, the session header and the server's own session, a scanner failure and a rejected configuration answering `-32003`, monitor and fail-open modes, and an LLM body carrying JSON-RPC members taking the MCP path |
 | Scanning an open event stream as it passes | Measured with a mock stream sending events at 0, 1.5 and 3 s and closing at 4.5 s: scanning each event held all three until 4.5 s. Without scanning they arrived when sent. So Allow MCP Event Streams passes such streams unscanned instead. |
 | A blocked streamed reply leaks no stream bytes | Pass |
@@ -112,7 +113,7 @@ Tests: 165 unit tests and 51 harness cases pass. The live rows are in the table 
 | A reply over 1 MiB | It never reaches the client; Envoy answers `500` with 21 bytes |
 | An invalid configuration, such as a string for an integer | The gateway logs the error and serves the API **without** the policy. The policy's own error path is never reached. |
 | The Prisma AIRS certificate | It is verified against the gateway image's trust store: an untrusted certificate gave 503 and no scan (6 and 7 November) |
-| A rejected configuration | Every request gets 503 "Prisma AIRS Guardrails is not configured correctly" in every format, and nothing is scanned or forwarded |
+| A rejected configuration | Every LLM request gets 503 "Prisma AIRS Guardrails is not configured correctly" in every format, and every MCP request JSON-RPC error `-32003` with that message; nothing is scanned or forwarded |
 | The API key in the gateway's logs | Absent (the leak check, 7 November) |
 | A detection service failed with action `allow` | Treated as unavailable: 503 by default |
 
@@ -123,7 +124,10 @@ Tests: 165 unit tests and 51 harness cases pass. The live rows are in the table 
 - The `make release` publish path (only development versions were published) and the console's "Use a stored secret" for the key.
 - The scan time of very long texts: the longest live scan was about 8,000 characters (a 32,000-character reply was refused under the old 20,000 limit without a scan).
 - The sources in a Gemini reply (grounding, citations, URL context) in a live reply: covered by unit tests only.
-- The managed gateway's default MCP `server_name` (the API instance's name): the Prisma AIRS scan-results and scan-reports APIs do not return a tool event's server name.
+- The managed gateway's default MCP `server_name` (the API instance's name), and where Strata Cloud Manager shows it: the Prisma AIRS scan-results and scan-reports APIs do not return a tool event's server name, and Strata Cloud Manager was not checked.
+- A profile given by its ID: every live run used a name, so `profile_id`, and what Prisma AIRS answers for an unknown one, are covered by unit tests only.
+- The older MCP HTTP+SSE transport, with Allow MCP Event Streams off (405) and on: DeepWiki answers its `/sse` path with 410.
+- An MCP client carrying on over POST after the 405, and a GET that resumes a broken reply (`Last-Event-ID`): DeepWiki is stateless, and the SDK test opened no GET stream.
 - MCP `sampling` and `elicitation` round trips inside a call: DeepWiki sent none, so the effect of holding the reply is reasoned, not measured.
 - MuleSoft's MCP PII Detector policy running alongside this one.
 - Whether a Model Proxy's Edit configuration form behaves like the MCP server instance's for settings left out of the stored configuration (phase 1 recorded every default shown on a proxy).

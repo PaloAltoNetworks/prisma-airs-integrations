@@ -2,7 +2,7 @@
 
 This page covers what the policy puts in each Prisma AIRS scan request, where each value comes from, and how to follow a blocked request from the client to the gateway log to the AIRS scan record.
 
-Everything under "Measured" was observed on a managed Omni Gateway 1.12.12 (Model Proxy, Anypoint trial, Sandbox) in November 2026. The scan records were read back through the AIRS scan-results API.
+Everything under "Measured" was observed on a managed Omni Gateway 1.12.12 (Model Proxies and an MCP server instance, Anypoint trial, Sandbox) in November 2026, except where a line says otherwise. The scan records were read back through the AIRS scan-results API.
 
 ## The fields
 
