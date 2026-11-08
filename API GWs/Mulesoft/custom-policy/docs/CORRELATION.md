@@ -9,11 +9,11 @@ Everything under "Measured" was observed on a managed Omni Gateway 1.12.12 (Mode
 | AIRS field | Where the value comes from, first usable one wins | When there is none |
 |---|---|---|
 | `transaction_id` | the `x-correlation-id` request header, then `x-request-id` | left out |
-| `session_id` | the Session Header (default `x-session-id`), then the verified token claim named in Session Claim | left out (AIRS then assigns its own `pan_<uuid>`) |
+| `session_id` | the Session Header (default `x-session-id`), then the verified token claim named in Session Claim. On MCP traffic, the `Mcp-Session-Id` header comes first; and the scan of an `initialize` reply, when no session was known yet, takes the `Mcp-Session-Id` the server issues in that reply | left out (AIRS then assigns its own `pan_<uuid>`) |
 | `metadata.app_user` | the verified token claim named in User Claim, then the User Header, then the client application's name, then its client ID | `anonymous` |
 | `metadata.app_name` | `MuleSoft`, or `MuleSoft-<suffix>` when Application Name Suffix is set | always sent |
 | `metadata.ai_model` | the model the request names (the body's `model`, or the model in a Gemini path) | left out |
-| `ai_profile` | the Profile Map entry for the client application's exact name, then the map's fallback; without a map, the configured profile name or ID | always sent |
+| `ai_profile` | the Profile Map entry for the client application's exact name, then AI Security Profile: `profile_id` when it is in UUID form (sent in lowercase), else `profile_name` | always sent |
 | `tr_id` | never sent (see below) | |
 
 ### Which values are usable
@@ -42,6 +42,7 @@ Session Claim and User Claim read the claims of a token that a JWT validation po
 
 - `x-session-id` becomes `session_id`. AIRS also copies it into `tr_id`, the legacy session field.
 - Without a session value, the policy sends no `session_id`, and AIRS assigns `pan_<uuid>`.
+- **MCP** (8 November, an MCP server instance in front of DeepWiki): a refused `tools/call` sent with `Mcp-Session-Id: s04-live-<time>` produced an AIRS record whose `session_id` and `tr_id` both equal that header. DeepWiki is stateless and issues no `Mcp-Session-Id`, so taking the server's session from an `initialize` reply is covered by the Local Mode harness only.
 
 ### JWT claims
 
