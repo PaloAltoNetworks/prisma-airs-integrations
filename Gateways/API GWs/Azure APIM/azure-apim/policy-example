@@ -1,0 +1,42 @@
+<policies>
+    <inbound>
+        <base />
+        <set-backend-service id="apim-generated-policy" backend-id="my-llm-openai-endpoint" />
+        <!--Optional Entries -->
+        <set-variable name="airsDescriptions" value="@{
+                return new JObject(
+                    new JProperty("url_cats", "There are unacceptable URLs."),
+                    new JProperty("dlp", "There is sensitive data."),
+                    new JProperty("injection", "This contains content that is interpreted as trying to do something malicious."),
+                    new JProperty("agent", "Do not mess with my agent."),
+                    new JProperty("toxic_content", "This contains content that is not in keeping with our policy."),
+                    new JProperty("malicious_code", "You are not fooling me with your naughty code."),
+                    new JProperty("topic_violation", "We are going off topic."),
+                    new JProperty("db_security", "Keep out of DB commands."),
+                    new JProperty("ungrounded", "We lost the plot.")
+                );
+            }" />
+        <set-variable name="FailOpen" value="true" />
+        <!--Recommended Entries -->
+        <set-variable name="currentProfile" value="prompt-profile" />
+        <!--Mandatory Entries -->
+        <set-variable name="ScanType" value="prompt" />
+        <include-fragment fragment-id="panw-airs-scan" />
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+        <!--Optional Entries -->
+        <set-variable name="FailOpen" value="false" />
+        <!--Recommended Entries -->
+        <set-variable name="currentProfile" value="response-profile" />
+        <!--Mandatory Entries -->
+        <set-variable name="ScanType" value="response" />
+        <include-fragment fragment-id="panw-airs-scan" />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>
