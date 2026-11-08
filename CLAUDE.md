@@ -13,9 +13,8 @@ This is a **documentation-first repository** - primarily markdown guides, config
 ├── Microsoft/          # Microsoft integrations (Azure APIM)
 ├── Google/             # Google Cloud integrations (Apigee)
 ├── Kong/               # Kong custom plugin & request callout
-├── LiteLLM/            # LiteLLM proxy integration
-├── n8n/                # Workflow automation
-└── TrueFoundry/        # AI Gateway
+├── Gateways/           # AI GWs/ (LiteLLM, MuleSoft, TrueFoundry) and API GWs/
+└── n8n/                # Workflow automation
 ```
 
 Each integration follows the template in CONTRIBUTING.md:

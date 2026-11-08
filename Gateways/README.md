@@ -8,5 +8,5 @@ The contents of this repository are community examples and reference implementat
 
 | Folder | What it holds |
 |---|---|
-| [AI GWs/](AI%20GWs/) | Integrations that run inside AI gateways: MuleSoft AI Gateway |
+| [AI GWs/](AI%20GWs/) | Integrations that run inside AI gateways: LiteLLM, MuleSoft AI Gateway and TrueFoundry |
 | [API GWs/](API%20GWs/) | Integrations that run inside API gateways |

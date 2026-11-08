@@ -37,10 +37,10 @@ This repository collects example configurations, sample code, and reference patt
 | [Kong (Request Callout)](./Kong/request-callout/) | API Gateway | ✅ | ❌ | ❌ | ❌ | ❌ |
 | [Kong (AI Gateway 2.x Policies)](./Kong/ai-gateway/) | API Gateway | ✅ | ✅ | ❌ | ⚠️ | ❌ |
 | [MuleSoft (AI Gateway Custom Policy — LLM + MCP)](./Gateways/AI%20GWs/Mulesoft/custom-policy/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ⚠️ |
-| [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ❌ |
+| [LiteLLM](./Gateways/AI%20GWs/LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ❌ |
 | [Bifrost](./Bifrost/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 | [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ |
-| [TrueFoundry](./TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
+| [TrueFoundry](./Gateways/AI%20GWs/TrueFoundry/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 | [AWS (Lambda Decorator)](./AWS/lambda-decorator/) | Serverless Compute | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [AWS (Bedrock SDK Hooks — Python · Node.js · Java · Go)](./AWS/bedrock-sdk-hooks/) | AI SDK | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 | [AWS (Bedrock AgentCore)](./AWS/bedrock-agentcore/) | Agent Runtime | ✅ | ✅ | ⚠️ | ✅ | ✅ |
