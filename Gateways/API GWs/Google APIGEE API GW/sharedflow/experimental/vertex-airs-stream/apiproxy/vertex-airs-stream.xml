@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<APIProxy revision="1" name="vertex-airs-stream">
+    <DisplayName>vertex-airs-stream</DisplayName>
+    <Description>Streaming SSE Apigee proxy fronting Vertex AI streamGenerateContent. Calls the PANW-AIRS SharedFlow on the user prompt (PreFlow) and scans response chunks inline from an EventFlow via httpClient: cumulative-buffer scanning (200-char threshold) with sticky-block gating once any detector fires.</Description>
+</APIProxy>

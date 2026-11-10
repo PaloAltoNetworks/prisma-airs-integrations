@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ProxyEndpoint name="default">
+    <Description/>
+    <FaultRules/>
+    <PreFlow name="PreFlow">
+        <Request>
+            <Step>
+                <Name>EV-ExtractFields</Name>
+            </Step>
+            <Step>
+                <Name>JS-ExtractRequestPrompt</Name>
+            </Step>
+            <Step>
+                <Name>FC-CallAIRSInput</Name>
+            </Step>
+        </Request>
+        <Response>
+            <Step>
+                <Name>JS-ExtractResponsePrompt</Name>
+            </Step>
+            <Step>
+                <Name>FC-CallAIRSOutput</Name>
+            </Step>
+        </Response>
+    </PreFlow>
+    <Flows/>
+    <PostFlow name="PostFlow">
+        <Request/>
+        <Response/>
+    </PostFlow>
+    <HTTPProxyConnection>
+        <BasePath>/vertex-airs-sync</BasePath>
+        <Properties/>
+    </HTTPProxyConnection>
+    <RouteRule name="llm">
+        <TargetEndpoint>llm</TargetEndpoint>
+    </RouteRule>
+</ProxyEndpoint>

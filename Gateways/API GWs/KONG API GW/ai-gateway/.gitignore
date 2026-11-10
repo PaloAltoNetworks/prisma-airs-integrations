@@ -1,0 +1,14 @@
+# Generated. `/dist/` is NOT committed: scripts/build-config.py inlines Lua into
+# the policy YAML, and for the MCP callout it also inlines the AIRS profile and
+# MCP server names, which are tenant-specific. A committed /dist/ would therefore
+# carry one deployment's values. Build before applying, then validate the result.
+/dist/
+
+__pycache__/
+*.pyc
+.DS_Store
+
+# Never commit credentials. Referenced by docs as files you create locally.
+*.key
+*.pat
+.env
