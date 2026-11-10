@@ -1,0 +1,1 @@
+In this folder the compiled policy files will be generated, therefore, the content of this folder is ignored in the .gitignore.

@@ -1,0 +1,15 @@
+{
+  "model": "claude-test",
+  "max_tokens": 100,
+  "system": [{"type": "text", "text": "You are a weather bot."}],
+  "messages": [
+    {"role": "user", "content": "What is the weather in Paris?"},
+    {"role": "assistant", "content": [
+      {"type": "text", "text": "Let me check."},
+      {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Paris"}}
+    ]},
+    {"role": "user", "content": [
+      {"type": "tool_result", "tool_use_id": "toolu_1", "content": "Sunny, 21C"}
+    ]}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "systemInstruction": {"parts": [{"text": "You are a weather bot."}]},
+  "contents": [
+    {"role": "user", "parts": [{"text": "What is the weather in Paris?"}]},
+    {"role": "model", "parts": [{"functionCall": {"name": "get_weather", "args": {"city": "Paris"}}}]},
+    {"role": "user", "parts": [{"functionResponse": {"name": "get_weather", "response": {"result": "Sunny, 21C"}}}]}
+  ]
+}

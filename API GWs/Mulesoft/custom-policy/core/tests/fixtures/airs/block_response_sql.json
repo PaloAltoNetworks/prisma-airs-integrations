@@ -1,0 +1,40 @@
+{
+  "action": "block",
+  "category": "malicious",
+  "error": false,
+  "errors": [],
+  "masked": false,
+  "profile_id": "00000000-0000-0000-0000-000000000000",
+  "profile_name": "my-security-profile",
+  "prompt_detected": {
+    "agent": false,
+    "dlp": false,
+    "injection": false,
+    "malicious_code": false,
+    "toxic_content": false,
+    "url_cats": false
+  },
+  "prompt_detection_details": {
+    "prompt_injection_details": {
+      "pi_categories": []
+    },
+    "toxic_content_details": {
+      "toxic_categories": []
+    }
+  },
+  "report_id": "R70580e5d-f475-4410-bedf-9264e886cbd7",
+  "response_detected": {
+    "db_security": true,
+    "dlp": false,
+    "malicious_code": false,
+    "toxic_content": false,
+    "url_cats": false
+  },
+  "scan_id": "70580e5d-f475-4410-bedf-9264e886cbd7",
+  "session_id": "payload-probe-session",
+  "source": "AI-Runtime-API",
+  "timeout": false,
+  "tool_detected": {},
+  "tr_id": "payload-probe-session",
+  "transaction_id": "payload-probe-6"
+}

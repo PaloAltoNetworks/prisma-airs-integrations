@@ -1,0 +1,22 @@
+# Copyright 2026 Salesforce, Inc. All rights reserved.
+---
+apiVersion: gateway.mulesoft.com/v1alpha1
+kind: ApiInstance
+metadata:
+  name: ingress-http
+spec:
+  address: http://0.0.0.0:8081
+  services:
+    upstream:
+      address: http://backend
+      routes:
+        - config:
+            destinationPath: /anything/echo/
+  policies:
+    - policyRef:
+        name: prisma-airs-guardrails-flex-v1-0 # This value will be overriden during 'make run' execution
+      # Fill the config with a policy configuration that matches the schema specified in the policy
+      # definition gcl.yaml. Eg:
+      # config:
+      #   someProperty: desiredValue
+      config: {}
