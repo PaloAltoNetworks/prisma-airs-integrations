@@ -8,5 +8,7 @@ The contents of this repository are community examples and reference implementat
 
 | Folder | What it holds |
 |---|---|
-| [AI GWs/](AI%20GWs/) | Integrations that run inside AI gateways: Kong, LiteLLM, MuleSoft AI Gateway and TrueFoundry |
-| [API GWs/](API%20GWs/) | Integrations that run inside API gateways: Apigee, Azure API Management, Kong and MuleSoft Omni Gateway |
+| [ai-gateways/](ai-gateways/) | Integrations that run inside AI gateways: Kong, LiteLLM, MuleSoft AI Gateway and TrueFoundry |
+| [api-gateways/](api-gateways/) | Integrations that run inside API gateways: Apigee, Azure API Management, Kong and MuleSoft Omni Gateway |
+
+The top-level folders (`Google/`, `Kong/`, `LiteLLM/`, `Microsoft/`, `TrueFoundry/`) remain the source of truth for now; the integrations here are copies of them, except MuleSoft, which lives only here.

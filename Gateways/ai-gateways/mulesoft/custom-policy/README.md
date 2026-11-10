@@ -155,7 +155,7 @@ Tested on the managed gateway on 8 November, through three plain instances with 
 In `Cargo.toml`, set `group_id` under `[package.metadata.anypoint]` to your Anypoint organization ID. It ships as `YOUR_ANYPOINT_ORG_ID`. Then:
 
 ```bash
-cd "Gateways/AI GWs/Mulesoft/custom-policy"
+cd Gateways/ai-gateways/mulesoft/custom-policy
 make setup
 make build
 ```
