@@ -12,7 +12,7 @@ metadata:
       refusals are JSON-RPC errors. Fails closed by default.
     category: LLM
     metadata/interfaceScope: api
-    metadata/capabilities/assetTypes: llm,mcp
+    metadata/capabilities/assetTypes: llm,mcp,http,rest
 spec:
   extends:
     - name: extension-definition
@@ -141,7 +141,7 @@ spec:
             - user
           title: Scanned Message Roles
           description: >-
-            Which conversation roles are scanned on the prompt leg of Model Proxy traffic. Every user turn is always
+            Which conversation roles are scanned on the prompt leg of LLM traffic (a Model Proxy, or a plain API instance in front of a model provider). Every user turn is always
             scanned. Adding tool closes the tool-result injection path; adding system closes system-prompt injection.
         maxScanChars:
           type: integer
@@ -170,7 +170,7 @@ spec:
             When the security profile masks sensitive data (the tested profile blocks it, with masking), Prisma AIRS
             returns its block verdict together with a masked copy of the text; Prisma AIRS cannot change the traffic
             itself. This setting decides whether the gateway forwards the masked copy instead of blocking, for block
-            verdicts that are only about sensitive data. Off (the default): blocked. Model Proxy traffic and
+            verdicts that are only about sensitive data. Off (the default): blocked. LLM traffic (a Model Proxy or a plain API instance) and
             non-streamed bodies only; on a stream or on MCP traffic, such a verdict is a block. Masking never overrides
             any other block.
         appNameSuffix:

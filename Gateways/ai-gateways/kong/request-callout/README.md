@@ -7,7 +7,7 @@ Scan AI/LLM prompts using Kong's native `request-callout` plugin with Prisma AIR
 | Phase | Supported | Notes |
 |-------|:---------:|-------|
 | Prompt | Yes | Scans user prompts before forwarding to AI service |
-| Response | No | Use [custom-plugin](../../../API%20GWs/KONG%20API%20GW/custom-plugin/) for LLM response scanning |
+| Response | No | Use [custom-plugin](../../../api-gateways/kong/custom-plugin/) for LLM response scanning |
 | Streaming | No | Synchronous scanning only |
 
 > For threat categories, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).

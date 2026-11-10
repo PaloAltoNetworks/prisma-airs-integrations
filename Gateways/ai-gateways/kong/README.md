@@ -1,6 +1,6 @@
 # Kong AI Gateway
 
-Prisma AIRS integrations that run in Kong as an AI gateway. The Kong custom plugins are under [KONG API GW](../../API%20GWs/KONG%20API%20GW/).
+Prisma AIRS integrations that run in Kong as an AI gateway. The Kong custom plugins are under [api-gateways/kong](../../api-gateways/kong/).
 
 ## IMPORTANT
 
