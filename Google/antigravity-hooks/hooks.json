@@ -1,0 +1,39 @@
+{
+  "prisma-airs-prompt-scan": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "~/.gemini/hooks/scan-user-prompt.sh",
+        "timeout": 30
+      }
+    ]
+  },
+  "prisma-airs-pre-tool-scan": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|read_url_content|search_web|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|send_message",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.gemini/hooks/scan-tool-request.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  },
+  "prisma-airs-post-tool-scan": {
+    "PostToolUse": [
+      {
+        "matcher": "read_url_content|search_web",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.gemini/hooks/scan-tool-response.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
