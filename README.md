@@ -32,6 +32,7 @@ This repository collects example configurations, sample code, and reference patt
 | [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ✅ | ❌ | ✅ |
 | [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Google (Apigee SharedFlow)](./Google/apigee/sharedflow/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Google (Apigee SharedFlow v3)](./Gateways/api-gateways/apigee/sharedflow-v3/) | API Gateway | ✅ | ✅ | ⚠️ | ✅ | ✅ |
 | [Kong (Custom Plugin v1)](./Kong/custom-plugin/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Kong (Custom Plugin v2 — MCP + buffered SSE)](./Kong/custom-plugin-v2/) | API Gateway | ✅ | ✅ | ✅ | ✅ | ✅ |
 | [Kong (Request Callout)](./Kong/request-callout/) | API Gateway | ✅ | ❌ | ❌ | ❌ | ❌ |
