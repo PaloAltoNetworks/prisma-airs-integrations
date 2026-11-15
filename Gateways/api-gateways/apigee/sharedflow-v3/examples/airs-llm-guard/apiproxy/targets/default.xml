@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- The request leg runs in this PreFlow, after any step of your own that sets target.url. A long reply must finish
+     inside io.timeout.millis (default 55 s; the ingress limit is 300 s), because PANW-AIRS holds a turned-off stream
+     until it is complete. -->
+<TargetEndpoint name="default">
+  <PreFlow name="PreFlow">
+    <Request>
+      <Step><Name>FC-AirsRequest</Name></Step>
+    </Request>
+    <Response/>
+  </PreFlow>
+  <HTTPTargetConnection>
+    <Authentication>
+      <GoogleAccessToken>
+        <Scopes><Scope>https://www.googleapis.com/auth/cloud-platform</Scope></Scopes>
+      </GoogleAccessToken>
+    </Authentication>
+    <URL>https://aiplatform.googleapis.com</URL>
+    <Properties>
+      <Property name="io.timeout.millis">120000</Property>
+    </Properties>
+  </HTTPTargetConnection>
+</TargetEndpoint>

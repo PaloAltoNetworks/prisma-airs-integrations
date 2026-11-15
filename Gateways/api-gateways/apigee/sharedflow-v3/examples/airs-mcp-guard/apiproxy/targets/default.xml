@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- The request leg runs in this PreFlow, after any step of your own that sets target.url. A long reply must finish
+     inside io.timeout.millis (default 55 s; the ingress limit is 300 s), because PANW-AIRS holds a turned-off stream
+     until it is complete. success.codes counts every status as success, so an MCP server's 4xx or 5xx reply reaches
+     PANW-AIRS on the reply leg and is scanned; with Apigee's default, such a reply goes back to the client unscanned. -->
+<TargetEndpoint name="default">
+  <PreFlow name="PreFlow">
+    <Request>
+      <Step><Name>FC-AirsRequest</Name></Step>
+    </Request>
+    <Response/>
+  </PreFlow>
+  <HTTPTargetConnection>
+    <URL>https://mcp.example.com</URL>
+    <Properties>
+      <Property name="io.timeout.millis">120000</Property>
+      <Property name="success.codes">1xx,2xx,3xx,4xx,5xx</Property>
+    </Properties>
+  </HTTPTargetConnection>
+</TargetEndpoint>

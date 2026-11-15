@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- The PANW-AIRS settings this proxy uses, each shown at its default. Remove a line to keep the default; a value
+     PANW-AIRS can't read refuses every request with a message naming the setting. -->
+<AssignMessage continueOnError="false" enabled="true" name="AM-AirsSettings">
+  <DisplayName>AM-AirsSettings</DisplayName>
+  <AssignVariable><Name>failOpen</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>onScanError</Name><Value>block</Value></AssignVariable>
+  <AssignVariable><Name>scanMessageRoles</Name><Value>user</Value></AssignVariable>
+  <AssignVariable><Name>maxScanChars</Name><Value>100000</Value></AssignVariable>
+  <AssignVariable><Name>truncationFailClosed</Name><Value>true</Value></AssignVariable>
+  <AssignVariable><Name>applyDlpMasking</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>blockStatus</Name><Value>native</Value></AssignVariable>
+  <AssignVariable><Name>appName</Name><Value>Gateway</Value></AssignVariable>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

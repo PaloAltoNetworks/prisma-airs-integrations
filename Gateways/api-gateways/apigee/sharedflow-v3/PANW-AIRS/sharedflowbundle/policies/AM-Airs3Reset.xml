@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- The first step on every leg: every done flag false. Flow variables last the whole exchange (L6), so without it a
+     reply leg whose JS-Airs3Init did not finish would run on the request leg's flags and pass the reply unscanned. That
+     includes every flag a refusal step's condition reads (phase 3: mode, skipLeg, quiet) and what JS-Airs3Respond and the log
+     line read (the route, the outcome, the detections, the scan id), so a run whose JS-Airs3Init is cut is refused as a
+     scanner failure and logged as such, whatever the run before it on this exchange was. Not reset: what one run leaves the
+     next on purpose (airs3.destreamed, promptContext, promptVerdict, the never-twice marks, and plainReply, the reply as
+     JSON that a restream keeps for a later run on the leg).
+     An AssignMessage: no time limit can cut it, and if it fails Apigee refuses the call itself. -->
+<AssignMessage continueOnError="false" enabled="true" name="AM-Airs3Reset">
+  <DisplayName>AM-Airs3Reset</DisplayName>
+  <AssignVariable><Name>airs3.doneInit</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneDetect</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneRead</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneVerdict</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneMask</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneDestream</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneRestream</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneRespond</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneLog</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.blockReady</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.needDestream</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.needRestream</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.lateStream</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.mode</Name><Value>enforce</Value></AssignVariable>
+  <AssignVariable><Name>airs3.skipLeg</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.quiet</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.hook</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.judged</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.readGap</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.cachedScans</Name><Value>0</Value></AssignVariable>
+  <AssignVariable><Name>airs3.doneCacheKeys</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.route</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.outcome</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.detections</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.scanId</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.category</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.blockKind</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.logNote</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.refuse</Name><Value>none</Value></AssignVariable>
+  <AssignVariable><Name>airs3.refuseMsg</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.slot2</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slot3</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slot4</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slot5</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slot6</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slot7</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slot8</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slotRan2</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slotRan3</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slotRan4</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slotRan5</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slotRan6</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slotRan7</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slotRan8</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.slotStop</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.scanCount</Name><Value>0</Value></AssignVariable>
+  <AssignVariable><Name>airs3.scansRan</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.retry1</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.retry2</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.retry3</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.retry4</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.retry5</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.retry6</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.retry7</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.retry8</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.retried</Name><Value>0</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcKey1</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcKey2</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcKey3</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcKey4</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcKey5</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcKey6</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcKey7</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcKey8</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcScan1</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcScan2</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcScan3</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcScan4</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcScan5</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcScan6</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcScan7</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcScan8</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcPut1</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcPut2</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcPut3</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcPut4</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcPut5</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcPut6</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcPut7</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcPut8</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcWrite1</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcWrite2</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcWrite3</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcWrite4</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcWrite5</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcWrite6</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcWrite7</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcWrite8</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcHit1</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcHit2</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcHit3</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcHit4</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcHit5</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcHit6</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcHit7</Name><Value>false</Value></AssignVariable>
+  <AssignVariable><Name>airs3.vcHit8</Name><Value>false</Value></AssignVariable>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

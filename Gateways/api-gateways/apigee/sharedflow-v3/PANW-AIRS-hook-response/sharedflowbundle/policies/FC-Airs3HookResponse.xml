@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- v3's response leg in hook mode: settings from the config map's airs_hook entry, only the base paths it lists, and never a
+     leg the proxy's own FlowCallout already scanned. continueOnError=false: v3's refusal ends the request (L20).
+     One parameter, the leg: a FlowCallout's parameters stay set after it returns (L6), so v3 clears it at once, and no
+     proxy variable of another name (type, say) is ever written. -->
+<FlowCallout continueOnError="false" enabled="true" name="FC-Airs3HookResponse">
+  <DisplayName>FC-Airs3HookResponse</DisplayName>
+  <Parameters>
+    <Parameter name="hookMode">response</Parameter>
+  </Parameters>
+  <SharedFlowBundle>PANW-AIRS</SharedFlowBundle>
+</FlowCallout>

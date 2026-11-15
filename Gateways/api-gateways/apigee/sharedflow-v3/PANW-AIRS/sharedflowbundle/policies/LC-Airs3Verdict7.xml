@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Scan slot 7, the verdict cache (phase 3): its entry, read before any call (airs3-cache.js made the key). continueOnError=true:
+     a lookup that fails is a miss. Every scope inside a SharedFlow is shared (L19); the key keeps tenants and profiles apart. -->
+<LookupCache continueOnError="true" enabled="true" name="LC-Airs3Verdict7">
+  <DisplayName>LC-Airs3Verdict7</DisplayName>
+  <CacheKey>
+    <KeyFragment ref="airs3.vcKey7"/>
+  </CacheKey>
+  <Scope>Global</Scope>
+  <AssignTo>airs3.vcScan7</AssignTo>
+</LookupCache>

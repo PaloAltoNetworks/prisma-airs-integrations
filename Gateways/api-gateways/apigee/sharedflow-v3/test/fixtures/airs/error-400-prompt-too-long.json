@@ -1,0 +1,16 @@
+{
+ "what": "a prompt of 2,100,000 characters",
+ "recorded_utc": "2026-11-10T00:21:46Z",
+ "status": 400,
+ "ms": 1127,
+ "request_contents_shape": [
+  [
+   "prompt"
+  ]
+ ],
+ "body": {
+  "error": {
+   "message": "\"prompt length exceeds maximum allowed length of 2097152 characters\"\n"
+  }
+ }
+}

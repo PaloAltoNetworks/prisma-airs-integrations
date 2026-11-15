@@ -1,0 +1,45 @@
+{
+ "what": "a benign prompt",
+ "recorded_utc": "2026-11-10T00:21:28Z",
+ "status": 200,
+ "ms": 726,
+ "request_contents_shape": [
+  [
+   "prompt"
+  ]
+ ],
+ "body": {
+  "action": "allow",
+  "category": "benign",
+  "error": false,
+  "errors": [],
+  "masked": false,
+  "profile_id": "PROFILE_ID",
+  "profile_name": "PROFILE_NAME",
+  "prompt_detected": {
+   "agent": false,
+   "dlp": false,
+   "injection": false,
+   "malicious_code": false,
+   "toxic_content": false,
+   "url_cats": false
+  },
+  "prompt_detection_details": {
+   "prompt_injection_details": {
+    "pi_categories": []
+   },
+   "toxic_content_details": {
+    "toxic_categories": []
+   }
+  },
+  "report_id": "REPORT_ID",
+  "response_detected": {},
+  "scan_id": "SCAN_ID",
+  "session_id": "ID",
+  "source": "AI-Runtime-API",
+  "timeout": false,
+  "tool_detected": {},
+  "tr_id": "ID",
+  "transaction_id": "ID"
+ }
+}

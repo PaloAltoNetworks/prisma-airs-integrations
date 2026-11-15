@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Phase 3, the verdict cache, after Read: each scan's key, then airs3.doneCacheKeys. continueOnError=true: if it doesn't finish,
+     no lookup, hit or write runs on this leg (each needs airs3.doneCacheKeys), so every slot makes its call. -->
+<Javascript continueOnError="true" enabled="true" timeLimit="1000" name="JS-Airs3CacheKeys">
+  <DisplayName>JS-Airs3CacheKeys</DisplayName>
+  <Properties>
+    <Property name="op">keys</Property>
+  </Properties>
+  <IncludeURL>jsc://airs3-lib.js</IncludeURL>
+  <ResourceURL>jsc://airs3-cache.js</ResourceURL>
+</Javascript>

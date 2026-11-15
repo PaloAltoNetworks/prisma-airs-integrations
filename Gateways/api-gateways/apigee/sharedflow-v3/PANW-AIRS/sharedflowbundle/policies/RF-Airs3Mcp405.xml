@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- An MCP GET that asks for an event stream: 405, the answer MCP expects. -->
+<RaiseFault continueOnError="false" enabled="true" name="RF-Airs3Mcp405">
+  <DisplayName>RF-Airs3Mcp405</DisplayName>
+  <FaultResponse>
+    <Set>
+      <Headers>
+        <Header name="Content-Type">application/json</Header>
+        <Header name="Allow">POST, DELETE</Header>
+        <Header name="x-airs-blocked">true</Header>
+        <Header name="x-airs-kind">refused</Header>
+      </Headers>
+      <Payload>{airs3.blockBody}</Payload>
+      <StatusCode>405</StatusCode>
+      <ReasonPhrase>Method Not Allowed</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>
