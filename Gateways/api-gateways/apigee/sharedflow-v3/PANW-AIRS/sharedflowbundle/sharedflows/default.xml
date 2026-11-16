@@ -75,7 +75,11 @@
   </Step>
   <Step>
     <Name>AM-Airs3ScanRequest</Name>
-    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true"</Condition>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true" and airs3.authMode = "bearer"</Condition>
   </Step>
   <Step>
     <Name>AM-Airs3ClearScan</Name>
@@ -108,7 +112,11 @@
   </Step>
   <Step>
     <Name>AM-Airs3ScanRequest2</Name>
-    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true"</Condition>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true" and airs3.authMode = "bearer"</Condition>
   </Step>
   <Step>
     <Name>SC-Airs3Scan2</Name>
@@ -136,7 +144,11 @@
   </Step>
   <Step>
     <Name>AM-Airs3ScanRequest3</Name>
-    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true"</Condition>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true" and airs3.authMode = "bearer"</Condition>
   </Step>
   <Step>
     <Name>SC-Airs3Scan3</Name>
@@ -164,7 +176,11 @@
   </Step>
   <Step>
     <Name>AM-Airs3ScanRequest4</Name>
-    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true"</Condition>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true" and airs3.authMode = "bearer"</Condition>
   </Step>
   <Step>
     <Name>SC-Airs3Scan4</Name>
@@ -192,7 +208,11 @@
   </Step>
   <Step>
     <Name>AM-Airs3ScanRequest5</Name>
-    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true"</Condition>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true" and airs3.authMode = "bearer"</Condition>
   </Step>
   <Step>
     <Name>SC-Airs3Scan5</Name>
@@ -220,7 +240,11 @@
   </Step>
   <Step>
     <Name>AM-Airs3ScanRequest6</Name>
-    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true"</Condition>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true" and airs3.authMode = "bearer"</Condition>
   </Step>
   <Step>
     <Name>SC-Airs3Scan6</Name>
@@ -248,7 +272,11 @@
   </Step>
   <Step>
     <Name>AM-Airs3ScanRequest7</Name>
-    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true"</Condition>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true" and airs3.authMode = "bearer"</Condition>
   </Step>
   <Step>
     <Name>SC-Airs3Scan7</Name>
@@ -276,7 +304,11 @@
   </Step>
   <Step>
     <Name>AM-Airs3ScanRequest8</Name>
-    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true"</Condition>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true" and airs3.authMode = "bearer"</Condition>
   </Step>
   <Step>
     <Name>SC-Airs3Scan8</Name>

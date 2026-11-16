@@ -43,7 +43,7 @@ const X = require('../harness/xml');
 const C = S.CARD, M = 'AIRSV3-MARKER';
 const KEY = 'lab-key-for-unit-tests';                                   // test/run.js's Prisma AIRS key
 const EP = 'service.api.aisecurity.paloaltonetworks.com';
-const BKEY = 'airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + KEY, 'utf8').digest('hex');
+const BKEY = 'airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + S.CRED, 'utf8').digest('hex');
 const NOW = Date.now();
 const HOOK_REQ = { hookMode: 'request' }, HOOK_RESP = { hookMode: 'response' };
 const FC_REQ = { type: 'user-prompt' };
@@ -85,7 +85,7 @@ function streamed(x, rewritten) {
 // The config map's key, as a value whose read fails only inside airs3-cache.js: JS-Airs3CacheKeys doesn't finish (its 1000 ms
 // timeLimit, or an error), which continueOnError=true makes silent (L2). Every other read gets the key.
 function keyCutToken() {
-    return { toString: function () { if (String(new Error().stack).indexOf('airs3-cache.js') !== -1) { throw new Error('JS-Airs3CacheKeys cut'); } return KEY; } };
+    return { toString: function () { if (String(new Error().stack).indexOf('airs3-cache.js') !== -1) { throw new Error('JS-Airs3CacheKeys cut'); } return S.CRED_VALUE; } };
 }
 
 // The hook SharedFlows as shipped, beside v3 (the lab's src/ or the published folder): their one FlowCallout, from its XML.
@@ -173,20 +173,22 @@ module.exports = [
     {
         finding: 'P3GATE-APIGEE-KEYCUT',
         title: 'verdictCacheTtlS=60, JS-Airs3CacheKeys cut on both legs of one call: the request leg\'s allow is written under the empty key (AM-Airs3Reset\'s value) and the reply leg\'s lookup of the same empty key hits, so a reply with the card that Prisma AIRS would block reaches the client with no scan (JS-Airs3CacheKeys.xml: "if it doesn\'t finish, no slot hits")',
-        setup: Object.assign(ask(), { legs: ['request', 'response'], kvm: { airs_token: keyCutToken() }, vars: { verdictCacheTtlS: '60' },
+        setup: Object.assign(ask(), { legs: ['request', 'response'], kvm: S.credKvm(keyCutToken()), vars: { verdictCacheTtlS: '60' },
             airs: R.answers('allow-prompt', 'block-dlp-response-masked'), response: chatReply('Card on file: ' + C) }),
         v3: function (r) {
             var x = r.response;
             if (!r.request || r.request.fault || r.request.calls.length !== 1) { return 'precondition: the request leg was not scanned and allowed: ' + state(r.request); }
+            if (!S.cutIn(x, 'JS-Airs3CacheKeys', 'request') || !S.cutIn(x, 'JS-Airs3CacheKeys', 'response')) { return 'precondition: JS-Airs3CacheKeys was not cut on both legs: ' + state(x); }
             return S.check(x && x.calls.length === 1 && x.blocked, 'the reply was not scanned: ' + state(x) + ', cached ' + v(x, 'cachedScans'));
         }
     },
     {
         finding: 'P3GATE-APIGEE-KEYCUT',
         title: 'JS-Airs3CacheKeys cut, then an allow: nothing may be stored under the empty key (today PC-Airs3Verdict runs with airs3.vcKey1 empty: JS-Airs3CacheRecord sets vcWrite1 without checking the key)',
-        setup: Object.assign(ask(), { legs: ['request'], kvm: { airs_token: keyCutToken() }, vars: { verdictCacheTtlS: '60' }, airs: R.answers('allow-prompt') }),
+        setup: Object.assign(ask(), { legs: ['request'], kvm: S.credKvm(keyCutToken()), vars: { verdictCacheTtlS: '60' }, airs: R.answers('allow-prompt') }),
         v3: function (r) {
             var x = r.request, c = x && x.flow ? x.flow.cache : {};
+            if (!S.cutIn(x, 'JS-Airs3CacheKeys', 'request')) { return 'precondition: JS-Airs3CacheKeys was not cut: ' + state(x); }
             return S.check(x && !x.fault && x.calls.length === 1 && !Object.prototype.hasOwnProperty.call(c, ''), 'stored under the empty key: ' + JSON.stringify(c));
         }
     },

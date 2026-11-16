@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<!-- The key goes only into a private. variable, which Apigee hides in Debug (A25). continueOnError=true: init refuses
-     with a clear message when the key is missing. -->
+<!-- The key and the OAuth token (v3.1) go only into private. variables, which Apigee hides in Debug (A25, L23).
+     continueOnError=true: init refuses with a clear message when the credential its mode needs is missing. An absent
+     entry empties the variable it is read into, and the Gets after it still run (L26); the optional entries come last. -->
 <KeyValueMapOperations continueOnError="true" enabled="true" name="KVM-GetAIRSConfig" mapIdentifier="airs-config">
   <DisplayName>KVM-GetAIRSConfig</DisplayName>
   <ExpiryTimeInSecs>300</ExpiryTimeInSecs>
   <Get assignTo="private.airs3_token"><Key><Parameter>airs_token</Parameter></Key></Get>
   <Get assignTo="airs3.kvmProfile"><Key><Parameter>airs_profile</Parameter></Key></Get>
   <Get assignTo="airs3.kvmHook"><Key><Parameter>airs_hook</Parameter></Key></Get>
+  <Get assignTo="private.airs3_bearer"><Key><Parameter>airs_bearer</Parameter></Key></Get>
+  <Get assignTo="airs3.kvmAuthMode"><Key><Parameter>airs_auth_mode</Parameter></Key></Get>
   <Scope>environment</Scope>
 </KeyValueMapOperations>

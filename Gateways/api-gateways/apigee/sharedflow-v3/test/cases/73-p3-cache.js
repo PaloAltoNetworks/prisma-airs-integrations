@@ -24,7 +24,7 @@ const ON = { verdictCacheTtlS: '60' };
 const PROFILE = { profile_name: 'PROFILE_NAME' };                          // test/run.js's config map profile
 
 function vcKey(leg, profile, contents, maxChars, truncClosed) {
-    var parts = ['airs3-vc-1', KEY, EP, JSON.stringify(profile), leg, String(maxChars || 100000), String(truncClosed === undefined ? true : truncClosed), JSON.stringify(contents)];
+    var parts = ['airs3-vc-1', S.CRED, EP, JSON.stringify(profile), leg, String(maxChars || 100000), String(truncClosed === undefined ? true : truncClosed), JSON.stringify(contents)];
     return 'airs3-verdict-' + crypto.createHash('sha256').update(parts.map(function (p) { return p.length + ':' + p; }).join(''), 'utf8').digest('hex');
 }
 function seed(pairs) { var c = {}; pairs.forEach(function (p) { c[p[0]] = p[1]; }); return c; }
@@ -121,7 +121,7 @@ module.exports = [
         setup: Object.assign(ask(), { legs: ['request'], vars: Object.assign({ breakerFailures: '3' }, ON), airs: R.answers('allow-prompt'),
             cache: (function () {
                 var c = seed([[HELLO, 'scan-from-cache']]);
-                c['airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + KEY, 'utf8').digest('hex')] = JSON.stringify({ failures: 3, openUntil: Date.now() + 60000 });
+                c['airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + S.CRED, 'utf8').digest('hex')] = JSON.stringify({ failures: 3, openUntil: Date.now() + 60000 });
                 return c;
             })() }),
         v3: function (r) { var x = r.request; return S.check(x && !x.fault && x.calls.length === 0, 'refused by the breaker, or called: ' + state(x)); }
@@ -132,11 +132,11 @@ module.exports = [
             { legs: ['request'], vars: Object.assign({ breakerFailures: '3' }, ON), airs: R.answers(R.noAnswer('timeout')),
               cache: (function () {
                   var c = seed([[vcKey('request', PROFILE, [{ tool_event: { metadata: { ecosystem: 'mcp', method: 'tools/call', server_name: 'lab-proxy', tool_invoked: 'echo' }, input: '{"text":"hello"}' } }]), 'cached-1']]);
-                  c['airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + KEY, 'utf8').digest('hex')] = JSON.stringify({ failures: 2, openUntil: 0 });
+                  c['airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + S.CRED, 'utf8').digest('hex')] = JSON.stringify({ failures: 2, openUntil: 0 });
                   return c;
               })() }),
         v3: function (r) {
-            var x = r.request, e = x && x.flow.cache['airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + KEY, 'utf8').digest('hex')], s = null;
+            var x = r.request, e = x && x.flow.cache['airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + S.CRED, 'utf8').digest('hex')], s = null;
             try { s = JSON.parse(e.value); } catch (err) { s = null; }
             return S.check(x && x.calls.length === 1 && s && s.openUntil > Date.now(), 'the breaker did not open: ' + JSON.stringify(s) + ' ' + state(x));
         }

@@ -1,9 +1,10 @@
 /*
  * airs3-cache.js: the verdict cache (phase 3; MuleSoft's cache.rs), when verdictCacheTtlS is above 0 and applyDlpMasking is
  * false (settings.rs: never with masking). Allow verdicts only: a cached block would freeze a false positive.
- *   op=keys, after Read: each scan's key, 'airs3-verdict-' + SHA-256 (L18) of length-prefixed fields: 'airs3-vc-1', the API
- *   key, the endpoint, the scan's ai_profile, the leg, maxScanChars, truncationFailClosed and the scan's contents. Ids and
- *   metadata never change a verdict, so they stay out, as in MuleSoft; the API key is hashed, never stored. It ends by
+ *   op=keys, after Read: each scan's key, 'airs3-verdict-' + SHA-256 (L18) of length-prefixed fields: 'airs3-vc-1', the
+ *   credential (the API key, or in bearer mode 'bearer:' and the token, v3.1), the endpoint, the scan's ai_profile, the leg,
+ *   maxScanChars, truncationFailClosed and the scan's contents. Ids and metadata never change a verdict, so they stay out,
+ *   as in MuleSoft; the credential is hashed, never stored. It ends by
  *   setting airs3.doneCacheKeys: the lookups, the hits and the writes run only then, so a leg whose keys were not all made
  *   (a step cut by its time limit) never reads or writes an entry under a key it didn't finish (AM-Airs3Reset's empty one).
  *   op=hits, after LC-Airs3Verdict and LC-Airs3Verdict<k> read each slot's entry: airs3.vcHit<k> for each slot whose own
@@ -17,7 +18,7 @@
     var op = String(properties.op);
     if (op === 'keys') {
         var n = parseInt(AIRS3.get('scanCount'), 10) || 1;
-        var fixed = ['airs3-vc-1', AIRS3.str('private.airs3_token'), AIRS3.get('endpoint')];
+        var fixed = ['airs3-vc-1', AIRS3.get('authMode') === 'bearer' ? 'bearer:' + AIRS3.str('private.airs3_bearer') : AIRS3.str('private.airs3_token'), AIRS3.get('endpoint')];
         for (var k = 1; k <= n && k <= AIRS3.SLOTS; k++) {
             var body = AIRS3.parse(AIRS3.get(k === 1 ? 'scanBody' : 'scanBody' + k));
             if (!AIRS3.isObject(body)) { continue; }

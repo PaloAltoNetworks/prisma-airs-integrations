@@ -4,9 +4,12 @@
 #   cp example.env .env      # fill in your values
 #   ./deploy.sh --env-file=.env
 #
-# The Prisma AIRS key is read only from the env file or the environment (AIRS_TOKEN), never from the command line,
-# where other users of the machine could see it. Settings other than the key can be overridden on the command line:
+# The Prisma AIRS key (AIRS_TOKEN) and the OAuth 2.0 token (AIRS_BEARER, v3.1) are read only from the env file or the
+# environment, never from the command line, where other users of the machine could see them. Other settings can be
+# overridden on the command line:
 #   ./deploy.sh --env-file=.env --env=dev --examples=llm,mcp --mcp-url=https://mcp.example.com
+# Renewing the OAuth token by hand: put the new one in the env file, then
+#   ./deploy.sh --env-file=.env --bearer-only
 #
 # Needs: gcloud (signed in, with Apigee admin rights on the organization), curl, jq, zip.
 set -euo pipefail
@@ -24,7 +27,8 @@ Required (in the env file, the environment, or as options):
   SA / --sa=EMAIL                 service account the SharedFlow and the example proxies run as. The SharedFlow's
                                   log step writes to Cloud Logging, so Apigee refuses to deploy it without one.
                                   Grant it roles/logging.logWriter, and roles/aiplatform.user for the LLM example.
-  AIRS_TOKEN                      the Prisma AIRS API key (env file or environment only)
+  AIRS_TOKEN                      the Prisma AIRS API key (env file or environment only); not needed with
+                                  AIRS_AUTH_MODE=bearer
   AIRS_PROFILE / --airs-profile=NAME   the Prisma AIRS security profile (name or UUID)
 
 Optional:
@@ -36,6 +40,16 @@ Optional:
   MCP_URL / --mcp-url=URL         the MCP server the MCP example forwards to (required with mcp)
   APIGEE_HOST / --host=HOST       your environment group's host name, to print smoke-test commands
   SMOKE_MODEL                     the Gemini model the smoke tests name (default gemini-3.8-flash)
+  AIRS_AUTH_MODE / --auth-mode=MODE   apikey or bearer (v3.1): written to the config map as airs_auth_mode, the mode of
+                                  every proxy that sets no prismaAirsAuthMode of its own. Unset leaves the entry as it is
+  AIRS_BEARER                     the Prisma AIRS OAuth 2.0 token (v3.1; env file or environment only), written to the config
+                                  map as airs_bearer, before airs_auth_mode. Whitespace around it is dropped; it must then be
+                                  1 to 4,096 printable ASCII characters with no spaces, as v3 requires. If the map already
+                                  held a token, what this run switches to bearer mode (airs_auth_mode, or flow hooks whose
+                                  HOOK_SETTINGS say bearer) comes last, 310 s after the token, so no runtime instance sends
+                                  the old token in bearer mode
+  --bearer-only                   renewal by hand: writes only airs_bearer to the existing config map and deploys nothing
+                                  (needs PROJECT, ENV and AIRS_BEARER). The runtime uses it within about five minutes
   HOOK_ROUTES / --hook-routes=LIST   flow hooks: the base paths v3 scans from the environment's pre-target and post-target
                                   hooks, comma-separated (/airs-llm,/airs-mcp), each exactly as the proxy's base path.
                                   Reads both hook points before anything else and stops, with nothing changed, if either
@@ -64,6 +78,7 @@ fi
 
 PROJECT="${PROJECT:-}"; ORG="${ORG:-}"; ENV="${ENV:-}"; SA="${SA:-}"
 AIRS_TOKEN="${AIRS_TOKEN:-}"; AIRS_PROFILE="${AIRS_PROFILE:-}"
+AIRS_AUTH_MODE="${AIRS_AUTH_MODE:-}"; AIRS_BEARER="${AIRS_BEARER:-}"; BEARER_ONLY=no
 KVM_NAME="${KVM_NAME:-airs-config}"; SHAREDFLOW_NAME="${SHAREDFLOW_NAME:-PANW-AIRS}"
 EXAMPLES="${EXAMPLES:-llm}"; LLM_PROXY_NAME="${LLM_PROXY_NAME:-airs-llm-guard}"; MCP_PROXY_NAME="${MCP_PROXY_NAME:-airs-mcp-guard}"
 MCP_URL="${MCP_URL:-}"; APIGEE_HOST="${APIGEE_HOST:-}"; SMOKE_MODEL="${SMOKE_MODEL:-gemini-3.8-flash}"
@@ -85,16 +100,34 @@ for arg in "$@"; do
     --hook-routes=*)      HOOK_ROUTES="${arg#*=}" ;;
     --hook-settings=*)    HOOK_SETTINGS="${arg#*=}" ;;
     --hook-attach=*)      HOOK_ATTACH="${arg#*=}" ;;
+    --auth-mode=*)        AIRS_AUTH_MODE="${arg#*=}" ;;
+    --bearer-only)        BEARER_ONLY=yes ;;
     --airs-token=*)       echo "The key is not accepted on the command line: put AIRS_TOKEN in the env file." >&2; exit 1 ;;
+    --airs-bearer=*)      echo "The OAuth token is not accepted on the command line: put AIRS_BEARER in the env file." >&2; exit 1 ;;
     *) echo "Unknown option: $arg" >&2; usage 1 ;;
   esac
 done
 
 [[ -n "$PROJECT" ]]      || { echo "Missing PROJECT" >&2; usage 1; }
 [[ -n "$ENV" ]]          || { echo "Missing ENV" >&2; usage 1; }
-[[ -n "$SA" ]]           || { echo "Missing SA (the SharedFlow can't be deployed without a service account)" >&2; usage 1; }
-[[ -n "$AIRS_TOKEN" ]]   || { echo "Missing AIRS_TOKEN (env file or environment)" >&2; usage 1; }
-[[ -n "$AIRS_PROFILE" ]] || { echo "Missing AIRS_PROFILE" >&2; usage 1; }
+# v3.1: the mode and the token, checked as v3 checks them, before anything is written. The token is never printed.
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
+AIRS_AUTH_MODE="$(trim "$AIRS_AUTH_MODE" | tr '[:upper:]' '[:lower:]')"
+[[ -z "$AIRS_AUTH_MODE" || "$AIRS_AUTH_MODE" == apikey || "$AIRS_AUTH_MODE" == bearer ]] || { echo "AIRS_AUTH_MODE: apikey or bearer" >&2; exit 1; }
+AIRS_BEARER="$(trim "$AIRS_BEARER")"
+if [[ -n "$AIRS_BEARER" ]] && ! ( LC_ALL=C; [[ ${#AIRS_BEARER} -le 4096 && "$AIRS_BEARER" =~ ^[!-~]+$ ]] ); then
+  echo "AIRS_BEARER: not a token v3 can send (1 to 4,096 printable ASCII characters, no spaces); nothing was written" >&2; exit 1
+fi
+[[ "$AIRS_BEARER" != your-prisma-airs-oauth-token ]] || { echo "AIRS_BEARER still holds example.env's placeholder: put your token there" >&2; exit 1; }
+if [[ "$BEARER_ONLY" == yes ]]; then
+  [[ -n "$AIRS_BEARER" ]] || { echo "--bearer-only needs AIRS_BEARER (env file or environment)" >&2; exit 1; }
+else
+  [[ "$AIRS_TOKEN" != your-prisma-airs-api-key ]] || { echo "AIRS_TOKEN still holds example.env's placeholder: put your key there, or leave it empty with AIRS_AUTH_MODE=bearer" >&2; exit 1; }
+  [[ -n "$SA" ]]           || { echo "Missing SA (the SharedFlow can't be deployed without a service account)" >&2; usage 1; }
+  [[ "$AIRS_AUTH_MODE" != bearer || -n "$AIRS_BEARER" ]] || { echo "AIRS_AUTH_MODE=bearer needs AIRS_BEARER (env file or environment)" >&2; exit 1; }
+  [[ -n "$AIRS_TOKEN" || "$AIRS_AUTH_MODE" == bearer ]] || { echo "Missing AIRS_TOKEN (env file or environment), or set AIRS_AUTH_MODE=bearer and AIRS_BEARER" >&2; usage 1; }
+  [[ -n "$AIRS_PROFILE" ]] || { echo "Missing AIRS_PROFILE" >&2; usage 1; }
+fi
 ORG="${ORG:-$PROJECT}"
 [[ "$KVM_NAME" =~ ^[A-Za-z0-9._-]+$ ]]        || { echo "KVM_NAME: letters, digits, '.', '_' and '-' only" >&2; exit 1; }
 [[ "$SHAREDFLOW_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "SHAREDFLOW_NAME: letters, digits, '.', '_' and '-' only" >&2; exit 1; }
@@ -123,6 +156,7 @@ refresh() {
 refresh
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+MODE_AT=""; MODE_LATER=""; HOOKS_LATER=""   # set by setup_kvm when what switches to bearer mode must wait for a replaced token
 
 step() { printf "\n== %s\n" "$*"; }
 ok()   { printf "  ok: %s\n" "$*"; }
@@ -141,8 +175,32 @@ api() {
   fi
 }
 status_of() { refresh; curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "$APIGEE_API$1"; }
+lower_trim() { trim "$1" | tr '[:upper:]' '[:lower:]'; }
+# A settings JSON object's prismaAirsAuthMode, trimmed and lowercased as v3 reads it, or nothing.
+settings_mode() { local v; v="$(printf '%s' "$1" | jq -r '(.prismaAirsAuthMode // "") | tostring' 2>/dev/null || true)"; lower_trim "$v"; }
+# An entry's value, or nothing if it isn't there: only for entries that hold no secret (airs_auth_mode, airs_hook).
+entry_value() {
+  local resp
+  resp="$(api GET "$1/entries/$2")"
+  [[ "${resp##*$'\n'}" == 200 ]] && printf '%s' "${resp%$'\n'*}" | jq -r '.value // empty'
+  return 0
+}
 
-# ----- the config map: encrypted, two entries; the key is never printed, nor put on a command line ---------------
+# ----- the config map: encrypted; the key and the token are never printed, nor put on a command line ---------------
+put_entry() {   # map path, entry name, value (from a variable, never argv to another program)
+  local payload resp code
+  payload="$(V="$3" jq -n --arg n "$2" '{name:$n, value:env.V}')"
+  if [[ "$(status_of "$1/entries/$2")" == "200" ]]; then resp="$(api PUT "$1/entries/$2" "$payload")"; else resp="$(api POST "$1/entries" "$payload")"; fi
+  code="${resp##*$'\n'}"; [[ "$code" =~ ^20[01]$ ]] || die "writing entry $2: HTTP $code"
+  ok "entry $2 written"
+}
+# Renewal by hand (--bearer-only): the map must exist; only airs_bearer changes, and nothing is deployed.
+renew_bearer() {
+  step "OAuth token in config map $KVM_NAME, environment $ENV"
+  local kvm="/organizations/$ORG/environments/$ENV/keyvaluemaps/$KVM_NAME"
+  [[ "$(status_of "$kvm")" == "200" ]] || die "no config map $KVM_NAME in $ENV: run a full deploy first"
+  put_entry "$kvm" airs_bearer "$AIRS_BEARER"
+}
 setup_kvm() {
   step "Config map $KVM_NAME in environment $ENV"
   local kvm="/organizations/$ORG/environments/$ENV/keyvaluemaps/$KVM_NAME" resp code
@@ -153,18 +211,45 @@ setup_kvm() {
     code="${resp##*$'\n'}"; [[ "$code" =~ ^20[01]$ ]] || die "creating it: HTTP $code"
     ok "created, encrypted"
   fi
-  local key val payload
-  for key in airs_token airs_profile; do
-    if [[ "$key" == "airs_token" ]]; then val="$AIRS_TOKEN"; else val="$AIRS_PROFILE"; fi
-    payload="$(V="$val" jq -n --arg n "$key" '{name:$n, value:env.V}')"
-    if [[ "$(status_of "$kvm/entries/$key")" == "200" ]]; then
-      resp="$(api PUT "$kvm/entries/$key" "$payload")"
-    else
-      resp="$(api POST "$kvm/entries" "$payload")"
+  [[ -n "$AIRS_TOKEN" ]] && put_entry "$kvm" airs_token "$AIRS_TOKEN"
+  put_entry "$kvm" airs_profile "$AIRS_PROFILE"
+  # The token before the mode. A first token is read at once, so the mode can follow it at once. A token that replaces one
+  # already in the map reaches each runtime instance only when its 300 s cache of the old one runs out, while a mode can be
+  # read sooner (VERIFICATION.md, L24): switching to bearer then would send the old token for up to five minutes. So what
+  # this run switches to bearer mode, the map's airs_auth_mode or flow hooks whose settings say bearer, comes last, 310 s
+  # after the token, once the SharedFlow and the examples are deployed. Any answer but 404 counts as a token there.
+  if [[ -n "$AIRS_BEARER" ]]; then
+    local had_token mode_now hooks_now
+    had_token="$(status_of "$kvm/entries/airs_bearer")" || die "reading entry airs_bearer: no answer"
+    mode_now="$(lower_trim "$(entry_value "$kvm" airs_auth_mode)")"
+    put_entry "$kvm" airs_bearer "$AIRS_BEARER"
+    if [[ "$had_token" != 404 ]]; then
+      [[ "$AIRS_AUTH_MODE" == bearer && "$mode_now" != bearer ]] && MODE_LATER=yes
+      if [[ -n "$HOOK_ROUTES" && "$(settings_mode "$HOOK_SETTINGS")" == bearer ]]; then
+        hooks_now="$(entry_value "$kvm" airs_hook)"
+        [[ "$(settings_mode "$(printf '%s' "$hooks_now" | jq -c '.settings // {}' 2>/dev/null || true)")" == bearer ]] || HOOKS_LATER=yes
+      fi
+      if [[ -n "$MODE_LATER$HOOKS_LATER" ]]; then
+        local what="${MODE_LATER:+airs_auth_mode}"; [[ -n "$HOOKS_LATER" ]] && what="${what:+$what, }the flow hooks"
+        MODE_AT=$(( $(date +%s) + 310 ))
+        ok "the map already held a token: bearer mode starts last ($what), once every runtime instance has the new token"
+      fi
     fi
-    code="${resp##*$'\n'}"; [[ "$code" =~ ^20[01]$ ]] || die "writing entry $key: HTTP $code"
-    ok "entry $key written"
-  done
+  fi
+  [[ -n "$AIRS_AUTH_MODE" && -z "$MODE_LATER" ]] && put_entry "$kvm" airs_auth_mode "$AIRS_AUTH_MODE"
+  return 0
+}
+# What switches to bearer mode, when it had to wait for a replaced token (setup_kvm): the mode, then the flow hooks.
+write_last() {
+  step "Bearer mode, after the new token"
+  local now; now="$(date +%s)"
+  if (( MODE_AT > now )); then
+    echo "  waiting $(( MODE_AT - now )) s, so every runtime instance has the new token before bearer mode starts"
+    sleep "$(( MODE_AT - now ))"
+  fi
+  if [[ -n "$MODE_LATER" ]]; then put_entry "/organizations/$ORG/environments/$ENV/keyvaluemaps/$KVM_NAME" airs_auth_mode "$AIRS_AUTH_MODE"; fi
+  if [[ -n "$HOOKS_LATER" ]]; then setup_hooks; fi
+  return 0
 }
 
 # ----- bundles -------------------------------------------------------------------------------------------------
@@ -303,13 +388,21 @@ setup_hooks() {
   done
 }
 
-echo "Deploying to organization $ORG, environment $ENV, as $SA (profile $AIRS_PROFILE)"
+if [[ "$BEARER_ONLY" == yes ]]; then
+  echo "Renewing the OAuth token in organization $ORG, environment $ENV (nothing is deployed)"
+  renew_bearer
+  step "Done"
+  echo "  Each runtime instance keeps a config map entry it read for 300 s, so the new token is in use within about five minutes."
+  exit 0
+fi
+echo "Deploying to organization $ORG, environment $ENV, as $SA (profile $AIRS_PROFILE, auth mode ${AIRS_AUTH_MODE:-as the config map has it})"
 [[ -n "$HOOK_ROUTES" && "$HOOK_ATTACH" == yes ]] && check_hook_points
 setup_kvm
 deploy_sharedflow
-[[ -n "$HOOK_ROUTES" ]] && setup_hooks
+[[ -n "$HOOK_ROUTES" && -z "$HOOKS_LATER" ]] && setup_hooks
 case ",$EXAMPLES," in *,llm,*) deploy_example airs-llm-guard "$LLM_PROXY_NAME" ;; esac
 case ",$EXAMPLES," in *,mcp,*) deploy_example airs-mcp-guard "$MCP_PROXY_NAME" ;; esac
+[[ -n "$MODE_AT" ]] && write_last
 step "Done"
 
 if [[ -n "$APIGEE_HOST" ]] && [[ ",$EXAMPLES," == *,llm,* ]]; then

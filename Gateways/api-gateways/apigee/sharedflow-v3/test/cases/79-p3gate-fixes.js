@@ -46,7 +46,7 @@ const MCPH = { 'Content-Type': 'application/json', Accept: 'application/json, te
 function forwarded(x) { try { return JSON.parse(x.flow.messages.request.content); } catch (e) { return null; } }
 function gotStream(x, text) { return !!(x && !x.fault && /event-stream/.test(String(x.contentType)) && String(x.body).indexOf(text) !== -1); }
 function vcKey(leg, contents) {
-    var parts = ['airs3-vc-1', KEY, EP, JSON.stringify(PROFILE), leg, '100000', 'true', JSON.stringify(contents)];
+    var parts = ['airs3-vc-1', S.CRED, EP, JSON.stringify(PROFILE), leg, '100000', 'true', JSON.stringify(contents)];
     return 'airs3-verdict-' + crypto.createHash('sha256').update(parts.map(function (p) { return p.length + ':' + p; }).join(''), 'utf8').digest('hex');
 }
 // A stand-in for JS-Airs3CacheKeys cut on the reply leg only (L2): the key's read throws from airs3-cache.js once the reply leg
@@ -54,7 +54,7 @@ function vcKey(leg, contents) {
 function cutKeysOnReply() {
     var st = { reply: false };
     return { mark: function () { st.reply = true; },
-             token: { toString: function () { if (st.reply && String(new Error().stack).indexOf('airs3-cache.js') !== -1) { throw new Error('JS-Airs3CacheKeys cut'); } return KEY; } } };
+             token: { toString: function () { if (st.reply && String(new Error().stack).indexOf('airs3-cache.js') !== -1) { throw new Error('JS-Airs3CacheKeys cut'); } return S.CRED_VALUE; } } };
 }
 const HITS = cutKeysOnReply();
 
@@ -69,7 +69,7 @@ module.exports = [
         v3: function (r) {
             var h = r.runs[1], f = r.runs[2];
             if (!gotStream(h, 'Hi there.')) { return 'precondition: the hook did not pass the reply as the client\'s stream: ' + state(h); }
-            return S.check(f && f.calls.length === 1 && gotStream(f, 'Hi there.') && f.body === h.body,
+            return S.check(f && f.calls.length === 1 && gotStream(f, 'Hi there.') && S.sameStream(f.body, h.body),
                 'the FlowCallout did not scan the stream once and leave it as it was: ' + state(f));
         }
     },
@@ -271,12 +271,13 @@ module.exports = [
     {
         finding: 'P3GATE-FIX-HITS',
         title: 'Guard: the request leg is answered from the verdict cache; the reply leg\'s JS-Airs3CacheKeys is cut, so its lookup never runs and the runtime\'s cachehit variable still says true: the reply is not taken for a hit, it is scanned, and the card is withheld',
-        setup: Object.assign(ask(), { legs: ['request', 'response'], vars: { verdictCacheTtlS: '60' }, kvm: { airs_token: HITS.token },
+        setup: Object.assign(ask(), { legs: ['request', 'response'], vars: { verdictCacheTtlS: '60' }, kvm: S.credKvm(HITS.token),
             cache: (function () { var c = {}; c[vcKey('request', [{ prompt: 'hello' }])] = 'scan-of-hello'; return c; })(),
             beforeResponse: function () { HITS.mark(); }, response: chatReply('Card on file: ' + C), airs: R.answers('block-dlp-response-masked') }),
         v3: function (r) {
             var q = r.request, x = r.response;
             if (!q || q.fault || q.calls.length !== 0 || q.cachedScans !== 1) { return 'precondition: the request leg was not answered from the cache: ' + state(q); }
+            if (!S.cutIn(x, 'JS-Airs3CacheKeys', 'response')) { return 'precondition: the reply leg\'s JS-Airs3CacheKeys was not cut: ' + state(x); }
             return S.check(x && x.blocked && x.calls.length === 1, 'the reply passed as a cache hit it never had: ' + state(x));
         }
     }

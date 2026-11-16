@@ -67,6 +67,9 @@ AIRS3.judge = function (k) {
     var outcome, note = '';
     if (status === null) { outcome = 'failure'; note = 'no answer from Prisma AIRS'; }
     else if (status === 400 || status === 413) { outcome = 'refused'; note = 'Prisma AIRS refused the content (HTTP ' + status + ')'; }
+    else if ((status === 401 || status === 403) && AIRS3.get('authMode') === 'bearer') {
+        outcome = 'failure'; note = 'Prisma AIRS rejected the OAuth token (HTTP ' + status + '): it is wrong or expired, or its API key expired';
+    }
     else if (status !== 200) { outcome = 'failure'; note = 'Prisma AIRS answered HTTP ' + status; }
     else if (!AIRS3.isObject(body)) { outcome = 'failure'; note = 'an answer that is not a JSON object'; }
     else if (body.action !== 'allow' && body.action !== 'block') { outcome = 'failure'; note = 'an answer with no action'; }

@@ -62,6 +62,7 @@ function Flow(opts) {
     this.logs = [];                           // MessageLogging lines
     this.calls = [];                          // ServiceCallout requests, as sent
     this.kvm = opts.kvm || {};
+    this.kvmFails = !!opts.kvmFails;          // v3.1: a stand-in for a config-map step that fails as a whole
     this.responder = opts.airs || null;
     this.cache = {};                          // LookupCache / PopulateCache: key -> { value, expires (ms, or null) }
     var seed = opts.cache || {};
@@ -298,7 +299,7 @@ const runners = {
         } catch (e) {
             var timedOut = /Script execution timed out/.test(String(e && e.message));
             var msg = timedOut ? 'Javascript runtime exceeded limit of ' + limit + 'ms' : String(e && e.message);
-            flow.events.push({ type: 'js-error', policy: p.attrs.name, message: msg });
+            flow.events.push({ type: 'js-error', policy: p.attrs.name, leg: flow.leg, message: msg });
             if (!coe) {
                 raise(flow, p.attrs.name, 'steps.javascript.ScriptExecutionFailed', 500,
                     JSON.stringify({ fault: { faultstring: 'Execution of ' + p.attrs.name + ' failed with error: ' + msg, detail: { errorcode: 'steps.javascript.ScriptExecutionFailed' } } }));
@@ -308,12 +309,20 @@ const runners = {
     },
 
     KeyValueMapOperations: function (flow, b, p) {
+        // v3.1's stand-in: the whole step fails (a runtime error), so no Get runs; continueOnError=true lets the flow go on.
+        if (flow.kvmFails) {
+            flow.events.push({ type: 'kvm-failed', policy: p.attrs.name });
+            if (p.attrs.continueOnError !== 'true') { raise(flow, p.attrs.name, 'steps.keyvaluemapoperations.Failed', 500, '{"fault":{"faultstring":"stand-in"}}'); }
+            return;
+        }
         var map = flow.kvm[p.attrs.mapIdentifier];
         if (!map) { throw new Error('the test gave no config map named ' + p.attrs.mapIdentifier); }
         X.kids(p, 'Get').forEach(function (g) {
             var key = X.text(X.path(g, ['Key', 'Parameter']));
             var v = Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
-            if (v !== null) { flow.set(g.attrs.assignTo, v, p.attrs.name); }
+            // L26 (measured 16 Nov): an absent entry empties the variable (it reads null afterwards, whatever it held),
+            // and the Gets after it still run.
+            if (v !== null) { flow.set(g.attrs.assignTo, v, p.attrs.name); } else { flow.remove(g.attrs.assignTo); }
         });
     },
 
@@ -492,6 +501,23 @@ function keyLeaks(flow, key) {
     return out;
 }
 
+/* v3.1: every place outside private. where a credential shows, by substring (so "Bearer <token>" counts): each variable
+   not under private., each header and body of each message not named private.*, and each log line. */
+function secretLeaks(flow, secret) {
+    var out = [], s = String(secret);
+    // A value that throws when read is a case's stand-in for a cut step (93, 96): it holds no credential.
+    function str(v) { try { return String(v); } catch (e) { return ''; } }
+    flow.vars.forEach(function (v, k) { if (k.indexOf('private.') !== 0 && v !== null && v !== undefined && str(v).indexOf(s) !== -1) { out.push('variable ' + k); } });
+    Object.keys(flow.messages).forEach(function (name) {
+        var m = flow.messages[name];
+        if (!m || name.indexOf('private.') === 0) { return; }
+        Object.keys(m.headers).forEach(function (hk) { if (String(m.headers[hk].value).indexOf(s) !== -1) { out.push('header ' + m.headers[hk].name + ' of ' + name); } });
+        if (m.content !== null && m.content !== undefined && String(m.content).indexOf(s) !== -1) { out.push('the body of ' + name); }
+    });
+    (flow.logs || []).forEach(function (l, i) { if (String(l.line).indexOf(s) !== -1) { out.push('log line ' + (i + 1)); } });
+    return out;
+}
+
 /* A rough ES5 check, because Node runs code Rhino would refuse; the lab's Apigee is the final judge. */
 function es5Problems(src) {
     var probs = [];
@@ -505,4 +531,4 @@ function es5Problems(src) {
 }
 
 module.exports = { Bundle: Bundle, Flow: Flow, Message: Message, newFlow: newFlow, setResponse: setResponse, runSharedFlow: runSharedFlow,
-                   evalCondition: evalCondition, render: render, jsonPath: jsonPath, keyLeaks: keyLeaks, es5Problems: es5Problems };
+                   evalCondition: evalCondition, render: render, jsonPath: jsonPath, keyLeaks: keyLeaks, secretLeaks: secretLeaks, es5Problems: es5Problems };

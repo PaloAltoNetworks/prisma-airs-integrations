@@ -74,7 +74,7 @@ const MCPH = { 'Content-Type': 'application/json', Accept: 'application/json, te
 function forwarded(x) { try { return JSON.parse(x.flow.messages.request.content); } catch (e) { return null; } }
 function gotStream(x, text) { return !!(x && !x.fault && /event-stream/.test(String(x.contentType)) && String(x.body).indexOf(text) !== -1); }
 function vcKey(leg, contents) {
-    var parts = ['airs3-vc-1', KEY, EP, JSON.stringify(PROFILE), leg, '100000', 'true', JSON.stringify(contents)];
+    var parts = ['airs3-vc-1', S.CRED, EP, JSON.stringify(PROFILE), leg, '100000', 'true', JSON.stringify(contents)];
     return 'airs3-verdict-' + crypto.createHash('sha256').update(parts.map(function (p) { return p.length + ':' + p; }).join(''), 'utf8').digest('hex');
 }
 
@@ -114,7 +114,7 @@ module.exports = [
             airs: R.answers('allow-prompt', 'allow-prompt-response', 'allow-prompt-response') }),
         v3: function (r) {
             var a = r.runs[1], b = r.runs[2];
-            return S.check(a && a.calls.length === 1 && gotStream(a, 'Hi there.') && b && b.calls.length === 1 && gotStream(b, 'Hi there.') && b.body === a.body,
+            return S.check(a && a.calls.length === 1 && gotStream(a, 'Hi there.') && b && b.calls.length === 1 && gotStream(b, 'Hi there.') && S.sameStream(b.body, a.body),
                 'not scanned twice and streamed once: ' + state(a) + ' | ' + state(b));
         }
     },

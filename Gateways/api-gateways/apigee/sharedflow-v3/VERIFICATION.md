@@ -1,11 +1,11 @@
-# Verification record: PANW-AIRS v3, phases 1 to 3
+# Verification record: PANW-AIRS v3, phases 1 to 3, and v3.1
 
-This page records each phase 1, 2 and 3 claim about v3's behavior, the result, and where it was measured. A claim that no real client or Prisma AIRS tenant can produce on demand is proven by unit tests only, and is marked so below. No mock stood in for Prisma AIRS in any live row.
+This page records each phase 1, 2 and 3 claim about v3's behavior, and each v3.1 claim (OAuth 2.0 tokens toward Prisma AIRS), the result, and where it was measured. A claim that no real client or Prisma AIRS tenant can produce on demand is proven by unit tests only, and is marked so below. No mock stood in for Prisma AIRS in any live row.
 
 ## Environments
 
 - **Apigee:**
-  - an Apigee X evaluation organization, runtime 1-18-0-apigee-8, in an environment of its own, 9 to 15 November 2026;
+  - an Apigee X evaluation organization, runtime 1-18-0-apigee-8, in an environment of its own, 9 to 15 November 2026; v3.1 on 16 November, on runtime 1-18-0-apigee-9, two runtime instances;
   - the SharedFlow deployed as `PANW-AIRS-v3`, with a service account, since its log step writes to Cloud Logging;
   - reached over Private Service Connect from a VM in the same Google Cloud project.
 - **Lab proxies:**
@@ -17,16 +17,17 @@ This page records each phase 1, 2 and 3 claim about v3's behavior, the result, a
   - for the review of phase 2: one whose MCP target counts 4xx and 5xx as success (`success.codes`); one with `failOpen=true` whose request leg's scan goes to a host that doesn't resolve while its reply leg's goes to Prisma AIRS; and one that calls v3 on its reply leg only, with `type=both` and `maxScanChars=800`;
   - for MCP error replies: one that calls v3 on its reply leg only, with its MCP target counting 4xx and 5xx as success;
   - for phase 3: one proxy per operations setting (monitor mode, a retry, a circuit breaker, a verdict cache), the retry's and breaker's request-leg scan sent to a regional host name that doesn't resolve; v3's two flow-hook SharedFlows; and small probes for the platform facts L18 to L21;
-  - a proxy with no target measures what the flow sees around ServiceCallouts (L10, L14, L15).
+  - a proxy with no target measures what the flow sees around ServiceCallouts (L10, L14, L15);
+  - for v3.1: one in bearer mode (`prismaAirsAuthMode=bearer`); one with an unknown mode and `failOpen=true`; one in bearer mode that sets the token's variable itself; and a copy of the SharedFlow that reads a second config map (the real key and a made-up token), called by four proxies: three in bearer mode (one with the shipped defaults otherwise, one with `failOpen=true`, one in monitor mode) and one in API-key mode on the request leg and bearer mode on the reply leg.
 - **Models and servers:**
   - Vertex AI with Gemini 3.8 Flash, through its native `generateContent` and `streamGenerateContent` endpoints and its OpenAI-compatible Chat Completions endpoint;
   - Claude on Vertex, Claude Haiku 5.5 (`claude-haiku-5-5`), through `rawPredict` and `streamRawPredict` on the global endpoint;
   - an MCP server built with the MCP Python SDK 1.30.0 on Cloud Run, with JSON and event-stream routes.
-- **Prisma AIRS:** US region. The lab security profile blocks prompt injection and sensitive data, and returns a masked copy.
+- **Prisma AIRS:** US region. The lab security profile blocks prompt injection and sensitive data, and returns a masked copy. v3.1's OAuth 2.0 token was made by hand in Strata Cloud Manager from the lab's API key, with a lifetime of one day.
 - **Clients:** Python 3.11 with httpx 0.28.1, the OpenAI SDK 3.48.0, the Google Gen AI SDK 3.0.0 and the Anthropic SDK 2.7.0, and Claude Code 2.1.321, on the VM.
   - Claude Code can't trust the lab endpoint's certificate, because the endpoint sends only its leaf certificate. It reached Apigee through a bridge on the VM, listening on 127.0.0.1 only, which checks that certificate and passes each request through unchanged.
 - **Unit:**
-  - **v3:** `node test/run.js --v3`, 911 cases, on an offline emulator that runs the SharedFlow's own XML and JavaScript. Each case names a Prisma AIRS reply recorded from the lab's tenant. The emulator gives a new response message status 200 and no body, as Apigee does (L14).
+  - **v3:** `node test/run.js --v3`, 950 cases with v3.1's (911 before it), on an offline emulator that runs the SharedFlow's own XML and JavaScript. Each case names a Prisma AIRS reply recorded from the lab's tenant. The emulator gives a new response message status 200 and no body, as Apigee does (L14), and empties the variable of a config map entry that isn't there (L26). `--auth=bearer` runs the same cases in bearer mode: 910 pass, and the 40 about the key or the mode itself are left out.
   - **V2:** `node test/run.js` runs V2's bundle, which shows all 48 defects that have a V2 case.
 
 **When it ran:**
@@ -42,6 +43,8 @@ This page records each phase 1, 2 and 3 claim about v3's behavior, the result, a
 - **On 15 November, revision 19,** with phase 3 (11:12 to 11:21 UTC): the operations rows (MON, RT, BK, VC) and the hook-mode rows (HM); again P2N0 to P2N6, P2F1 to P2F11, the P2 rows, M1 to M4, G10, every row of the A*v3 set, LEGL0 to LEGL2 and GL1 to GL5: all 60 as on revision 18.
 - **On 15 November, revision 20,** with the fixes from the review of phase 3, and the hook SharedFlows passing one parameter (12:59 to 13:11 UTC): BK5, HM7 and HM8; again the operations rows, HM1 to HM6, P2N0 to P2N6, P2F1 to P2F11, the P2 rows, M1 to M4, G10, every row of the A*v3 set, LEGL0 to LEGL2 and GL1 to GL5: all as on revision 19.
 - **On 15 November, revision 21,** with the fixes from the second review (13:44 to 14:12 UTC): HM9; again HM1 to HM8, BK5 and the operations rows, and the 60 regression rows: all as on revision 20. Two first attempts at the operations rows met the lab's own text, not v3: a timestamp the profile masks as a data pattern, then one spelled in letters that it flags as toxic (Test inputs); their results were set aside.
+- **On 16 November, revision 22,** v3.1 (08:11 to 08:39 UTC): the 60 regression rows with the config map as it was, each as on revision 21; OO1, OA6 and OB1 to OB4, which need no token; with the key in the map made up, OA1 to OA5 and a Debug session of them; the renewal on a second map; the 60 rows again in bearer mode with no key in the map; then `deploy.sh` in bearer mode, and EX1 to EX3 through its example proxy.
+- **On 16 November, revision 23,** with the fixes from the review of v3.1 (09:26 to 09:36 UTC): the 60 regression rows in API-key mode, each as on revision 22; OA1 to OA3 and OA6, each as on revision 22; then `deploy.sh`'s wait for a replaced token, and EX2.
 
 ## Test inputs
 
@@ -158,12 +161,33 @@ Each row places the test card where v3 must read it. A block means Prisma AIRS j
 | **The key never shows in Debug** | With the scan request held in a message with a plain name (revision 5), Debug showed the key's value where the AssignMessage set the `x-pan-token` header: 3 times in 2 transactions. With the message named `private.airs3_scan` (revision 6), the key appeared nowhere, and the scans worked as before. Checked by searching the Debug session's data for the key's value, printing only where it appeared; the Debug data was deleted afterwards. |
 | **Strict certificate checks** | Every live scan ran with `SSLInfo` `Enforce=true`. With it, a self-signed certificate was refused; without `SSLInfo`, as V2 has it, the same certificate was accepted (L5). |
 
+## v3.1: OAuth 2.0 tokens
+
+| Claim | Result |
+|---|---|
+| **An upgrade with no OAuth entries changes nothing** | Revision 22 with the config map as it was, with no `airs_bearer` and no `airs_auth_mode`: the 60 regression rows gave the HTTP status, `x-airs-*` headers and body they had on revision 21, row for row. |
+| **The token alone authenticates** | With the key in the map replaced by a made-up value, a proxy in API-key mode got HTTP 403 from Prisma AIRS (six calls). Through a proxy in bearer mode at the same time, a harmless `tools/call` was scanned on both legs and allowed (OA1), a batch of 8 got 8 scans and was forwarded (OA3), and a Gemini prompt with the marker was allowed on both legs (OA4). Each log line says `auth` `bearer`, with Prisma AIRS status 200. Prisma AIRS refuses a token sent beside a wrong key (K6), so the key wasn't sent. |
+| **Blocks are the same in bearer mode** | The card in a `tools/call`: blocked on the request leg, never forwarded (OA2). A Gemini reply carrying the card: blocked on the reply leg (OA5). |
+| **Each scan carries the token and nothing else** | In a Debug session of OA1 to OA5, by each step's condition result, the token's step ran before each of the 15 calls, in slots 1 to 8 for the batch, and the key's step never ran. |
+| **The token never shows in Debug** | In the same 5 transactions, the token appeared nowhere, whole or in any 16-character piece, raw or JSON-escaped, and neither did the key. Debug showed no `Authorization` header and no variable holding the token (see also L23). The session's data was deleted afterwards. |
+| **A rejected token is a scanner failure** | Through a copy that reads a second map holding a made-up token, Prisma AIRS answered 403. The request was refused, "could not scan this request", logged `failure` with "Prisma AIRS rejected the OAuth token (HTTP 403): it is wrong or expired, or its API key expired" (OB1). With `failOpen=true`, the call passed, and both legs logged that note after "failed open:" (OB2). In monitor mode it passed, logged `failed_open` (OB4). |
+| **The mode can differ by leg** | A proxy whose request leg uses API-key mode and whose reply leg uses bearer mode, on the second map: the request leg was allowed with the key and forwarded; the reply leg's scan was refused for the made-up token, and the reply was withheld (OB3). |
+| **A configuration problem refuses before any scan, even with failOpen** | `prismaAirsAuthMode=oauth` with `failOpen=true`: refused, naming the setting (OA6). Bearer mode with no `airs_bearer` in the map: refused, naming the entry, and not forwarded, though the proxy had set the token's variable itself; v3 empties it, and only the config map fills it (OO1, without `failOpen`; the same with `failOpen=true` is a unit case). |
+| **Renewal by hand needs no redeploy** | `deploy.sh --bearer-only` replaced the second map's made-up token with the real one. One runtime instance used the new token at once. The other kept sending the old one until 300 s after its own last read of the map (L24), so calls were mixed for 80 s. From then on, every call was allowed. |
+| **OAuth alone** | With `airs_auth_mode=bearer` in the config map and `airs_token` deleted from it more than five minutes before: the 60 regression rows gave the results they had in API-key mode, row for row, but one that goes to a lab probe outside v3, which reads the key itself. v3's log lines were the same in number and outcome, each saying `auth` `bearer`. |
+| **`deploy.sh` installs bearer mode from scratch** | With `AIRS_AUTH_MODE=bearer`, a token and no key in its env file, the packaged `deploy.sh` created the config map, wrote the token before the mode, and deployed the SharedFlow and the LLM example proxy, each READY. Through that example, the smoke test's harmless prompt was allowed, its card prompt was blocked before the model, and a harmless `alt=sse` stream was turned off, scanned and sent back as an event stream (EX1 to EX3), each logged `auth` `bearer`. Run again, with the fix from the review of v3.1, over that map with its mode entry removed and its token kept: it wrote the token, deployed the SharedFlow and the example, and wrote the mode last, 313 s after the token. The card prompt was then blocked, logged `auth` `bearer` (EX2). Offline, against stand-ins for gcloud, curl and sleep, it waited whenever the map held a token, or answered unclearly, and the run switched the map's mode or flow hooks' settings to bearer; and not for a first token, a mode already bearer, or none given. |
+
+**Compared with APIM's v2.2.0 fragment,** which v3.1 follows for the mode setting, the single credential header and the token's rule:
+- v3.1 refuses every request on a configuration problem, even one with nothing to scan, where APIM fails only the requests it would scan;
+- v3.1 checks the token as it is stored, where APIM trims it first, so `deploy.sh` drops the whitespace around a token before it stores it;
+- v3.1 has a monitor mode, which passes a request with a configuration problem and logs it (`config_unenforced`).
+
 ## Deployment and the example proxy
 
 | Claim | Result |
 |---|---|
 | **`deploy.sh` deploys everything it names** | The config map, the SharedFlow and the LLM example proxy, with the SharedFlow's and the map's names overridden as its options allow. Each deployment was reported READY. |
-| **The key never reaches a command line** | `deploy.sh` refuses `--airs-token` and reads the key only from its env file or the environment. It hands the key to jq through jq's environment and to curl on standard input, so no process's command line holds it; that version wrote the config map live (revision 10's run). With no valid gcloud session, it stops at once and says to sign in again. |
+| **The key and the token never reach a command line** | `deploy.sh` refuses `--airs-token` and v3.1's `--airs-bearer`, and reads the key and the token only from its env file or the environment. It hands each to jq through jq's environment and to curl on standard input, so no process's command line holds it. That version wrote the config map live (revision 10's run), and v3.1's wrote the token the same way (16 November). With no valid gcloud session, it stops at once and says to sign in again. |
 | **The LLM example proxy works as shipped** | The smoke test's harmless prompt was allowed (EX1). Its prompt with the test card was blocked before the model (EX2). A harmless `alt=sse` stream was turned off, scanned, and sent back as one event-stream burst (EX3). The example sets `target.url` only through its TargetEndpoint's URL, the form most proxies use. |
 
 ## Logging
@@ -188,15 +212,19 @@ These can't be produced on demand by a real client or tenant, or can't be produc
 - **never twice, the other cases:** a run that scanned only part of the text (`truncationFailClosed=false`) or let a gap pass leaves the leg to the other run; a reply the proxy changed after the hook's re-stream is read as the event stream it is and passed as it is; a request-leg refusal after an earlier run turned streaming off goes back in the client's stream format;
 - **a de-streamed reply v3 can't read, under `onScanError=allow`:** it passes as the model sent it, not re-streamed;
 - **an empty HTTP 200 reply with `Content-Length: 0` passes:** the lab's MCP server keeps no sessions, so it answers a `DELETE` with 405. A server that keeps sessions answers it with 200 and no body (the Python MCP SDK 1.30.0 does).
+- **v3.1, a token v3 can't send** (empty, over 4,096 characters, or with a space or a control character), **and a mistyped `airs_auth_mode` in the map:** each refused, naming the entry. These weren't run live, because the config map's 300 s cache would refuse every proxy in the environment for up to five minutes. `deploy.sh` refuses both before it writes anything; the unknown mode set by a proxy ran live (OA6);
+- **v3.1, a config map that can't be read:** refused before any scan, even when the proxy had set the credential's variable itself. The message names the token's entry when the proxy sets bearer mode, and else the key's, since the map's own mode can't be read either; the suite stands in for the failure;
+- **v3.1, the verdict cache and the circuit breaker in bearer mode:** both are keyed by the token where API-key mode uses the key. A verdict cached under the key isn't used in bearer mode, and a breaker opened in bearer mode is the token's. So a renewed token starts with no cached verdicts and a closed breaker; API-key mode's keys are unchanged;
 - **MCP error replies to a request with no body:** with `type=both`, a `GET` or `DELETE` has nothing to judge, so its reply is scanned alone; and an event stream outside 2xx to such a request on an MCP route is withheld unless `allowOpenStreams` opens it. The lab's server sends neither an error reply that `type=both` at an `apiFormat=mcp` route would meet nor an event stream outside 2xx.
 
 ## Not yet measured live
 
 - **The Responses API:** the lab project has no Responses endpoint. That leaves the allowed case, streamed tool-call arguments and the Responses block format.
+- **v3.1, an expired token, a token whose API key has expired or been deleted, and a token sent to a Prisma AIRS host in another region:** Prisma AIRS's answer to an expired token hasn't been observed yet; v3.1 reads any HTTP 401 or 403 in bearer mode as a rejected token.
 
 ## Platform facts measured on Apigee
 
-The code's comments cite these by id. All were measured on runtime 1-18-0-apigee-8.
+The code's comments cite these by id. L1 to L22 were measured on runtime 1-18-0-apigee-8, L23, L24 and L26 on 1-18-0-apigee-9.
 
 | Id | What was measured |
 |---|---|
@@ -220,6 +248,10 @@ The code's comments cite these by id. All were measured on runtime 1-18-0-apigee
 | **L20** | **The target flow hooks (a change reaches the runtime's instances one by one, so for some seconds requests may or may not see it):** the pre-target hook runs after the TargetEndpoint's request PreFlow, just before the call; the post-target hook just after the reply, before the TargetEndpoint's response flow. Neither gets a parameter; both see variables the proxy set; only the post-target hook sees a reply status. A RaiseFault inside either ends the request with its response, with the hook's `continueOnError` true or false; from the pre-target hook the server is never called. A proxy with no target runs neither. A hook change reaches the runtime 40 to 50 s after the API call (phase 3, 15 Nov). |
 | **L21** | **Changing the call from the pre-target hook:** a change to `request.content` there reaches the server. `target.url` reads as the TargetEndpoint's URL without the request's path, and a URL set there is used as it is, the path suffix no longer added (setting the bare base gave HTTP 500, "Request path cannot be empty"). v3's de-stream step already writes the whole URL, path included (phase 3, 15 Nov). |
 | **L22** | **A reply set in one SharedFlow run reads back unchanged in the next on the same leg:** after the post-target hook put a Gemini reply back into the client's stream, the proxy's own reply-leg FlowCallout found exactly what the hook had set: the SHA-256 v3 kept matched, so it read the JSON the hook kept (HM9, revision 21). |
+| **L23** | **A bearer token in Debug (16 Nov, before v3.1 was built):** a made-up value read from a config map into a `private.` variable and sent as `Authorization: Bearer` on a `private.` message reached Prisma AIRS (HTTP 403) and showed nowhere in a Debug session of 7 calls, whole or in any 16-character piece, raw or JSON-escaped; Debug showed no `Authorization` header at all. |
+| **L24** | **The config map's cache:** each runtime instance keeps an entry it has read for 300 s from its own last read. A changed entry was first read 175 and 205 s after the change on the two instances, a deleted one 185 and 226 s after; an entry added where none existed was read at once (4 s); a new revision, ready 94 s after a change, still read the old value until the same 300 s were up. |
+| **L26** | **An absent config map entry:** a KVM Get of an entry that isn't there empties the variable it assigns: one that held a value reads `null` afterwards, `private.` or not, and the Gets after it still run. An AssignVariable with an empty `<Value>` leaves `""`. |
 | **K3** | **Prisma AIRS judges only the last entry of `contents`:** with the test card in the first of two prompt entries, the scan was allowed; with the same text in one entry, it was blocked. |
 | **K4** | **A prompt sent as a separate entry before the reply is ignored:** v3 sends the prompt and the reply in one entry. |
 | **K5** | **A data pattern can mask text DLP doesn't flag (15 Nov):** "hello 1794750001" came back `allow`, `masked` true, with a masked copy ("hello" and ten X's) and the pattern "Tax Id - UK - UTR", while its `dlp` flag was false; "hello 1794750003" (no valid checksum) came back with no masked copy. On MCP, v3 refuses an allow that carries a masked copy (A24). The same timestamps spelled in letters were flagged `toxic_content` three times in four. |
+| **K6** | **Prisma AIRS and an OAuth 2.0 token (15 Nov, direct calls to the US scan API):** a token made by hand in Strata Cloud Manager was taken as it is, as `Authorization: Bearer`, with or without `x-payload-hash`. A made-up token got HTTP 403, "Invalid API Key or OAuth Token". A valid token sent beside a wrong `x-pan-token` got 403, so v3.1 sends one credential only. |

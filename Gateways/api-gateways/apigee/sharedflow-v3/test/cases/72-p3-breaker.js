@@ -20,7 +20,7 @@ const S = require('./_shapes');
 const R = require('../harness/replies');
 const KEY = 'lab-key-for-unit-tests';                                   // test/run.js's Prisma AIRS key
 const EP = 'service.api.aisecurity.paloaltonetworks.com';
-const BKEY = 'airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + KEY, 'utf8').digest('hex');
+const BKEY = 'airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + S.CRED, 'utf8').digest('hex');
 const ON = { breakerFailures: '3' };
 const NOW = Date.now();
 

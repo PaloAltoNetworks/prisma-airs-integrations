@@ -68,7 +68,7 @@ function clientGot(x) { var m = x && x.flow && x.flow.messages.response; return 
 function isStream(x) { return /text\/event-stream/.test(String(x && x.contentType)); }
 // The breaker's state for test/run.js's key, as airs3-init.js keys it.
 function breakerSeed(failures, openUntil) {
-    var c = {}; c['airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + KEY, 'utf8').digest('hex')] = JSON.stringify({ failures: failures, openUntil: openUntil });
+    var c = {}; c['airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + S.CRED, 'utf8').digest('hex')] = JSON.stringify({ failures: failures, openUntil: openUntil });
     return c;
 }
 // A stand-in for a step that doesn't finish: the value reads as `value` except on read number `n`, which throws, so the
@@ -103,9 +103,10 @@ module.exports = [
         title: 'JS-Airs3CacheKeys cut (its policy: "if it doesn\'t finish, no slot hits"): the entry an earlier cut leg wrote under the empty key, for ' +
                'other text of any proxy or tenant, answers this leg, and a prompt Prisma AIRS blocks reaches the model with no scan',
         setup: Object.assign(ask(M), { legs: ['request'], vars: { verdictCacheTtlS: '60' },
-            kvm: { airs_token: cutOnRead(2, KEY) }, cache: { '': 'scan-of-other-text' }, airs: R.answers('block-injection-agent-prompt') }),
+            kvm: S.credKvm(cutOnRead(2, S.CRED_VALUE)), cache: { '': 'scan-of-other-text' }, airs: R.answers('block-injection-agent-prompt') }),
         v3: function (r) {
             var x = r.request, l = lastLog(x, 'request');
+            if (!S.cutIn(x, 'JS-Airs3CacheKeys', 'request')) { return 'precondition: JS-Airs3CacheKeys was not cut: ' + state(x); }
             return S.check(x && x.fault, 'forwarded unscanned, answered from the empty-key entry: ' + state(x) + ', log cached ' + (l && l.cached) + ', scan_id ' + (l && l.scan_id));
         }
     },
@@ -113,9 +114,10 @@ module.exports = [
         finding: 'P3GATE-COV-KEYCUT',
         title: 'JS-Airs3CacheKeys cut, then a clean allow: the allow is written under the empty key, the entry any later cut leg reads for any text',
         setup: Object.assign(ask('hello'), { legs: ['request'], vars: { verdictCacheTtlS: '60' },
-            kvm: { airs_token: cutOnRead(2, KEY) }, airs: R.answers('allow-prompt') }),
+            kvm: S.credKvm(cutOnRead(2, S.CRED_VALUE)), airs: R.answers('allow-prompt') }),
         v3: function (r) {
             var x = r.request, bad = Object.keys(x.flow.cache).filter(function (k) { return !/^airs3-(verdict|breaker)-[0-9a-f]{64}$/.test(k); });
+            if (!S.cutIn(x, 'JS-Airs3CacheKeys', 'request')) { return 'precondition: JS-Airs3CacheKeys was not cut: ' + state(x); }
             return S.check(x && bad.length === 0, 'written under a key that is no hash of the scan: ' + JSON.stringify(bad) + ' ' + state(x));
         }
     },

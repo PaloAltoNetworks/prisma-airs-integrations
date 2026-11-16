@@ -15,7 +15,7 @@ It reads five APIs, streamed and not, tool calls included:
 
 It fails closed by default: content that Prisma AIRS can't scan, or that v3 can't inspect, is refused, not passed. The few things it passes unscanned, such as an LLM reply outside 2xx and a request with no body, are each logged ([What v3 doesn't read, refuses or passes](#what-v3-doesnt-read-refuses-or-passes)).
 
-This is v3, phases 1 to 3: phase 2 reads MCP completely, batches included, and phase 3 adds the [operations settings](#operations) and [flow hooks](#flow-hooks). It keeps V2's SharedFlow name and FlowCallout parameters, so existing proxies keep calling it, but its defaults are stricter and some answers change. Read [MIGRATION.md](MIGRATION.md) before you upgrade. V2 stays in [`../sharedflow/`](../sharedflow/).
+This is v3, phases 1 to 3: phase 2 reads MCP completely, batches included, and phase 3 adds the [operations settings](#operations) and [flow hooks](#flow-hooks). v3.1 can also authenticate to Prisma AIRS with an [OAuth 2.0 token](#oauth-20-tokens) instead of the API key. It keeps V2's SharedFlow name and FlowCallout parameters, so existing proxies keep calling it, but its defaults are stricter and some answers change. Read [MIGRATION.md](MIGRATION.md) before you upgrade. V2 stays in [`../sharedflow/`](../sharedflow/).
 
 ---
 
@@ -36,6 +36,7 @@ A proxy calls v3 the way it calls V2. What changes is what happens to its traffi
 | **Masking** | Best effort: some text went out unmasked | Exact, or the content is blocked |
 | **A setting value it can't read** | Quietly treated as `false` | Every request refused, with a message that names the setting |
 | **The Prisma AIRS key** | Shown in Apigee's Debug view | Never shown |
+| **How it authenticates to Prisma AIRS** | The API key | The API key, or an OAuth 2.0 token made from it (v3.1) |
 | **A scanner failure, as the client sees it** | HTTP 500, which the OpenAI and Anthropic SDKs retry | A refusal in the client's own format, with `x-airs-kind: failure` |
 | **Log lines** | None | One per leg in Cloud Logging, with no content and no key |
 
@@ -50,6 +51,7 @@ Each is off until you turn it on:
 | **Circuit breaker** | After a run of failures, stops calling Prisma AIRS for a cooldown; `failOpen` decides in the meantime | `breakerFailures`, `breakerCooldownS` |
 | **Verdict cache** | Keeps each allow for a time you set, up to 5 minutes, so the same text isn't scanned twice | `verdictCacheTtlS` |
 | **Flow hooks** | Scans proxies that have no FlowCallout of their own, from the environment's flow hooks | `HOOK_ROUTES` in `deploy.sh` |
+| **OAuth 2.0 tokens (v3.1)** | Sends Prisma AIRS a token made in Strata Cloud Manager instead of the API key | `AIRS_AUTH_MODE=bearer` and `AIRS_BEARER` in `deploy.sh` ([OAuth 2.0 tokens](#oauth-20-tokens)) |
 
 The cache and the breaker keep their state in the environment's cache, which every proxy deployed there shares: read [Operations](#operations) before you turn them on.
 
@@ -135,11 +137,11 @@ chmod 600 .env
 
 `deploy.sh`, in order:
 
-1. Creates the config map `airs-config` in the environment, encrypted, unless it exists, and writes its two entries, `airs_token` and `airs_profile`. It never prints the key.
+1. Creates the config map `airs-config` in the environment, encrypted, unless it exists, and writes its entries: `airs_token` (when `AIRS_TOKEN` is set) and `airs_profile`, and with an [OAuth 2.0 token](#oauth-20-tokens) `airs_bearer`, then `airs_auth_mode`. When that token replaces one already in the map and the mode switches to bearer, `airs_auth_mode` is written last, five minutes after the token. It never prints the key or the token.
 2. Imports the SharedFlow as a new revision of `PANW-AIRS` (or of `SHAREDFLOW_NAME`) and deploys it with the service account.
 3. Imports and deploys the example proxies named in `EXAMPLES` (`llm` by default), with the same service account.
 4. Waits until each deployment reports READY, up to five minutes each, and stops if one reports ERROR.
-5. With `HOOK_ROUTES` set, sets up the [flow hooks](#flow-hooks) after the SharedFlow and before the example proxies.
+5. With `HOOK_ROUTES` set, sets up the [flow hooks](#flow-hooks) after the SharedFlow and before the example proxies; or last, five minutes after a new token that replaced one, when their settings switch to bearer mode.
 6. With `APIGEE_HOST` set and `llm` in `EXAMPLES`, prints smoke-test commands for the LLM example.
 
 It asks `gcloud` for a fresh access token before each call. If `gcloud` gives none, it stops and asks you to run `gcloud auth login`.
@@ -151,7 +153,7 @@ Run it again to change the key or the profile, or to deploy a new revision: it r
 | `PROJECT` | `--project=ID` | (required) | The Google Cloud project; also the Apigee organization unless `ORG` is set |
 | `ENV` | `--env=NAME` | (required) | The Apigee environment to deploy into |
 | `SA` | `--sa=EMAIL` | (required) | The service account the SharedFlow and the example proxies run as |
-| `AIRS_TOKEN` | none | (required) | The Prisma AIRS API key. Accepted only from the env file or the environment: `--airs-token` on the command line is refused, because other users of the machine could see it. The script hands the key on to jq and curl the same way, never on their command lines, and never prints it |
+| `AIRS_TOKEN` | none | (required, unless `AIRS_AUTH_MODE=bearer`) | The Prisma AIRS API key, written as `airs_token` whenever it is set (leave it empty for the OAuth token alone). Accepted only from the env file or the environment: `--airs-token` on the command line is refused, because other users of the machine could see it. The script hands the key on to jq and curl the same way, never on their command lines, and never prints it |
 | `AIRS_PROFILE` | `--airs-profile=NAME` | (required) | The security profile: its name or its UUID |
 | `ORG` | `--org=NAME` | `PROJECT` | The Apigee organization, if it isn't the project id |
 | `KVM_NAME` | `--kvm-name=NAME` | `airs-config` | The config map's name. The SharedFlow's copy is changed to match |
@@ -161,6 +163,9 @@ Run it again to change the key or the profile, or to deploy a new revision: it r
 | `MCP_URL` | `--mcp-url=URL` | (required with `mcp`) | The MCP server the MCP example forwards to: `https://host[:port][/path]`, with no query string |
 | `APIGEE_HOST` | `--host=HOST` | none | Your environment group's host name, to print smoke-test commands |
 | `SMOKE_MODEL` | none | `gemini-3.8-flash` | The Gemini model the smoke tests name |
+| `AIRS_AUTH_MODE` | `--auth-mode=MODE` | none | `apikey` or `bearer` (v3.1), written as the config map entry `airs_auth_mode`: the mode of every proxy that sets no `prismaAirsAuthMode`. Unset leaves the entry as it is |
+| `AIRS_BEARER` | none | (required with `bearer`) | The [OAuth 2.0 token](#oauth-20-tokens), written as `airs_bearer` before `airs_auth_mode`; when it replaces a token already in the map and the mode switches to bearer, the mode is written last, five minutes after it. Accepted only from the env file or the environment, as `AIRS_TOKEN` is; whitespace around it is dropped, and the script stops, writing nothing, unless it is then 1 to 4,096 printable ASCII characters with no spaces |
+| none | `--bearer-only` | | Renewal by hand: writes only `airs_bearer`, to a config map that exists, and deploys nothing (needs `PROJECT`, `ENV` and `AIRS_BEARER`) |
 | `HOOK_ROUTES` | `--hook-routes=LIST` | none | [Flow hooks](#flow-hooks): the base paths v3 scans from the environment's hooks, comma-separated, each exactly as the proxy's base path (`/airs-llm`, no `/` at the end) |
 | `HOOK_SETTINGS` | `--hook-settings=JSON` | `{}` | Settings for those routes, a JSON object of names and values |
 | `HOOK_ATTACH` | `--hook-attach=yes\|no` | `yes` | `no` writes `airs_hook` and deploys the hook SharedFlows without attaching them, for hook points that hold a SharedFlow of yours |
@@ -281,6 +286,7 @@ v3 reads each setting from the flow variable of that name, and in [hook mode](#f
 | `currentProfile` | the config map's `airs_profile` | a profile name, or its UUID | The security profile for LLM and MCP text scans. A UUID is sent as `profile_id`, anything else as `profile_name` |
 | `toolProfile` | the profile above | a profile name, or its UUID | The profile for MCP tool events: `tools/call`, and the answer to `tools/list` |
 | `prismaAirsEndpoint` | `service.api.aisecurity.paloaltonetworks.com` | `service.api.aisecurity.paloaltonetworks.com`, or `service-XX.api.aisecurity.paloaltonetworks.com` where `XX` is a two-letter region code, such as `de` | The Prisma AIRS host for your key's region. A host name only, with no scheme or path. Any other host refuses, so the key can't be sent anywhere else |
+| `prismaAirsAuthMode` | the config map's `airs_auth_mode`, else `apikey` | `apikey`, `bearer` (spaces around it and letter case ignored) | v3.1: how v3 authenticates to Prisma AIRS. `apikey` sends the key in `x-pan-token`; `bearer` sends the config map's `airs_bearer` as `Authorization: Bearer`, and never the key. See [OAuth 2.0 tokens](#oauth-20-tokens) |
 | `appName` | `Gateway` | 1 to 64 letters, digits, spaces, `.`, `_` or `-` | Sent as `app_name`: `Apigee-<appName>` |
 | `agentId` | the request's `X-Agent-ID` header, else `x-claude-code-agent-id` | up to 100 characters | Sent as `agent_meta.agent_id`. A longer value is left out |
 | `agentVersion` | unset | text; the first 100 characters are sent | Sent as `agent_meta.agent_version`, with `agentId` |
@@ -302,11 +308,13 @@ The SharedFlow reads its entries from the environment's config map `airs-config`
 
 | Entry | Value |
 |---|---|
-| `airs_token` | The Prisma AIRS API key. It is read into `private.airs3_token`, which Apigee's Debug view never shows, and sent only to Prisma AIRS, in `x-pan-token` |
+| `airs_token` | The Prisma AIRS API key. It is read into `private.airs3_token`, which Apigee's Debug view never shows, and sent only to Prisma AIRS, in `x-pan-token`. Not needed in bearer mode |
 | `airs_profile` | The default security profile, by name or UUID. `currentProfile` overrides it |
 | `airs_hook` | Only for [flow hooks](#flow-hooks): JSON, `{"routes": [base paths], "settings": {name: value}}` |
+| `airs_bearer` | v3.1: the [OAuth 2.0 token](#oauth-20-tokens), used only in bearer mode. It is read into `private.airs3_bearer`, which Debug never shows, and sent only to Prisma AIRS, as `Authorization: Bearer` |
+| `airs_auth_mode` | v3.1: `apikey` or `bearer`, the mode of every proxy that sets no `prismaAirsAuthMode`. Any other value refuses every such proxy's requests |
 
-v3 caches them for 300 seconds, so a change can take up to five minutes to reach every request. A missing key or profile refuses every request, whatever `failOpen` says.
+Each runtime instance keeps an entry it has read for 300 seconds, so a changed or removed entry can take up to five minutes to reach every request, and a new revision doesn't make it sooner; an entry added where none was is read at once. A missing profile, in API-key mode a missing key, or in bearer mode a missing or malformed token, refuses every request, whatever `failOpen` says. The key and the token are read from the map alone: a proxy's own variable of either name is emptied first.
 
 ---
 
@@ -328,7 +336,7 @@ By default a refusal is HTTP 200 in the client's own format, so the client's SDK
 | `block` | Prisma AIRS blocked the content | "Request blocked by Prisma AIRS security policy." Then what was found and the scan ID, for example "Sensitive data (PII, credentials, secrets) detected. Scan ID: ..." |
 | `refused` | v3 can't inspect the content, and `onScanError=block` | "Prisma AIRS could not inspect this request, so it was not forwarded.", usually with the reason, such as "(its body is not JSON)" |
 | `failure` | Prisma AIRS gave no verdict and `failOpen=false`, or a step of v3 didn't finish | "Prisma AIRS could not scan this request, so it was not forwarded." |
-| `config` | A setting v3 can't read, a missing key or profile, or a FlowCallout in the wrong place for streaming | "Prisma AIRS is not configured correctly, so it refused this request. Check the setting: failOpen.", for example |
+| `config` | A setting v3 can't read, a missing profile, a missing key (API-key mode) or token (bearer mode), or a FlowCallout in the wrong place for streaming | "Prisma AIRS is not configured correctly, so it refused this request. Check the setting: failOpen.", for example |
 
 On the reply leg, the `block`, `refused` and `failure` messages say "Response blocked" and "so it was withheld"; a `config` message reads the same on both legs. Allowed and masked traffic carries no `x-airs-*` header.
 
@@ -570,7 +578,7 @@ v3 writes one line per leg to Cloud Logging, from inside the SharedFlow (`ML-Air
 The blocked smoke test below logs a line of this form:
 
 ```text
-{"v":"panw-airs-v3","leg":"request","mode":"enforce","hook":false,"format":"gemini","route":"scan","stream":"none","outcome":"block","kind":"block","detections":"prompt.dlp","scan_id":"<scan id>","airs_status":"200","transaction_id":"<transaction id>","chars":"58","scans":"1","retries":0,"cached":0,"masked":false,"destreamed":"","ms":<milliseconds>,"note":""}
+{"v":"panw-airs-v3","leg":"request","mode":"enforce","auth":"apikey","hook":false,"format":"gemini","route":"scan","stream":"none","outcome":"block","kind":"block","detections":"prompt.dlp","scan_id":"<scan id>","airs_status":"200","transaction_id":"<transaction id>","chars":"58","scans":"1","retries":0,"cached":0,"masked":false,"destreamed":"","ms":<milliseconds>,"note":""}
 ```
 
 | Field | Value |
@@ -578,6 +586,7 @@ The blocked smoke test below logs a line of this form:
 | `v` | `panw-airs-v3` |
 | `leg` | `request` or `response` |
 | `mode` | `enforce`, or `monitor` (see [Operations](#operations)) |
+| `auth` | `apikey` or `bearer` (v3.1): the credential this leg's scans carried, or would have carried on a refusal before any scan. `apikey` when the mode setting itself was refused. Empty on a leg v3 passed before choosing the credential (already scanned on this leg; hook mode with no readable `airs_hook`), and when `JS-Airs3Init` didn't finish |
 | `hook` | `true` when a [flow hook](#flow-hooks) ran v3 |
 | `format` | `openai-chat`, `openai-responses`, `anthropic`, `gemini`, `mcp`, `count-tokens` or `unknown`. An MCP GET for an event stream is `mcp` |
 | `route` | `scan`, `pass`, `refuse` or `mcp405` |
@@ -609,9 +618,9 @@ Four settings from MuleSoft's policy, each off by default.
 
 - **Monitor mode** (`enforcementMode=monitor`), for a first rollout: v3 scans as usual and logs what it would have done, but nothing is refused or masked, an MCP GET for an event stream isn't answered 405, and every scan of a leg runs (an MCP part v3 can't inspect is passed over, logged, and the rest scanned). Streaming is still turned off on the way to the model and back on for the client, so replies are read, whatever let the leg pass. A value of `enforcementMode` itself that v3 can't read refuses, so the mode is never guessed. It takes any letter case, as v3's other choices do (MuleSoft takes only lowercase).
 - **A retry** (`scanRetries=1`): one more call after no answer, HTTP 429 or a 5xx; never after a verdict or any other 4xx. Each try can take 5 seconds, so on a leg of 8 scans an unreachable Prisma AIRS can add 80 seconds. The circuit breaker bounds that for later legs only: it is read once per leg, so the leg that meets the outage still makes its calls (MuleSoft asks it before each call).
-- **A circuit breaker** (`breakerFailures`, `breakerCooldownS`): after that many scanner failures in a row, Prisma AIRS isn't called for the cooldown, and each leg is a scanner failure that `failOpen` decides. After the cooldown, the next leg's calls are a trial: an answer closes it, a failure opens it again. With `failOpen=true` such a leg passes as any failure under `failOpen` does, streaming turned off and back on. Its state sits in the environment's cache under a hash of the endpoint and the key, so tenants never share one. It is read once per leg, and legs that run at once may count from the same state. A 400 or 413 (Prisma AIRS refusing the content) resets the count, where MuleSoft counts it as a failure: the state is shared by every proxy on the tenant, so one client's content would otherwise open it for all of them.
-- **A verdict cache** (`verdictCacheTtlS`): each allow is kept for the TTL under a SHA-256 of everything that can change it (the key, the endpoint, the profile, the leg, the size settings and the text), so a repeated scan isn't sent again. Blocks, failures and allows that carry a masked copy are never kept, and the cache is off with `applyDlpMasking=true`. A profile change in Strata Cloud Manager reaches cached text only when its entry expires. A scan answered from the cache leaves no new record in Prisma AIRS; v3's log line counts it in `cached`. Inside a SharedFlow the cache is shared by every proxy that calls it (L19); the key keeps tenants and profiles apart.
-- **Trust:** the config map, the verdict cache and the breaker's state belong to the environment. Any proxy deployed there can read the Prisma AIRS key from the config map and write entries under v3's cache keys: an allow for text it chooses, or an open breaker. MuleSoft keeps both in each worker's memory. Deploy v3 only in an environment whose proxies, and whoever deploys them, you trust with the key.
+- **A circuit breaker** (`breakerFailures`, `breakerCooldownS`): after that many scanner failures in a row, Prisma AIRS isn't called for the cooldown, and each leg is a scanner failure that `failOpen` decides. After the cooldown, the next leg's calls are a trial: an answer closes it, a failure opens it again. With `failOpen=true` such a leg passes as any failure under `failOpen` does, streaming turned off and back on. Its state sits in the environment's cache under a hash of the endpoint and the key (in bearer mode, the token, so a renewed token starts with a closed breaker), so tenants never share one. It is read once per leg, and legs that run at once may count from the same state. A 400 or 413 (Prisma AIRS refusing the content) resets the count, where MuleSoft counts it as a failure: the state is shared by every proxy on the tenant, so one client's content would otherwise open it for all of them.
+- **A verdict cache** (`verdictCacheTtlS`): each allow is kept for the TTL under a SHA-256 of everything that can change it (the key or, in bearer mode, the token; the endpoint, the profile, the leg, the size settings and the text), so a repeated scan isn't sent again, and a renewed token starts with an empty cache. Blocks, failures and allows that carry a masked copy are never kept, and the cache is off with `applyDlpMasking=true`. A profile change in Strata Cloud Manager reaches cached text only when its entry expires. A scan answered from the cache leaves no new record in Prisma AIRS; v3's log line counts it in `cached`. Inside a SharedFlow the cache is shared by every proxy that calls it (L19); the key keeps tenants and profiles apart.
+- **Trust:** the config map, the verdict cache and the breaker's state belong to the environment. Any proxy deployed there can read the Prisma AIRS key and, whenever one is stored, the OAuth token, from the config map and write entries under v3's cache keys: an allow for text it chooses, or an open breaker. MuleSoft keeps both in each worker's memory. Deploy v3 only in an environment whose proxies, and whoever deploys them, you trust with the key and the token.
 
 ---
 
@@ -628,6 +637,47 @@ For proxies with no FlowCallout of their own, v3 can run from the environment's 
 - **Removing:** detach both hooks (in the Apigee console under Environments, Flow hooks, or with the `flowhooks` API), then delete `airs_hook`. Detach them before you undeploy v3 or the hook SharedFlows.
 
 ---
+
+## OAuth 2.0 tokens
+
+v3.1 can authenticate to Prisma AIRS with an OAuth 2.0 token instead of the API key. It is off until you turn it on: in API-key mode, the default, v3.1 sends what v3 sends. In bearer mode every scan call carries `Authorization: Bearer <token>` and no `x-pan-token`, since Prisma AIRS refuses a call that carries a valid token beside a wrong key ([VERIFICATION.md](VERIFICATION.md), K6). Scans, verdicts, masking, profiles and quotas are the same in both modes, and Prisma AIRS logs the scans under the API key the token was made from.
+
+### Turn it on
+
+1. **Make a token** in Strata Cloud Manager: **AI Security > API Applications > Manage** (top right) **> API Keys**, select an API key, then **Generate Token for OAuth 2.0** (a small control, easy to miss). Pick a lifetime from 1 hour to 30 days (24 hours by default) and select **Generate Token**. Copy it now: it is shown once. A Superuser can make tokens; other roles may not.
+2. **Store it** with `deploy.sh`: put `AIRS_BEARER=<token>` and `AIRS_AUTH_MODE=bearer` in the env file and run `./deploy.sh --env-file=.env`. It checks both first, then writes the token (`airs_bearer`), then the mode (`airs_auth_mode`). If the map already held a token, what the run switches to bearer mode (the map's mode, or flow hooks whose `HOOK_SETTINGS` say bearer) comes last, five minutes after the token, so no runtime instance sends the old token in bearer mode. For the token alone, leave `AIRS_TOKEN` empty (see OAuth alone below).
+3. **Or try one proxy first:** leave `AIRS_AUTH_MODE` unset, store the token, and set `prismaAirsAuthMode=bearer` on that proxy's two FlowCallouts. A proxy's setting wins over the config map's.
+
+A first token is read at once. If the map already held a token, wait five minutes after you store the new one before you switch a proxy to bearer mode yourself (step 3), so every runtime instance has it. `deploy.sh` does that wait itself when it switches the map's mode.
+
+**OAuth alone:** while `airs_token` is in the map, a proxy with `prismaAirsAuthMode=apikey` still sends the key, because `airs_auth_mode` is only a default. To use the token alone, delete `airs_token` from the config map, and empty `AIRS_TOKEN` in your env file, or the next full deploy writes the key back.
+
+**Going back:** switch the mode to `apikey` first, with the key in the map, wait five minutes, then remove the token.
+
+### Renewal by hand
+
+- Before a token expires, make a new one, put it in `AIRS_BEARER`, and run `./deploy.sh --env-file=.env --bearer-only`. It writes only `airs_bearer` and deploys nothing.
+- Each runtime instance keeps an entry it has read for 300 seconds, and a new revision doesn't refresh it (VERIFICATION.md, L24). So the new token is in use within about five minutes, and until then some calls still carry the old one: renew at least ten minutes before the old one expires.
+- Prisma AIRS documents no way to revoke a token, so keep lifetimes as short as your routine allows. A token also stops working when its API key expires.
+- Automatic renewal, with a Strata Cloud Manager service account fetching tokens, is not in v3.1.
+
+### When the token fails
+
+- **A wrong token:** Prisma AIRS answers 403. In bearer mode v3.1 treats a 401 or 403 as a rejected token, a scanner failure: by default the request is refused (`x-airs-kind: failure`; MCP `-32003`), and the log line's note says `Prisma AIRS rejected the OAuth token`. Clients never see Prisma AIRS's own text. An expired token is expected to get the same answer, but that hasn't been observed yet.
+- **With `failOpen=true`, an expired token lets every request through unscanned** until it is renewed. Each one is logged: watch the notes, or note each token's expiry when you make it.
+- **A missing or malformed token, or an unknown mode,** refuses every request, whatever `failOpen` says, with a message that names the setting or the config map entry and never its value. Monitor mode logs it as `config_unenforced` and scans nothing.
+- The token is checked as stored: 1 to 4,096 printable ASCII characters, no spaces. `deploy.sh` drops the whitespace around it before storing it.
+
+### What was tested
+
+Live on Apigee X with a one-day token (details in [VERIFICATION.md](VERIFICATION.md#v31-oauth-20-tokens)):
+- **The token alone:** with a made-up key in the config map, MCP calls and Gemini prompts were scanned and allowed on both legs, a batch of 8 got 8 scans, and the test card was blocked on the request leg and in a Gemini reply.
+- **No key at all:** with the key deleted from the map, the earlier regression rows gave their API-key results (59 of 60; the 60th goes to a lab probe outside v3 that reads the key itself), and `deploy.sh` installed bearer mode from scratch, with the example proxy.
+- **Failures:** a made-up token was refused as a scanner failure, and passed, logged, with `failOpen=true` and in monitor mode. An unknown mode was refused before any scan, even with `failOpen=true`, and so was bearer mode with no token in the map (with `failOpen=true` in the unit tests).
+- **Renewal:** `deploy.sh --bearer-only` reached every runtime instance within five minutes, with no redeploy.
+- **Debug** never showed the token, whole or in part.
+
+Not tested: an expired token, a token whose API key has expired, and Prisma AIRS hosts outside the US.
 
 ## Validation
 
@@ -695,7 +745,7 @@ The last line reads `v3: <n> pass, 0 fail, <n> with no v3 expectation`. [test/RE
 3. **Metadata:** `ai_model` is the body's `model`, else the model named in the path, else `unknown`. `app_user` is the `x-user-id` header, up to 100 characters, else `apigee`. `agent_meta` is sent when `agentId` is set.
 4. **The profile:** a UUID is sent as `ai_profile.profile_id`, any other value as `ai_profile.profile_name`.
 5. **One `contents` entry per scan:** the prompt, the reply with the prompt as context, an MCP tool event, or MCP text as a prompt with no context.
-6. **The API key** sits only in the encrypted config map and in `private.airs3_token`. The scan request that carries it is the message `private.airs3_scan` (`private.airs3_scan2` to `private.airs3_scan8` for the other scan slots), so Debug shows the key nowhere: measured live (VERIFICATION.md). The key is never logged.
+6. **The API key and the OAuth token** sit only in the encrypted config map and in `private.airs3_token` and `private.airs3_bearer`. The scan request that carries one is the message `private.airs3_scan` (`private.airs3_scan2` to `private.airs3_scan8` for the other scan slots), so Debug shows neither: measured live for the key, and for a made-up value sent as `Authorization: Bearer` (VERIFICATION.md, L23). Neither is ever logged.
 7. **TLS:** the call to `https://<prismaAirsEndpoint>/v1/scan/sync/request` checks the certificate strictly (`SSLInfo` with `Enforce=true`), with no trust store of your own (L5). A certificate failure is a scanner failure.
 8. **Timeout:** 5 seconds per scan, set in each slot's ServiceCallout: `SC-Airs3Scan.xml`, and `SC-Airs3Scan2.xml` to `SC-Airs3Scan8.xml`. Change all eight together. `scanRetries=1` adds one more try after no answer, a 429 or a 5xx ([Operations](#operations)).
 9. **Fails closed by default:** no verdict refuses (`failOpen=false`), and content v3 can't inspect is refused (`onScanError=block`). Every pass that a setting allows is logged.
@@ -721,9 +771,9 @@ The last line reads `v3: <n> pass, 0 fail, <n> with no v3 expectation`. [test/RE
 
 | Symptom | Cause |
 |---|---|
-| Every request: "Prisma AIRS is not configured correctly, so it refused this request. Check the setting: X." (`x-airs-kind: config`; MCP `-32003`) | Setting X has a value v3 can't read, or the config map lacks `airs_token` or `airs_profile`. The message names the setting, never its value |
+| Every request: "Prisma AIRS is not configured correctly, so it refused this request. Check the setting: X." (`x-airs-kind: config`; MCP `-32003`) | Setting X has a value v3 can't read, or the config map lacks `airs_profile`, or `airs_token` in API-key mode, or a valid `airs_bearer` in bearer mode, or holds an `airs_auth_mode` other than `apikey` or `bearer`. The message names the setting or the entry, never its value. If the config map can't be read at all, it names `airs_token` unless the proxy sets bearer mode |
 | "Prisma AIRS could not turn streaming off for this call: the request leg must run in the TargetEndpoint PreFlow." | The request-leg FlowCallout runs in the ProxyEndpoint. Move it to the TargetEndpoint PreFlow |
-| "Prisma AIRS could not scan this request" (`x-airs-kind: failure`; MCP `-32003`) | Prisma AIRS was unreachable, took over 5 seconds, answered an error status other than 400 or 413, or gave no clean verdict; or a step of v3 didn't finish. The log line's `airs_status` says which: `none` means no answer, `403` a wrong key or a key from another region |
+| "Prisma AIRS could not scan this request" (`x-airs-kind: failure`; MCP `-32003`) | Prisma AIRS was unreachable, took over 5 seconds, answered an error status other than 400 or 413, or gave no clean verdict; or a step of v3 didn't finish. The log line's `airs_status` says which: `none` means no answer, `403` a wrong key or a key from another region. In bearer mode the note says `Prisma AIRS rejected the OAuth token (HTTP 401` or `403)`: the token is wrong or expired, its API key expired, or, as with a key, the host is another region's ([OAuth 2.0 tokens](#oauth-20-tokens)) |
 | "Prisma AIRS could not inspect this request (...)" (`x-airs-kind: refused`) | The reason is in the brackets. "an endpoint it does not read": check the path, or set `apiFormat` |
 | HTTP 403 with `"type":"prisma_airs_refused"` | An endpoint v3 doesn't read |
 | A streamed reply is withheld: "could not inspect this response" | The reply came back as an event stream: the request leg didn't run in the TargetEndpoint PreFlow, a later step set `target.url` back, or the path suffix doesn't show the stream method. Or an MCP server replied with an event stream |
@@ -750,15 +800,15 @@ The steps of [`sharedflows/default.xml`](PANW-AIRS/sharedflowbundle/sharedflows/
 
 | # | Step | Runs when | What it does |
 |---|---|---|---|
-| 1 | `AM-Airs3Reset` | Always, first | Sets every done flag, slot flag, retry flag and cache flag to false, and the mode to enforce, so each leg starts clean |
-| 2 | `KVM-GetAIRSConfig` | Always | Reads `airs_token` into `private.airs3_token`, `airs_profile` into `airs3.kvmProfile`, and `airs_hook` into `airs3.kvmHook` |
-| 3 | `JS-Airs3Init` | Always | In hook mode, whether this proxy is listed and no run has enforced a verdict on the leg yet; on the reply leg, the JSON an earlier run kept when it put the reply back into a stream; then the leg, every setting (strictly), the endpoint, the profile and the ids |
+| 1 | `AM-Airs3Reset` | Always, first | Sets every done flag, slot flag, retry flag and cache flag to false, and the mode to enforce, so each leg starts clean; empties both credential variables, so the config map is their only source |
+| 2 | `KVM-GetAIRSConfig` | Always | Reads `airs_token` into `private.airs3_token`, `airs_profile` into `airs3.kvmProfile`, `airs_hook` into `airs3.kvmHook`, and (v3.1) `airs_bearer` into `private.airs3_bearer` and `airs_auth_mode` into `airs3.kvmAuthMode` |
+| 3 | `JS-Airs3Init` | Always | In hook mode, whether this proxy is listed and no run has enforced a verdict on the leg yet; on the reply leg, the JSON an earlier run kept when it put the reply back into a stream; then the leg, every setting (strictly), the endpoint, the profile, the credential and the ids |
 | 4 | `JS-Airs3Detect` | After Init, unless Init passed the leg (an unlisted route, or never twice) | The API, the stream kind, the MCP method and id, and the route: `scan`, `pass`, `refuse` or `mcp405` |
 | 5 | `AM-Airs3StripEncoding` | Request leg, a scan | Removes `Accept-Encoding` from the forwarded request, so a reply v3 rewrites is never compressed |
 | 6 | `JS-Airs3Read` | A scan | The scan text, the size limit and the scan request body |
 | 6a | `JS-Airs3CacheKeys`, then `LC-Airs3Verdict` and `LC-Airs3Verdict<k>`, then `JS-Airs3CacheHits` | A scan, the verdict cache on; the lookups and the hits only once every key was made | Each scan's key, each slot's lookup, then the slots this leg's own lookups answered |
 | 6b | `LC-Airs3Breaker`, `JS-Airs3BreakerCheck` | A scan, the circuit breaker on | While it is open, no call: the leg is a scanner failure |
-| 7 | `AM-Airs3ScanRequest` | A scan | The scan request, in the message `private.airs3_scan`, with `x-pan-token` |
+| 7 | `AM-Airs3ScanRequest`, or in bearer mode `AM-Airs3ScanBearer` | A scan | The scan request, in the message `private.airs3_scan`, with `x-pan-token`, or in bearer mode with `Authorization: Bearer` and no `x-pan-token`. The two steps' conditions are opposites, so exactly one builds each call's message |
 | 8 | `AM-Airs3ClearScan` | A scan | A new `airs3ScanResponse`, so a leg that gets no answer never reads the other leg's. Apigee gives a new message status 200 and no body (L14), and the call's failed flag then marks it as no answer |
 | 9 | `SC-Airs3Scan` | A scan, not answered by the cache | Calls Prisma AIRS: 5-second timeout, strict TLS, `continueOnError=true` |
 | 9r | `JS-Airs3Retry<k>`, then the slot's clear and call steps again | `scanRetries=1`, no answer, 429 or a 5xx | One more try, the same callout |

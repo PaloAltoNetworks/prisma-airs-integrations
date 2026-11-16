@@ -10,7 +10,7 @@
     var SETTINGS = { failOpen: 1, failClosedOnUnknown: 1, onScanError: 1, scanMessageRoles: 1, maxScanChars: 1, truncationFailClosed: 1,
                      applyDlpMasking: 1, forceClaudeCode: 1, mcpBatchLimit: 1, allowOpenStreams: 1, blockStatus: 1, appName: 1, agentId: 1,
                      agentVersion: 1, airsDescriptions: 1, prismaAirsEndpoint: 1, currentProfile: 1, toolProfile: 1, enforcementMode: 1,
-                     scanRetries: 1, breakerFailures: 1, breakerCooldownS: 1, verdictCacheTtlS: 1 };
+                     scanRetries: 1, breakerFailures: 1, breakerCooldownS: 1, verdictCacheTtlS: 1, prismaAirsAuthMode: 1 };
     var hookSettings = null;
     function raw(name) {
         // Hook mode: a setting comes from airs_hook alone. A hook sees every variable the proxy set (L20), and a FlowCallout's
@@ -199,9 +199,29 @@
     if (profile === null) { problems.push('the profile (config map entry airs_profile)'); }
     AIRS3.set('profile', profile || '');
     AIRS3.set('toolProfile', raw('toolProfile') || profile || '');
-    if (raw('private.airs3_token') === null) { problems.push('the Prisma AIRS key (config map entry airs_token)'); }
-    // The breaker's cache key: SHA-256 of the endpoint and the API key (L18), so tenants never share one, and the key is not stored.
-    if (bf > 0) { var bh = crypto.getSHA256(); bh.update(ep + '\n' + (raw('private.airs3_token') || '')); AIRS3.set('breakerKey', 'airs3-breaker-' + bh.digest()); }
+    // The credential (v3.1): prismaAirsAuthMode from the proxy (in hook mode from airs_hook alone), else the config map's
+    // airs_auth_mode, else apikey. Bearer mode sends the config map's airs_bearer, checked as stored: 1 to 4,096 printable
+    // ASCII characters and no spaces (APIM v2.2.0's rule), so a bad value can't add a header. It is never trimmed or written.
+    var auth = 'apikey', cred = '';
+    if (raw('prismaAirsAuthMode') !== null) { auth = oneOf('prismaAirsAuthMode', 'apikey', ['apikey', 'bearer']); }
+    else if (raw('airs3.kvmAuthMode') !== null) {
+        var km = raw('airs3.kvmAuthMode').toLowerCase();
+        if (km === 'apikey' || km === 'bearer') { auth = km; } else { problems.push('the config map entry airs_auth_mode'); }
+    }
+    AIRS3.set('authMode', auth);
+    if (auth === 'bearer') {
+        var tk = context.getVariable('private.airs3_bearer');
+        tk = tk === null || tk === undefined ? '' : String(tk);
+        if (!/^[\x21-\x7e]{1,4096}$/.test(tk)) { problems.push('the Prisma AIRS OAuth token (config map entry airs_bearer)'); }
+        cred = 'bearer:' + tk;
+    } else {
+        var key = raw('private.airs3_token');            // read once, as each credential is read once here
+        if (key === null) { problems.push('the Prisma AIRS key (config map entry airs_token)'); }
+        cred = key || '';
+    }
+    // The breaker's cache key: SHA-256 of the endpoint and the credential (L18), the API key or, in bearer mode, 'bearer:' and
+    // the token: tenants never share one, a renewed token starts afresh, and no credential is stored.
+    if (bf > 0) { var bh = crypto.getSHA256(); bh.update(ep + '\n' + cred); AIRS3.set('breakerKey', 'airs3-breaker-' + bh.digest()); }
 
     // Ids: never cut (L12). Mcp-Session-Id is read only on MCP, once airs3-detect.js knows the format.
     AIRS3.set('txnId', AIRS3.firstId(['request.header.x-correlation-id', 'request.header.x-request-id', 'messageid']));

@@ -42,7 +42,7 @@ const C = S.CARD, M = 'AIRSV3-MARKER';
 const KEY = 'lab-key-for-unit-tests';                                   // test/run.js's Prisma AIRS key
 const EP = 'service.api.aisecurity.paloaltonetworks.com';
 const PROFILE = { profile_name: 'PROFILE_NAME' };                          // test/run.js's config map profile
-const BKEY = 'airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + KEY, 'utf8').digest('hex');
+const BKEY = 'airs3-breaker-' + crypto.createHash('sha256').update(EP + '\n' + S.CRED, 'utf8').digest('hex');
 const HOOK_REQ = { hookMode: 'request' };
 const LISTED = { airs_hook: JSON.stringify({ routes: ['/lab'], settings: {} }) };     // the harness's proxy.basepath is /lab
 
@@ -70,7 +70,7 @@ function gotStream(x, text) { return !!(x && !x.fault && /event-stream/.test(Str
 function openBreaker() { var c = {}; c[BKEY] = JSON.stringify({ failures: 3, openUntil: Date.now() + 60000 }); return c; }
 // The verdict cache's key, as 73-p3-cache.js specifies it.
 function vcKey(leg, contents) {
-    var parts = ['airs3-vc-1', KEY, EP, JSON.stringify(PROFILE), leg, '100000', 'true', JSON.stringify(contents)];
+    var parts = ['airs3-vc-1', S.CRED, EP, JSON.stringify(PROFILE), leg, '100000', 'true', JSON.stringify(contents)];
     return 'airs3-verdict-' + crypto.createHash('sha256').update(parts.map(function (p) { return p.length + ':' + p; }).join(''), 'utf8').digest('hex');
 }
 function seed(pairs) { var c = {}; pairs.forEach(function (p) { c[p[0]] = p[1]; }); return c; }

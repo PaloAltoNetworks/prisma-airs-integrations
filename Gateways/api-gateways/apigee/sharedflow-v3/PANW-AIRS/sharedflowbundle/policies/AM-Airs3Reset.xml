@@ -9,6 +9,12 @@
      An AssignMessage: no time limit can cut it, and if it fails Apigee refuses the call itself. -->
 <AssignMessage continueOnError="false" enabled="true" name="AM-Airs3Reset">
   <DisplayName>AM-Airs3Reset</DisplayName>
+  <!-- v3.1: both credentials come from the config map alone. A proxy's own variable of either name is emptied here, and
+       KVM-GetAIRSConfig then reads the map (an absent entry leaves the variable empty, L26). -->
+  <AssignVariable><Name>private.airs3_token</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>private.airs3_bearer</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.kvmAuthMode</Name><Value></Value></AssignVariable>
+  <AssignVariable><Name>airs3.authMode</Name><Value></Value></AssignVariable>
   <AssignVariable><Name>airs3.doneInit</Name><Value>false</Value></AssignVariable>
   <AssignVariable><Name>airs3.doneDetect</Name><Value>false</Value></AssignVariable>
   <AssignVariable><Name>airs3.doneRead</Name><Value>false</Value></AssignVariable>

@@ -21,6 +21,7 @@ node test/run.js --v3
 | `node test/run.js` | Every case's V2 expectation, against V2's bundle in `../sharedflow/PANW-AIRS/sharedflowbundle/` |
 | `node test/run.js --v3 --only A01` | Only the cases whose label is exactly `A01` (any label works, such as `MS-batch`) |
 | `node test/run.js --v3 --file 30-verdict-and-config.js` | Only the cases in one file of `cases/` |
+| `node test/run.js --v3 --auth=bearer` | Every case again in bearer mode (v3.1): the config map holds an OAuth token and `airs_auth_mode=bearer`, no key. Cases about the key itself (`apikeyOnly`) or about the mode (82's) are left out and counted |
 | `node test/debug.js "<part of a title>" v3` | One case, by part of its title, with what each leg scanned, its route, its refusal message and any script error (`v2` for V2's bundle) |
 
 The suite needs Node.js only: no packages, no cloud account and no Prisma AIRS key.
@@ -35,9 +36,10 @@ The exit code is 0 when every case passes, 1 when a case fails, and 2 when the b
 
 **On V2,** a case passes when V2 shows the defect the case describes. A clean run on V2 therefore shows that the suite can see each defect it tests, and the same cases passing on v3 show the defects fixed.
 
-**On v3,** two more rules apply:
+**On v3,** three more rules apply:
 
 - **Variable names:** the harness throws on any flow variable whose name extends another, in either order. Apigee silently drops such a variable (L6), so v3 must never set one. V2 runs under Apigee's own rule instead, where the variable is dropped.
+- **One credential, never outside `private.`:** every call to Prisma AIRS carries exactly the run's credential: `x-pan-token` with the key, or with `--auth=bearer` `Authorization: Bearer` with the token, never both. Neither shows in any variable outside `private.`, any header or body of a message not named `private.*`, or any log line, searched by substring (`secretLeaks` in the harness). 82's cases check their own.
 - **No silent leg:** each leg, and each run of `setup.runs`, must end with a scan, a refusal, or a pass on an explicit route. One that ends with none of them fails its case, unless the verdict cache answered every scan it made (phase 3), judged by its own counts, read when it ends.
 
 ---
@@ -55,7 +57,7 @@ The exit code is 0 when every case passes, 1 when a case fails, and 2 when the b
 
 `harness/xml.js` reads the bundle's XML. Anything it doesn't understand stops the run, so a bundle never runs half-read. `harness/replies.js` loads the recorded replies.
 
-Each case runs the legs it names on one flow: the request leg with `type=user-prompt`, then, unless the request leg stopped, the reply leg with `type=response-prompt`. A case with `setup.runs` runs the SharedFlow once per entry instead, in order, each with its own leg and parameters, as a flow hook's run and a proxy's FlowCallout share one exchange. The config map holds a test key and the profile name `PROFILE_NAME`.
+Each case runs the legs it names on one flow: the request leg with `type=user-prompt`, then, unless the request leg stopped, the reply leg with `type=response-prompt`. A case with `setup.runs` runs the SharedFlow once per entry instead, in order, each with its own leg and parameters, as a flow hook's run and a proxy's FlowCallout share one exchange. The config map holds a test key and the profile name `PROFILE_NAME` (with `--auth=bearer`, a test token and `airs_auth_mode=bearer` instead of the key). An absent entry empties the variable it is read into, as Apigee does (L26), and `setup.kvmFails` stands in for a config-map step that fails as a whole.
 
 The harness runs the JavaScript in Node.js, not in Apigee's Rhino engine, and doesn't model everything a runtime does. [VERIFICATION.md](../VERIFICATION.md) records what a live Apigee did.
 
@@ -134,8 +136,10 @@ A title that cites a measurement id, such as L1 or K3, refers to a measurement o
 | `69-non2xx-review.js` | The review of that change: `type=both` with a request with no body, an event stream to such a request, and the id of a refused client reply (P2NR-*) |
 | `75-p3gate-coverage.js` to `79-p3gate-fixes.js` | The review of phase 3: four reviewers' cases (coverage, Apigee realism, MuleSoft conformance, completeness), and the cases for what their fixes changed (P3GATE-*) |
 | `70-p3-monitor.js` to `74-p3-hooks.js` | Phase 3: monitor mode, the retry, the circuit breaker, the verdict cache and flow hooks. The cache and breaker cases fill the cache first and read it back; the hook cases run v3 several times on one flow |
+| `80-p3fix-correctness.js`, `81-p3fix-completeness.js` | The review of phase 3's fixes (P3FIX-*) |
+| `82-v31-oauth.js` | v3.1, OAuth 2.0 tokens: the mode and where it comes from, the token's rule, one credential on every slot and retry, a rejected token, the cache and breaker keys, the log's `auth`, and leaks (V31-*) |
 | `99-leg-and-empty-reply.js` | A `type` that doesn't match the leg, and a reply with no body that says so |
-| `_shapes.js` | Request and reply builders the cases share. Files that start with `_` are not case files |
+| `_shapes.js` | Request and reply builders the cases share; `CRED`, the credential the cache and breaker keys hash in the run; `credKvm`, which puts a stand-in in the config map entry of the run's credential, so a cut case reaches its cut in either mode; `cutIn`, which checks that a case's stand-in cut the step it is about; and `sameStream`, which compares two re-streamed bodies but for each chunk's `created` time. Files that start with `_` are not case files |
 
 ---
 

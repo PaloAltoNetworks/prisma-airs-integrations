@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Scan slot 2, bearer mode (v3.1): the scan request as AM-Airs3ScanBearer's, a private. message with the OAuth token
+     as Authorization: Bearer and no x-pan-token. Its step's condition is the exact opposite of AM-Airs3ScanRequest2's. -->
+<AssignMessage continueOnError="false" enabled="true" name="AM-Airs3ScanBearer2">
+  <DisplayName>AM-Airs3ScanBearer2</DisplayName>
+  <AssignTo createNew="true" transport="http" type="request">private.airs3_scan2</AssignTo>
+  <Set>
+    <Verb>POST</Verb>
+    <Headers>
+      <Header name="Content-Type">application/json</Header>
+      <Header name="Authorization">Bearer {private.airs3_bearer}</Header>
+    </Headers>
+    <Payload contentType="application/json">{airs3.scanBody2}</Payload>
+  </Set>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

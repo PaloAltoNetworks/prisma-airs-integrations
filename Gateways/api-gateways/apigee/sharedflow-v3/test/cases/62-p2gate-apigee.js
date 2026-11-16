@@ -73,7 +73,7 @@ module.exports = [
 
     /* ================================ guards (pass today) ================================ */
     {
-        finding: 'P2GATE-G1',
+        finding: 'P2GATE-G1', apikeyOnly: true,           // about the key itself; its bearer twin is V31-WIRE's 8-member batch (82)
         title: 'Guard: every slot of an 8-member batch calls Prisma AIRS as slot 1 does: the key only on a private. message, Enforce=true, ' +
                'the 5,000 ms timeout and the same scan URL (A25, A26 for slots 2 to 8; Debug was measured live on slots 1 to 3 only)',
         setup: Object.assign(rpc(calls(8)), { legs: ['request'], airs: R.answers('allow-tool') }),

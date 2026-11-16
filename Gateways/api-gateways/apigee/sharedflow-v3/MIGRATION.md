@@ -176,6 +176,15 @@ v3 holds the key only in `private.airs3_token` and sends it on the message `priv
 
 ---
 
+## v3 to v3.1
+
+Nothing to change. In API-key mode, the default, v3.1 sends Prisma AIRS the same requests as v3 and gives clients the same answers.
+
+- **New, optional:** an OAuth 2.0 token in place of the API key ([OAuth 2.0 tokens](README.md#oauth-20-tokens)): the setting `prismaAirsAuthMode`, the config map entries `airs_bearer` and `airs_auth_mode`, and in `deploy.sh` `AIRS_AUTH_MODE`, `AIRS_BEARER` and `--bearer-only`.
+- **Seen in API-key mode too:** each log line gains `auth`. The key is read only from the config map, as the README already said: v3.1 empties `private.airs3_token` before it reads the map, so a proxy's own variable of that name is never sent. The bundle has 87 policies, 8 more than v3.
+
+---
+
 ## The findings, A01 to A39
 
 A review of V2 found these defects: by running V2's own scripts offline with harmless marker text, by reading its code, and from Google's documentation. v3's three phases, this release, address A01 to A39. The unit suite has a case for each of A01 to A31 and A39, except A20: its V2 expectation shows the defect on V2's bundle, and its v3 expectation shows it fixed. A31's own case, the LLM reply decided in phase 3 (it passes unscanned, logged), has a v3 expectation too, and its MCP half has v3 cases (`P2NON2XX`); A20's rule is pinned by v3-only cases ([test/README.md](test/README.md)).

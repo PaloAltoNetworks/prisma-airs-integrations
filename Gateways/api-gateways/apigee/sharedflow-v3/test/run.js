@@ -21,11 +21,15 @@ const BUNDLES = {
     v3: first([path.join(ROOT, 'PANW-AIRS', 'sharedflowbundle'), path.join(ROOT, 'src', 'PANW-AIRS', 'sharedflowbundle')])
 };
 const KEY = 'lab-key-for-unit-tests';
+// v3.1: --auth=bearer runs every case with a config map that holds only an OAuth token and airs_auth_mode=bearer.
+const TOKEN = 'lab-oauth-token-for-unit-tests';
 
 const args = process.argv.slice(2);
 const which = args.indexOf('--v3') >= 0 ? 'v3' : 'v2';
 const only = args.indexOf('--only') >= 0 ? args[args.indexOf('--only') + 1] : null;
 const onlyFile = args.indexOf('--file') >= 0 ? args[args.indexOf('--file') + 1] : null;
+const auth = args.indexOf('--auth=bearer') >= 0 ? 'bearer' : 'apikey';
+process.env.AIRS3_TEST_AUTH = auth;          // read by cases/_shapes.js (S.CRED) when the cases load
 
 /* What a case gets to look at. */
 function result(flow) {
@@ -69,12 +73,13 @@ function params(s, leg, type) {
 /* Run one leg, or both: the request leg first, then, if it didn't stop, the reply leg on the same flow. */
 function run(bundle, c) {
     var s = c.setup;
-    var kvm = {}; kvm[s.map || 'airs-config'] = Object.assign({ airs_token: KEY, airs_profile: 'PROFILE_NAME' }, s.kvm || {});
+    var base = auth === 'bearer' ? { airs_bearer: TOKEN, airs_auth_mode: 'bearer', airs_profile: 'PROFILE_NAME' } : { airs_token: KEY, airs_profile: 'PROFILE_NAME' };
+    var kvm = {}; kvm[s.map || 'airs-config'] = Object.assign(base, s.kvm || {});
     var airs = s.airsFor ? s.airsFor[which] : s.airs;
     var vars = Object.assign({}, s.vars || {}, (s.varsFor && s.varsFor[which]) || {});
     var flow = H.newFlow({ mode: which === 'v3' ? 'strict' : 'apigee', pathsuffix: s.path, request: s.request, kvm: kvm,
                            airs: typeof airs === 'function' && airs.length === 0 && airs.fresh ? airs() : airs, vars: vars, proxyName: s.proxyName,
-                           cache: s.cache });
+                           cache: s.cache, kvmFails: !!s.kvmFails });
     var out = {};
     // Several runs of the SharedFlow on one flow, in order (phase 3): a flow hook's run and a FlowCallout's on the same leg.
     // Each run gives its own parameters; the reply is set before the first run on the reply leg.
@@ -117,10 +122,13 @@ function main() {
     if (!fs.existsSync(BUNDLES[which])) { console.log('no ' + which + ' bundle yet at ' + BUNDLES[which]); process.exit(2); }
     var bundle = new H.Bundle(BUNDLES[which]);
     var cases = loadCases().filter(function (c) { return !only || c.finding === only; });
-    var pass = 0, fail = 0, skipped = 0;
+    var pass = 0, fail = 0, skipped = 0, pinned = 0;
     cases.forEach(function (c) {
         var expect = c[which];
         if (!expect) { skipped++; return; }
+        // Bearer runs leave out the cases about the API key itself (apikeyOnly; 82-v31-oauth.js has their bearer twins) and
+        // v3.1's own cases, which set the mode themselves.
+        if (auth === 'bearer' && (c.apikeyOnly || String(c.finding).indexOf('V31-') === 0)) { pinned++; return; }
         var verdict;
         try {
             var r = run(bundle, c);
@@ -136,13 +144,29 @@ function main() {
             (r.runs || []).forEach(function (x, i) {
                 if (silent(x)) { verdict = 'run ' + (i + 1) + ' ended with no scan, no refusal and no pass'; }
             });
+            // v3.1: each call carries exactly one credential, the mode's; and no credential shows outside private. (v3.1's own
+            // cases set the mode themselves and check both.)
+            var legs = String(c.finding).indexOf('V31-') === 0 ? [] : ['request', 'response'].map(function (l) { return r[l]; }).concat(r.runs || []).filter(Boolean);
+            legs.forEach(function (x) {
+                x.calls.forEach(function (call, i) {
+                    var h = {}; for (var k in (call.headers || {})) { h[k.toLowerCase()] = call.headers[k]; }
+                    var ok = auth === 'bearer' ? (h.authorization === 'Bearer ' + TOKEN && h['x-pan-token'] === undefined)
+                                               : (h['x-pan-token'] === KEY && h.authorization === undefined);
+                    if (!ok && verdict === true) { verdict = 'call ' + (i + 1) + ' (' + call.policy + ') does not carry the ' + auth + ' credential alone'; }
+                });
+            });
+            if (legs.length && verdict === true) {
+                var leaks = H.secretLeaks(legs[0].flow, auth === 'bearer' ? TOKEN : KEY);
+                if (leaks.length) { verdict = 'the ' + auth + ' credential shows outside private.: ' + leaks.join(', '); }
+            }
         }
         } catch (e) { verdict = 'error: ' + (e && e.message); }
         var ok = verdict === true;
         if (ok) { pass++; } else { fail++; }
         console.log((ok ? 'PASS ' : 'FAIL ') + c.finding + '  ' + c.title + (ok ? '' : '\n       ' + verdict));
     });
-    console.log('\n' + which + ': ' + pass + ' pass, ' + fail + ' fail' + (skipped ? ', ' + skipped + ' with no ' + which + ' expectation' : ''));
+    console.log('\n' + which + (auth === 'bearer' ? ' (bearer)' : '') + ': ' + pass + ' pass, ' + fail + ' fail' + (skipped ? ', ' + skipped + ' with no ' + which + ' expectation' : '') +
+                (pinned ? ', ' + pinned + ' about the API key or the mode itself' : ''));
     process.exit(fail ? 1 : 0);
 }
 
