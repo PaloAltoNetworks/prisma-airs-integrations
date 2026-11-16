@@ -6,7 +6,7 @@ This document explains *how* and *why* the bundles in this folder are shaped the
 
 ## 1. Big picture
 
-Three Apigee bundles cooperate at runtime:
+Two Apigee bundles cooperate at runtime:
 
 - **`PANW-AIRS`** — a Shared Flow. A self-contained, **provider-agnostic** AIRS-call library. The same steps run on both the request and response legs; a `type` parameter (`user-prompt` / `response-prompt` / `both`) and the auto-detected API shape decide what gets scanned. It reads the AIRS token + profile from KVM, normalises its knobs, detects the API type (OpenAI chat, OpenAI Responses, Anthropic, Gemini/Vertex, or MCP) and whether the caller is Claude Code, extracts the content to scan (including inline tool calls; streamed SSE never reaches the response flow on Apigee X, A21), calls the AIRS sync API, and turns the verdict into an outcome of **allow / mask / block** — returning a block in the caller's own native dialect.
 - **`vertex-airs-sync`** — the shipped example API Proxy. Thin. It fronts Vertex AI `generateContent`, invokes the Shared Flow on the request leg (`type=user-prompt`), routes the allowed request to Vertex, then invokes the Shared Flow again on the response leg (`type=response-prompt`).

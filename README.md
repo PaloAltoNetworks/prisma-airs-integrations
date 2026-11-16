@@ -30,8 +30,8 @@ This repository collects example configurations, sample code, and reference patt
 | [Hooks: Gemini CLI](./Hooks/GeminiCLI/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ✅ |
 | [Hooks: Grok Build](./Hooks/GrokBuild/) | AI Coding Assistant | ✅ | ⚠️ | ❌ | ✅ | ⚠️ |
 | [Microsoft (Azure APIM)](./Microsoft/azure-apim/) | API Gateway | ✅ | ✅ | ✅ | ❌ | ✅ |
-| [Google (Apigee)](./Google/apigee/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
-| [Google (Apigee SharedFlow)](./Google/apigee/sharedflow/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Google (Apigee V1, legacy)](./Google/apigee/): superseded by [v3](./Gateways/api-gateways/apigee/sharedflow-v3/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
+| [Google (Apigee SharedFlow V2, legacy)](./Google/apigee/sharedflow/): superseded by [v3](./Gateways/api-gateways/apigee/sharedflow-v3/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Google (Apigee SharedFlow v3)](./Gateways/api-gateways/apigee/sharedflow-v3/) | API Gateway | ✅ | ✅ | ⚠️ | ✅ | ✅ |
 | [Kong (Custom Plugin v1)](./Kong/custom-plugin/) | API Gateway | ✅ | ✅ | ❌ | ❌ | ❌ |
 | [Kong (Custom Plugin v2 — MCP + buffered SSE)](./Kong/custom-plugin-v2/) | API Gateway | ✅ | ✅ | ✅ | ✅ | ✅ |
