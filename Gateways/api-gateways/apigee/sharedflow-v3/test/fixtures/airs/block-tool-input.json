@@ -1,0 +1,99 @@
+{
+ "what": "an MCP tool call whose input carries the test card",
+ "recorded_utc": "2026-11-10T00:21:41Z",
+ "status": 200,
+ "ms": 567,
+ "request_contents_shape": [
+  [
+   "tool_event"
+  ]
+ ],
+ "body": {
+  "action": "block",
+  "category": "malicious",
+  "error": false,
+  "errors": [],
+  "masked": true,
+  "profile_id": "PROFILE_ID",
+  "profile_name": "PROFILE_NAME",
+  "prompt_detected": {},
+  "report_id": "REPORT_ID",
+  "response_detected": {},
+  "scan_id": "SCAN_ID",
+  "session_id": "ID",
+  "source": "AI-Runtime-API",
+  "timeout": false,
+  "tool_detected": {
+   "input_detected": {
+    "detection_entries": [
+     {
+      "details": {
+       "prompt_injection_details": {
+        "pi_categories": [
+         "other_adversarial_prompt_attacks"
+        ]
+       }
+      },
+      "detections": {
+       "agent": true,
+       "db_security": false,
+       "dlp": true,
+       "injection": true,
+       "malicious_code": false,
+       "toxic_content": false,
+       "url_cats": false
+      },
+      "masked_data": {
+       "data": "{\"text\": \"Card XXXXXXXXXXXXXXXXXXX\"}",
+       "pattern_detections": [
+        {
+         "dlp_profiles": [
+          "Sensitive Content"
+         ],
+         "locations": [
+          [
+           15,
+           33
+          ]
+         ],
+         "pattern": "Credit Card Number"
+        }
+       ]
+      },
+      "threats": [
+       "credential leakage",
+       "context poisoning"
+      ],
+      "tool_invoked": "echo"
+     }
+    ]
+   },
+   "metadata": {
+    "ecosystem": "mcp",
+    "method": "tools/call",
+    "server_name": "mcp-server"
+   },
+   "output_detected": {
+    "detection_entries": null
+   },
+   "summary": {
+    "detections": {
+     "agent": true,
+     "db_security": false,
+     "dlp": true,
+     "injection": true,
+     "malicious_code": false,
+     "toxic_content": false,
+     "url_cats": false
+    },
+    "threats": [
+     "credential leakage",
+     "context poisoning"
+    ]
+   },
+   "verdict": "malicious"
+  },
+  "tr_id": "ID",
+  "transaction_id": "ID"
+ }
+}

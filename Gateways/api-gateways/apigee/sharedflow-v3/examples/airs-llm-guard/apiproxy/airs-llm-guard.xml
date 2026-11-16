@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<APIProxy name="airs-llm-guard">
+  <Description>Vertex AI (Gemini, Claude on Vertex, the OpenAI-compatible endpoint) behind PANW-AIRS. Deploy with a service account that may call Vertex AI.</Description>
+</APIProxy>

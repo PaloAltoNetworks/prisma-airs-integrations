@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- One line per request and leg: ids, outcome, kind, sizes and timings, never content or keys (airs3-logline.js).
+     Its lines land from inside the SharedFlow when the SharedFlow is deployed with a service account that
+     can write logs (see the README). -->
+<MessageLogging continueOnError="true" enabled="true" name="ML-Airs3Log">
+  <DisplayName>ML-Airs3Log</DisplayName>
+  <CloudLogging>
+    <LogName>projects/{organization.name}/logs/panw-airs</LogName>
+    <Message contentType="text/plain">{airs3.logLine}</Message>
+    <ResourceType>api</ResourceType>
+  </CloudLogging>
+</MessageLogging>

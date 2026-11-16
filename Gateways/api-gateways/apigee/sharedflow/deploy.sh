@@ -6,9 +6,7 @@
 #   2. Imports + deploys SharedFlow PANW-AIRS
 #   3. Imports + deploys sync proxy vertex-airs-sync (with SA)
 #
-# The experimental streaming bundle under experimental/ is intentionally
-# not deployed by this script — it is not production-ready. See its
-# README for current status and manual deploy instructions.
+# (The experimental streaming bundle that sat under experimental/ was retired.)
 #
 # All operations are idempotent — safe to re-run after partial failures or to
 # push a new revision after editing local source.

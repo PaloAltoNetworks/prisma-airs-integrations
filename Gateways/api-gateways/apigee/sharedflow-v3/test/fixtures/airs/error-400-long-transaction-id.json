@@ -1,0 +1,16 @@
+{
+ "what": "a 101-character transaction_id",
+ "recorded_utc": "2026-11-10T00:21:48Z",
+ "status": 400,
+ "ms": 318,
+ "request_contents_shape": [
+  [
+   "prompt"
+  ]
+ ],
+ "body": {
+  "error": {
+   "message": "\"transaction_id exceeds maximum length\"\n"
+  }
+ }
+}

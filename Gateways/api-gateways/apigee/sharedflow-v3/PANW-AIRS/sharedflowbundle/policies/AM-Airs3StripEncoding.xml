@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- The request leg forwards no Accept-Encoding, so a reply v3 rewrites (masking, restreaming) is never compressed. -->
+<AssignMessage continueOnError="false" enabled="true" name="AM-Airs3StripEncoding">
+  <DisplayName>AM-Airs3StripEncoding</DisplayName>
+  <Remove><Headers><Header name="Accept-Encoding"/></Headers></Remove>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+  <AssignTo createNew="false" transport="http" type="request"/>
+</AssignMessage>

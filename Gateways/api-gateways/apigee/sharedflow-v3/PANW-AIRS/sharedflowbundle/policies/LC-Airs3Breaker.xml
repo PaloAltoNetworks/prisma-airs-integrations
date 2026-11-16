@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Phase 3, the circuit breaker: its state for this endpoint and API key, from the environment's cache. Inside a SharedFlow every
+     scope is shared by the proxies that call it (L19), so the key, a SHA-256 of the endpoint and the API key, keeps tenants apart. -->
+<LookupCache continueOnError="true" enabled="true" name="LC-Airs3Breaker">
+  <DisplayName>LC-Airs3Breaker</DisplayName>
+  <CacheKey>
+    <KeyFragment ref="airs3.breakerKey"/>
+  </CacheKey>
+  <Scope>Global</Scope>
+  <AssignTo>airs3.breakerState</AssignTo>
+</LookupCache>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<SharedFlowBundle name="PANW-AIRS">
+  <Description>Prisma AIRS scanning for AI traffic: LLM APIs and MCP (v3)</Description>
+</SharedFlowBundle>

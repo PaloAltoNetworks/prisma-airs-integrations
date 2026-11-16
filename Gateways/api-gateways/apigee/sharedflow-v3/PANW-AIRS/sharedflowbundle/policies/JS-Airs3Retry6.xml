@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- After scan slot 6's call, with scanRetries=1: whether it gets one more try (no answer, HTTP 429 or a 5xx). continueOnError=true:
+     if it doesn't finish, the slot's first answer stands (no retry, never a missed scan). -->
+<Javascript continueOnError="true" enabled="true" timeLimit="1000" name="JS-Airs3Retry6">
+  <DisplayName>JS-Airs3Retry6</DisplayName>
+  <Properties>
+    <Property name="slot">6</Property>
+  </Properties>
+  <IncludeURL>jsc://airs3-lib.js</IncludeURL>
+  <ResourceURL>jsc://airs3-retry.js</ResourceURL>
+</Javascript>

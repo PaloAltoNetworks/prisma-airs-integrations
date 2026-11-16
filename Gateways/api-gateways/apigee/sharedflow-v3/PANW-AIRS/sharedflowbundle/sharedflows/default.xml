@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- PANW-AIRS v3: one flow for both legs; the FlowCallout's type parameter picks the leg. The README lists the steps
+     and the variables. -->
+<SharedFlow name="default">
+  <Step>
+    <Name>AM-Airs3Reset</Name>
+  </Step>
+  <Step>
+    <Name>KVM-GetAIRSConfig</Name>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Init</Name>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Detect</Name>
+    <Condition>airs3.doneInit = "true" and airs3.skipLeg != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3StripEncoding</Name>
+    <Condition>airs3.doneDetect = "true" and airs3.leg = "request" and airs3.route = "scan"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Read</Name>
+    <Condition>airs3.doneDetect = "true" and airs3.route = "scan" and airs3.refuse = "none"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3CacheKeys</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcOn = "true"</Condition>
+  </Step>
+  <!-- verdict cache: each slot's lookup -->
+  <Step>
+    <Name>LC-Airs3Verdict</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>LC-Airs3Verdict2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>LC-Airs3Verdict3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>LC-Airs3Verdict4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>LC-Airs3Verdict5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>LC-Airs3Verdict6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>LC-Airs3Verdict7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>LC-Airs3Verdict8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <!-- end of the cache lookups -->
+  <Step>
+    <Name>JS-Airs3CacheHits</Name>
+    <Condition>airs3.doneCacheKeys = "true" and airs3.vcOn = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>LC-Airs3Breaker</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.breakerOn = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3BreakerCheck</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.breakerOn = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanRequest</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true" and airs3.authMode = "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true"</Condition>
+  </Step>
+  <!-- slot 1's retry, then scan slots 2 to 8: numbered copies of slot 1's steps, for MCP legs of several scans -->
+  <Step>
+    <Name>JS-Airs3Retry1</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true" and airs3.scanRetries = "1"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true" and airs3.retry1 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.vcHit1 != "true" and airs3.retry1 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Slot1</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanRequest2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true" and airs3.authMode = "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Retry2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true" and airs3.scanRetries = "1"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true" and airs3.retry2 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true" and airs3.vcHit2 != "true" and airs3.retry2 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Slot2</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot2 = "true" and airs3.slotStop != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanRequest3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true" and airs3.authMode = "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Retry3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true" and airs3.scanRetries = "1"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true" and airs3.retry3 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true" and airs3.vcHit3 != "true" and airs3.retry3 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Slot3</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot3 = "true" and airs3.slotStop != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanRequest4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true" and airs3.authMode = "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Retry4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true" and airs3.scanRetries = "1"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true" and airs3.retry4 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true" and airs3.vcHit4 != "true" and airs3.retry4 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Slot4</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot4 = "true" and airs3.slotStop != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanRequest5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true" and airs3.authMode = "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Retry5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true" and airs3.scanRetries = "1"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true" and airs3.retry5 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true" and airs3.vcHit5 != "true" and airs3.retry5 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Slot5</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot5 = "true" and airs3.slotStop != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanRequest6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true" and airs3.authMode = "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Retry6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true" and airs3.scanRetries = "1"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true" and airs3.retry6 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true" and airs3.vcHit6 != "true" and airs3.retry6 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Slot6</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot6 = "true" and airs3.slotStop != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanRequest7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true" and airs3.authMode = "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Retry7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true" and airs3.scanRetries = "1"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true" and airs3.retry7 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true" and airs3.vcHit7 != "true" and airs3.retry7 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Slot7</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot7 = "true" and airs3.slotStop != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanRequest8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true" and airs3.authMode != "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ScanBearer8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true" and airs3.authMode = "bearer"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Retry8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true" and airs3.scanRetries = "1"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-Airs3ClearScan8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true" and airs3.retry8 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-Airs3Scan8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true" and airs3.vcHit8 != "true" and airs3.retry8 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Slot8</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none" and airs3.slot8 = "true" and airs3.slotStop != "true"</Condition>
+  </Step>
+  <!-- end of the scan slots -->
+  <Step>
+    <Name>JS-Airs3Verdict</Name>
+    <Condition>airs3.doneRead = "true" and airs3.route = "scan" and airs3.refuse = "none"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3BreakerRecord</Name>
+    <Condition>airs3.doneVerdict = "true" and airs3.breakerOn = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>PC-Airs3Breaker</Name>
+    <Condition>airs3.breakerWrite = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3CacheRecord</Name>
+    <Condition>airs3.doneVerdict = "true" and airs3.vcOn = "true" and airs3.doneCacheKeys = "true"</Condition>
+  </Step>
+  <!-- verdict cache: each slot's write -->
+  <Step>
+    <Name>PC-Airs3Verdict</Name>
+    <Condition>airs3.vcWrite1 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>PC-Airs3Verdict2</Name>
+    <Condition>airs3.vcWrite2 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>PC-Airs3Verdict3</Name>
+    <Condition>airs3.vcWrite3 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>PC-Airs3Verdict4</Name>
+    <Condition>airs3.vcWrite4 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>PC-Airs3Verdict5</Name>
+    <Condition>airs3.vcWrite5 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>PC-Airs3Verdict6</Name>
+    <Condition>airs3.vcWrite6 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>PC-Airs3Verdict7</Name>
+    <Condition>airs3.vcWrite7 = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>PC-Airs3Verdict8</Name>
+    <Condition>airs3.vcWrite8 = "true"</Condition>
+  </Step>
+  <!-- end of the cache writes -->
+  <Step>
+    <Name>JS-Airs3Mask</Name>
+    <Condition>airs3.doneVerdict = "true" and airs3.outcome = "mask"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Destream</Name>
+    <Condition>airs3.needDestream = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Restream</Name>
+    <Condition>airs3.needRestream = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Respond</Name>
+    <Condition>airs3.skipLeg != "true" and (airs3.doneInit != "true" or airs3.refuse != "none" or airs3.doneDetect != "true" or airs3.route = "mcp405" or (airs3.route = "scan" and (airs3.doneRead != "true" or airs3.doneVerdict != "true")) or airs3.outcome = "block" or airs3.outcome = "failure" or airs3.outcome = "refused" or (airs3.outcome = "mask" and airs3.doneMask != "true") or (airs3.needDestream = "true" and airs3.doneDestream != "true") or (airs3.needRestream = "true" and airs3.doneRestream != "true"))</Condition>
+  </Step>
+  <!-- monitor mode: a pass JS-Airs3Respond decided before any verdict still turns streaming off and back on -->
+  <Step>
+    <Name>JS-Airs3Destream</Name>
+    <Condition>airs3.lateStream = "true" and airs3.needDestream = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3Restream</Name>
+    <Condition>airs3.lateStream = "true" and airs3.needRestream = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-Airs3LogLine</Name>
+    <Condition>airs3.quiet != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>ML-Airs3Log</Name>
+    <Condition>airs3.quiet != "true"</Condition>
+  </Step>
+  <Step>
+    <Name>RF-Airs3Mcp405</Name>
+    <Condition>airs3.blockReady = "true" and airs3.route = "mcp405"</Condition>
+  </Step>
+  <Step>
+    <Name>RF-Airs3Block</Name>
+    <Condition>airs3.blockReady = "true" and airs3.route != "mcp405"</Condition>
+  </Step>
+  <Step>
+    <Name>RF-Airs3Backstop</Name>
+    <Condition>airs3.blockReady != "true" and (airs3.doneInit != "true" or airs3.refuse != "none" or airs3.doneDetect != "true" or airs3.route = "mcp405" or (airs3.route = "scan" and (airs3.doneRead != "true" or airs3.doneVerdict != "true")) or airs3.outcome = "block" or airs3.outcome = "failure" or airs3.outcome = "refused" or (airs3.outcome = "mask" and airs3.doneMask != "true") or (airs3.needDestream = "true" and airs3.doneDestream != "true") or (airs3.needRestream = "true" and airs3.doneRestream != "true")) and airs3.mode != "monitor" and airs3.skipLeg != "true"</Condition>
+  </Step>
+</SharedFlow>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Phase 3, the verdict cache, after the lookups: airs3.vcHit<k> for each slot whose own lookup hit with a scan id, this leg.
+     continueOnError=true: if it doesn't finish, no slot hits, and every slot makes its call. -->
+<Javascript continueOnError="true" enabled="true" timeLimit="1000" name="JS-Airs3CacheHits">
+  <DisplayName>JS-Airs3CacheHits</DisplayName>
+  <Properties>
+    <Property name="op">hits</Property>
+  </Properties>
+  <IncludeURL>jsc://airs3-lib.js</IncludeURL>
+  <ResourceURL>jsc://airs3-cache.js</ResourceURL>
+</Javascript>

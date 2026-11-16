@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<SharedFlowBundle name="PANW-AIRS-hook-request">
+  <Description>Prisma AIRS v3 on an environment's pre-target flow hook: v3's request leg in hook mode, for the base paths the config map's airs_hook entry lists</Description>
+</SharedFlowBundle>

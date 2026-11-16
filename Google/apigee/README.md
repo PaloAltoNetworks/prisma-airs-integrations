@@ -1,5 +1,7 @@
 # Apigee X + Vertex AI + Prisma AIRS Integration
 
+> **Superseded by [v3](../../Gateways/api-gateways/apigee/sharedflow-v3/).** This page describes V1, the single-bundle proxy, and hasn't been corrected. [v3's MIGRATION](../../Gateways/api-gateways/apigee/sharedflow-v3/MIGRATION.md#the-findings-a01-to-a39) lists V1's defects: its `deploy.sh` creates the config map without the encrypted flag (Apigee most likely encrypts it anyway) and passes the API key on the command line, where the process list and the shell history can show it (A35); its masking writes the whole masked text into every text part (A34); without an `X-Session-ID` header, every request most likely becomes its own session (A33); and `vertex-simple.zip` doesn't match the `apiproxy/` source (A37).
+
 A production-ready Apigee X proxy that integrates **Prisma AIRS security scanning** with **Google Vertex AI** to provide dual-layer protection:
 - **Prompt Scanning**: Block malicious prompts before they reach the LLM
 - **Response Scanning**: Block sensitive data in LLM responses (PII, credentials, etc.)

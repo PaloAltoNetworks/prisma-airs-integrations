@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Only when a refusal was needed and the writer itself did not finish: a plain JSON 503. -->
+<RaiseFault continueOnError="false" enabled="true" name="RF-Airs3Backstop">
+  <DisplayName>RF-Airs3Backstop</DisplayName>
+  <FaultResponse>
+    <Set>
+      <Headers>
+        <Header name="Content-Type">application/json</Header>
+        <Header name="x-airs-blocked">true</Header>
+        <Header name="x-airs-kind">failure</Header>
+      </Headers>
+      <Payload contentType="application/json" variablePrefix="@" variableSuffix="#">{"error":{"message":"Prisma AIRS could not complete its check, so this was not passed on.","type":"prisma_airs_unavailable","code":"prisma_airs_unavailable"}}</Payload>
+      <StatusCode>503</StatusCode>
+      <ReasonPhrase>Service Unavailable</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>

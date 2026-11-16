@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Scan slot 3: as SC-Airs3Scan. Strict certificate checks (A26); continueOnError=true, so the verdict step reads the
+     status, or its absence, and decides (L10). -->
+<ServiceCallout continueOnError="true" enabled="true" name="SC-Airs3Scan3">
+  <DisplayName>SC-Airs3Scan3</DisplayName>
+  <Request clearPayload="false" variable="private.airs3_scan3">
+    <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+  </Request>
+  <Response>airs3ScanResponse3</Response>
+  <Timeout>5000</Timeout>
+  <HTTPTargetConnection>
+    <SSLInfo><Enabled>true</Enabled><Enforce>true</Enforce></SSLInfo>
+    <URL>https://{airs3.endpoint}/v1/scan/sync/request</URL>
+  </HTTPTargetConnection>
+</ServiceCallout>

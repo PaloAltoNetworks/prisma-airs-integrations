@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- After scan slot 8: stops the slots after it once an answer would refuse the leg. continueOnError=true: if it doesn't
+     finish, the next slots run anyway (an extra scan, never a missed one). -->
+<Javascript continueOnError="true" enabled="true" timeLimit="1000" name="JS-Airs3Slot8">
+  <DisplayName>JS-Airs3Slot8</DisplayName>
+  <Properties>
+    <Property name="slot">8</Property>
+  </Properties>
+  <IncludeURL>jsc://airs3-lib.js</IncludeURL>
+  <ResourceURL>jsc://airs3-slot.js</ResourceURL>
+</Javascript>

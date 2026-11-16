@@ -10,7 +10,7 @@ The contents of this repository are community examples and reference implementat
 
 | Integration | Description | Documentation |
 |-------------|-------------|---------------|
-| **Apigee** | Production-ready API proxy with dual-layer security scanning for Vertex AI models | [apigee/](apigee/) |
+| **Apigee** (legacy) | V1, an API proxy with dual-layer security scanning for Vertex AI models, and the V2 SharedFlow; both superseded by [v3](../Gateways/api-gateways/apigee/sharedflow-v3/) | [apigee/](apigee/) |
 
 ## Prerequisites
 

@@ -1,14 +1,15 @@
 # Architecture — Apigee X + Prisma AIRS SharedFlow Reference
 
+> **Superseded by [v3](../sharedflow-v3/).** This page describes V2. Where V2's code doesn't do what this page once said, it now says so, with the finding's number from [v3's MIGRATION](../sharedflow-v3/MIGRATION.md#the-findings-a01-to-a39).
+
 This document explains *how* and *why* the bundles in this folder are shaped the way they are. Read [`README.md`](README.md) first for the operator's view.
 
 ## 1. Big picture
 
-Three Apigee bundles cooperate at runtime:
+Two Apigee bundles cooperate at runtime:
 
-- **`PANW-AIRS`** — a Shared Flow. A self-contained, **provider-agnostic** AIRS-call library. The same steps run on both the request and response legs; a `type` parameter (`user-prompt` / `response-prompt` / `both`) and the auto-detected API shape decide what gets scanned. It reads the AIRS token + profile from KVM, normalises its knobs, detects the API type (OpenAI chat, OpenAI Responses, Anthropic, Gemini/Vertex, or MCP) and whether the caller is Claude Code, extracts the content to scan (including inline tool calls and streamed SSE), calls the AIRS sync API, and turns the verdict into an outcome of **allow / mask / block** — returning a block in the caller's own native dialect.
+- **`PANW-AIRS`** — a Shared Flow. A self-contained, **provider-agnostic** AIRS-call library. The same steps run on both the request and response legs; a `type` parameter (`user-prompt` / `response-prompt` / `both`) and the auto-detected API shape decide what gets scanned. It reads the AIRS token + profile from KVM, normalises its knobs, detects the API type (OpenAI chat, OpenAI Responses, Anthropic, Gemini/Vertex, or MCP) and whether the caller is Claude Code, extracts the content to scan (including inline tool calls; streamed SSE never reaches the response flow on Apigee X, A21), calls the AIRS sync API, and turns the verdict into an outcome of **allow / mask / block** — returning a block in the caller's own native dialect.
 - **`vertex-airs-sync`** — the shipped example API Proxy. Thin. It fronts Vertex AI `generateContent`, invokes the Shared Flow on the request leg (`type=user-prompt`), routes the allowed request to Vertex, then invokes the Shared Flow again on the response leg (`type=response-prompt`).
-- **`experimental/vertex-airs-stream`** — a work-in-progress proxy that scans Vertex `streamGenerateContent` **per SSE event, mid-stream** (see §8). Not deployed by `deploy.sh`.
 
 ```mermaid
 flowchart LR
@@ -26,11 +27,11 @@ flowchart LR
     P -->|200 + response| C
 ```
 
-When AIRS returns `action: block`, the Shared Flow builds a **native, format-appropriate block** carrying the block message + an `airs` verdict object — the request never reaches the model (or, on the response side, the model output never reaches the client). When AIRS instead returns *masked* data, the Shared Flow rewrites the content in place and lets the traffic through.
+When AIRS returns `action: block`, the Shared Flow builds a **native, format-appropriate block** carrying the block message + an `airs` verdict object — the request never reaches the model (or, on the response side, the model output never reaches the client). When AIRS instead returns *masked* data, the Shared Flow writes the masked text back, not always into the field that was scanned (A22 to A24), and lets the traffic through.
 
 ## 2. Why a Shared Flow at all
 
-The sibling monolithic proxy bakes AIRS-scanning policies directly into the proxy bundle. That works fine for a single LLM proxy. It breaks down when you have **multiple** proxies — say, one per model, or proxies fronting Anthropic and OpenAI alongside Vertex — that all need the same AIRS scanning posture.
+The monolithic proxy that sat beside it in this folder, now retired, baked AIRS-scanning policies directly into the proxy bundle. That works for a single LLM proxy. It breaks down when you have **multiple** proxies — say, one per model, or proxies fronting Anthropic and OpenAI alongside Vertex — that all need the same AIRS scanning posture.
 
 A Shared Flow lets you:
 
@@ -118,7 +119,7 @@ The Vertex target is never invoked. Same shape on the response side, except the 
 
 Two deliberate design points, both learned from earlier tool-call work:
 
-1. **Per-turn isolation.** The flow scans the **newest** turn's content, not a re-flatten of the whole conversation. Prior turns were scanned when they were new; re-concatenating them muddies attribution (a benign prompt blended with a poisoned tool result) and re-bills already-scanned tokens.
+1. **Per-turn isolation.** The flow scans the **newest** turn's content, not a re-flatten of the whole conversation. Prior turns are assumed scanned when they were new, though a client can send turns the gateway never saw, and earlier user turns, system text and instructions never reach Prisma AIRS (A01); re-concatenating them muddies attribution (a benign prompt blended with a poisoned tool result) and re-bills already-scanned tokens.
 2. **Inline tool-call scanning.** When a model emits a native function call it is not skipped — its argument *values* are folded into the response scan. Symmetrically, inbound tool results are scanned as untrusted input. Values are extracted with a recursive "clean values" collector (`airsCollect`) that pushes scalar strings/numbers and drops keys, braces, and punctuation — feeding AIRS natural language rather than a JSON blob (a JSON wrapper reads as "code" and false-positives benign calls).
 
 | API type | Prompt leg (request) | Response leg |
@@ -129,6 +130,8 @@ Two deliberate design points, both learned from earlier tool-call work:
 | **Anthropic Messages** | newest `messages[]` user text / `text` blocks; `tool_result` blocks folded as untrusted input | `content[]` `text`; `tool_use.input` values folded; SSE reassembled |
 | **MCP (JSON-RPC `tools/call`)** | tool **input** (`params.arguments`) as a `tool_event` — scanned **before** the tool server runs | tool **output** (`result.content` text) added to the same `tool_event`; JSON or single-line SSE |
 
+> On Apigee X (runtime 1-18-0-apigee-8) an event-stream reply's body never reaches the response flow, so the SSE these rows read is never there, and V2 passes streamed replies unscanned (A21, A18).
+
 Folding of tool inputs/results is gated by the `scanTools` knob (default `true`). MCP tool events are scanned against `toolProfile` (default = the main profile). Requests that can't be classified (`apiType == unknown`, e.g. a `count-tokens` utility call) pass through unscanned by default, or are refused with a `403` when `failClosedOnUnknown=true`.
 
 ## 5. Claude Code awareness
@@ -138,10 +141,10 @@ Claude Code injects `<system-reminder>…</system-reminder>` blocks (harness con
 `JS-DetectContext` flags a request as Claude Code from the `x-claude-code-session-id` header, `x-app: cli`, or the explicit `forceClaudeCode` knob (needed for Claude-on-Vertex `:rawPredict`, which sends no such headers). When flagged, the extractor:
 
 - **Strips `<system-reminder>` blocks from USER text only** (`airsStripReminders`) — never from tool results or model output, which must reach the scanner byte-for-byte.
-- **Skips background utility calls** — toolless turns, tiny `max_tokens` (≤4096), or a `[SUGGESTION MODE:` marker on the newest user message (checked on the last *user* message, never a tool result, so poisoned tool output can't fake a skip).
+- **Skips background utility calls** — toolless turns, tiny `max_tokens` (≤4096), or a `[SUGGESTION MODE:` marker on the newest user message (checked on the last *user* message, never a tool result). Any caller can still trigger the skip: a request with `x-app: cli` or `x-claude-code-session-id` and no tools, or a `max_tokens` up to 4096, has neither leg scanned (A04).
 - **Leaves local tool chatter to the MCP chokepoint** — Anthropic `tool_result` / OpenAI `tool` folding is skipped for Claude Code, since local tool traffic is covered where the MCP server is fronted.
 
-`forceClaudeCode` must only be set on a proxy dedicated to fronting Claude Code — a general-purpose proxy that trusted `<system-reminder>` stripping would let an attacker hide a payload inside a fake reminder.
+`forceClaudeCode` must only be set on a proxy dedicated to fronting Claude Code — a general-purpose proxy that trusted `<system-reminder>` stripping would let an attacker hide a payload inside a fake reminder. Without it, any caller's `x-app: cli` or `x-claude-code-session-id` header turns the same stripping on, in any proxy (A04).
 
 ## 6. The AIRS two-tier verdict and consolidated processing
 
@@ -176,7 +179,7 @@ flowchart TD
     F -->|Yes| MASK[outcome = mask]
     F -->|No| ALLOW2[outcome = allow]
     BLK2 --> RF[RF-Block returns native shape<br/>+ x-airs-blocked / x-airs-category]
-    MASK --> AM[JS-ApplyMasking rewrites content in place]
+    MASK --> AM[JS-ApplyMasking writes the masked text back,<br/>not always into the scanned field: A22]
 ```
 
 The per-detector booleans still drive a human-readable threat list (preserving V1's "name the detector" behaviour), and set the `x-airs-category` header. The block **body** is built in the caller's own dialect:
@@ -186,19 +189,19 @@ The per-detector booleans still drive a human-readable threat list (preserving V
 - **OpenAI Responses API** — a `response` object + `airs`.
 - **Anthropic Messages** — a `message` object + `airs`.
 - **MCP** — a JSON-RPC error (`code -32000`).
-- **Any of the above, streaming** — a native SSE refusal so the client's stream parser (incl. Claude Code) completes cleanly instead of erroring.
+- **Any of the above, streaming** — meant as a native SSE refusal, but a streamed Responses API block comes back as Chat Completions chunks and a streamed Gemini block as one JSON object (A30); and on Apigee X a streamed reply's body never reaches the response flow, so it isn't scanned (A21).
 
 By default a block is returned with HTTP `200` (an `x-airs-blocked: true` header makes it detectable even in native-200 shape), matching V1's "graceful block" posture — AIRS has already logged/enforced the block; this only controls how the caller is told. The `blockStatus` knob can force a hard status (e.g. `403`) on **non-streaming** blocks so they show up in status-code metrics; SSE blocks always stay `200` because a stream needs it.
 
-## 7. DLP masking (mask-in-place)
+## 7. DLP masking
 
-Masking is a distinct outcome from blocking. When the AIRS profile is set to mask rather than block, AIRS **allows** the traffic but returns the sanitised text in a `*_masked_data.data` field. `JS-ApplyMasking` (see [`apply-masking.js`](PANW-AIRS/sharedflowbundle/resources/jsc/apply-masking.js)) then rewrites the message in place so sensitive values never reach the model (prompt leg) or the caller (response leg / MCP tool output):
+Masking is a distinct outcome from blocking. When the AIRS profile is set to mask rather than block, AIRS **allows** the traffic but returns the sanitised text in a `*_masked_data.data` field. `JS-ApplyMasking` (see [`apply-masking.js`](PANW-AIRS/sharedflowbundle/resources/jsc/apply-masking.js)) then writes the masked text back into the message. It doesn't always reach the field that was scanned, so sensitive values can still reach the model or the caller, and MCP tool input is never masked (A22 to A24):
 
 - **Prompt leg** → rewrite `request.content` with `airs.prompt.masked`.
 - **Response / both leg** → rewrite `response.content` with `airs.response.masked`.
 - **MCP** → rewrite the tool output with `airs.tool.output.masked`.
 
-Every branch is defensive: on any parse failure the original body is left untouched (masking is best-effort; it must never corrupt traffic). For streamed responses the masked value is delivered **exactly once** — the first text-bearing delta carries it and subsequent deltas are blanked, while terminal snapshot events (which carry the full text) get the full masked value. This deliberately avoids the naïve "set every chunk to the full masked string" bug that repeats the value N times.
+Every branch is defensive: on any parse failure the original body is left untouched (masking is best-effort; it must never corrupt traffic). For streamed responses (which on Apigee X never reach the response flow, A21) the masked value would be delivered **exactly once** — the first text-bearing delta carries it and subsequent deltas are blanked, while terminal snapshot events (which carry the full text) get the full masked value. This deliberately avoids the naïve "set every chunk to the full masked string" bug that repeats the value N times.
 
 ## 8. JSON-safe scan body
 
@@ -234,7 +237,7 @@ flowchart LR
 
 ## 10. Why fail-closed (and how V2 does it cleanly)
 
-The whole point of putting AIRS in line is to guarantee scanning — if scanning isn't happening, the request should not reach the model. A fail-open posture would mean an AIRS outage silently downgrades you to no AI security at all, which is the opposite of what an AI security gateway should do. So the default is **fail-closed** (`failOpen=false`).
+The whole point of putting AIRS in line is to guarantee scanning — if scanning isn't happening, the request should not reach the model. A fail-open posture would mean an AIRS outage silently downgrades you to no AI security at all, which is the opposite of what an AI security gateway should do. So the default is **fail-closed** (`failOpen=false`). It covers only the failures V2 sees as such: a 200 from Prisma AIRS without a clean verdict counts as an allow (A14), an allow that reports a detector error counts as clean (A15), and a body V2 can't read at a path it recognises (A13) and every streamed reply (A21) pass unscanned.
 
 V2 implements this without hard-faulting the proxy. `SC-AIRSScan` runs with `continueOnError="true"` and a 5 s `<Timeout>`, so an AIRS timeout or 5xx doesn't throw — instead `JS-ProcessVerdict` sees the non-200 callout status and:
 
@@ -245,13 +248,11 @@ Separately, if the AIRS **token is missing from KVM** entirely, `RF-ConfigError`
 
 The cost of fail-closed is that AIRS becomes a hard runtime dependency. If you can't accept that, the right answer is to architect for AIRS availability (multi-region failover, redundant deploy profiles) rather than to fall back to bypass.
 
-## 11. The streaming bundle (experimental)
+## 11. Streaming
 
-The Shared Flow already handles **streamed SSE responses** for the sync proxies: `response.content` is the gateway-buffered stream, which the extractor reassembles (OpenAI, Anthropic, OpenAI Responses, Gemini) and the verdict/masking steps turn into a native SSE block or an in-stream mask. That is a *post-buffer* scan — the full streamed body is scanned once it is available at the gateway.
+V2 expects `response.content` to hold the gateway-buffered stream, but on Apigee X (runtime 1-18-0-apigee-8) an event-stream reply's body never reaches the response flow, so V2 passes every streamed reply unscanned (A21). v3 turns streaming off on the way to the model and scans the whole reply.
 
-The proxy under [`experimental/vertex-airs-stream/`](experimental/vertex-airs-stream/) attempts something harder: scanning Vertex `streamGenerateContent` **per SSE event, mid-stream**, so a block can fire before the whole response has streamed. Apigee's `FlowCallout` does not work inside an EventFlow, so it can't reuse the Shared Flow for the response leg; instead an inline JavaScript (`airs-scan-event.js`) calls AIRS directly via Rhino's `httpClient.send()`, with a cumulative buffer (200-char threshold), a sticky `airs.stream.blocked` flag, and a fallback chain across Apigee Rhino runtime variants.
-
-In our lab the happy path renders and mid-stream blocks fire, but we've seen inconsistent results we don't yet trust — partial events being scanned, intermittent silent passes, model- and prompt-dependent behaviour. Until we can characterise and fix those, the streaming bundle is checked in as a starting point for collaboration, not a working reference. See its [README](experimental/vertex-airs-stream/README.md) for current status.
+The experimental per-event stream proxy that sat in `experimental/` was retired: it failed open when a scan errored, ignored the configured Prisma AIRS region, and never scanned a last stretch of under 200 characters when the stream ended without `finishReason: STOP` (A36). It stays in this repository's history.
 
 ## 12. Testing
 
@@ -269,5 +270,4 @@ A few directions this pattern naturally grows in:
 
 - **More proxies.** Add `anthropic-airs-sync/` or `openai-airs-sync/` proxy bundles alongside `vertex-airs-sync/`. They all `FlowCallout` into the same `PANW-AIRS` Shared Flow with a `type` parameter; the multi-format extractor already understands their bodies, so no Shared Flow change is needed.
 - **Per-route AIRS profiles.** Set `currentProfile` / `toolProfile` as flow variables before the FlowCallout to run a single Shared Flow with different posture per consumer, per model, or per tool.
-- **Tighter tool-call control.** The MCP chokepoint scans tool input pre-execution and output post-execution; inline function-call scanning covers native LLM tool calling. Custom detector-to-message mappings can be supplied via the `airsDescriptions` knob.
-- **Streaming, mid-stream.** Once the experimental per-event proxy settles, promote it out of `experimental/` and add it to `deploy.sh`.
+- **Tighter tool-call control.** The MCP chokepoint scans tool input pre-execution and output post-execution; inline function-call scanning covers native LLM tool calling, but not Responses API `function_call_output` items (A03) or tool results in Claude Code traffic (A04). Custom detector-to-message mappings can be supplied via the `airsDescriptions` knob.
