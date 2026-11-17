@@ -6,26 +6,31 @@ A policy fragment that can be integrated into an Azure AI Gateway (part of APIM)
 
 This integration provides the following versions of the policy fragment. Choose the one that fits your environment:
 
-| Feature | v1 | v2 | v2.1 | v2.1.1 |
-|---------|:--:|:--:|:--:|:--:|
-| OpenAI chat/completions | ✅ | ✅ | ✅ | ✅ |
-| OpenAI Responses API | ✅ | ✅ | ✅ | ✅ |
-| Anthropic /v1/messages | ❌ | ✅ | ✅ | ✅ |
-| Azure AI Foundry Claude | ❌ | ✅ | ✅ | ✅ |
-| Streaming/SSE response scanning | ❌ | ✅ | ✅ | ✅ |
-| Anthropic tool_result scanning | ❌ | ✅ | ✅ | ✅ |
-| Prompt & response masking | ✅ | ✅ | ✅ | ✅ |
-| Tool event scanning | ✅ | ✅ | ✅ | ✅ |
-| Claude Code session grouping | ❌ | ❌ | ✅ | ✅ |
-| Claude Code graceful blocking (200 streaming) | ❌ | ❌ | ✅ | ✅ |
-| Claude Code user/agent attribution | ❌ | ❌ | ✅ | ✅ |
-| Standards-based `failOpen` variable | ❌ | ❌ | ❌ | ✅ |
-| Profile UUID support (preferred over name) | ❌ | ❌ | ❌ | ✅ |
+| Feature | v1 | v2 | v2.1 | v2.1.1 | v2.1.2 |
+|---------|:--:|:--:|:--:|:--:|:--:|
+| OpenAI chat/completions | ✅ | ✅ | ✅ | ✅ | ✅ |
+| OpenAI Responses API | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Anthropic /v1/messages | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Azure AI Foundry Claude | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Azure AI Foundry GPT (Responses API) | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Google Gemini (native, not just OpenAI-compat) | ❌ | ❌ | ✅ | ✅ | ✅ |
+| MCP (Model Context Protocol) `tools/call` | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Prisma AIRS OAuth bearer-token mode | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Streaming/SSE response scanning | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Anthropic tool_result scanning | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Prompt & response masking | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Tool event scanning | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Claude Code session grouping | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Claude Code graceful blocking (200 streaming) | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Claude Code user/agent attribution | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Standards-based `failOpen` variable | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Profile UUID support (preferred over name) | ❌ | ❌ | ❌ | ✅ | ✅ |
 
 - **v1** — OpenAI-only. Simpler fragment for environments that only use OpenAI-compatible endpoints.
 - **v2** — Multi-model. Adds Anthropic and Azure AI Foundry Claude support, plus streaming/SSE response scanning.
-- **v2.1** — Claude Code. Builds on v2 with Claude Code session grouping, graceful (non-erroring) blocking, and automatic user/agent attribution. Backward-compatible with existing v2 policies — drop-in, no policy changes required. Ships as the current `panw-airs-scan-v2` fragment.
+- **v2.1** — Claude Code, Gemini, Foundry GPT, and MCP. Builds on v2 with Claude Code session grouping, graceful (non-erroring) blocking, and automatic user/agent attribution — and also where native Google Gemini support, Azure AI Foundry GPT (Responses API), and MCP (Model Context Protocol) `tools/call` scanning were actually introduced. Backward-compatible with existing v2 policies — drop-in, no policy changes required. Ships as `panw-airs-scan-v2.1` in its own directory (not the `v2` directory).
 - **v2.1.1** — Standards and UUID. Adds standards-based `failOpen` variable (lowercase) with backward compatibility for `FailOpen`, plus AIRS profile UUID support (`currentProfileUUID`, `toolProfileUUID`) which takes priority over profile names when defined.
+- **v2.1.2** — OAuth and hardening. Adds Prisma AIRS OAuth bearer-token mode as an alternative to the static API key (see [`policy-oauth-example`](policy-oauth-example)), with a 401/403 cache-eviction-and-retry so a revoked/rotated token doesn't go unnoticed for the full cache TTL. Requires APIM's internal cache (cache-lookup-value/cache-store-value), which is unavailable on the Consumption tier and on self-hosted gateways without the cache add-on — on those deployments every request pays the full OAuth token-fetch latency. Also includes a code-hardening pass replacing many brittle direct casts (`(JObject)context.Variables["x"]`) with null-safe lookups, and safer AIRS-call error handling.
 
 ## Coverage
 
@@ -41,9 +46,7 @@ This integration provides the following versions of the policy fragment. Choose 
 | Pre-tool call | ❌ | Not applicable - designed for direct LLM gateway requests |
 | Post-tool call | ✅ | Tool results scanned as `tool_event` with tool name, arguments, and output |
 
-### v2 / v2.1
-
-Scanning phases are identical for v2 and v2.1. v2.1 additionally layers Claude Code handling (session grouping, graceful 200-streaming blocking, and user/agent attribution) on top of these phases — see [Session Tracking](#session-tracking) and [Blocking Behavior](#blocking-behavior).
+### v2
 
 | Scanning Phase | Supported | Description |
 |----------------|:---------:|-------------|
@@ -53,13 +56,35 @@ Scanning phases are identical for v2 and v2.1. v2.1 additionally layers Claude C
 | Pre-tool call | ❌ | Not applicable - designed for direct LLM gateway requests |
 | Post-tool call | ✅ | Tool results scanned as `tool_event` with tool name, arguments, and output |
 
+### v2.1 / v2.1.1 / v2.1.2
+
+Scanning phases are identical across all three — v2.1.1 and v2.1.2 only
+change configuration/transport (standards-based `failOpen`, profile UUIDs,
+OAuth bearer-token mode), not what gets scanned. v2.1 layers Claude Code
+handling (session grouping, graceful 200-streaming blocking, user/agent
+attribution — see [Session Tracking](#session-tracking) and
+[Blocking Behavior](#blocking-behavior)) on top of v2's phases, and is also
+where Azure AI Foundry GPT, native Google Gemini, and MCP support were
+added. MCP scans outbound only (a single combined input+output scan after
+the backend tool call completes, not a separate pre-backend pass).
+
+| Scanning Phase | Supported | Description |
+|----------------|:---------:|-------------|
+| Prompt | ✅ | OpenAI, Anthropic, Foundry Claude/GPT, Gemini (MCP: fed into the combined outbound scan instead) |
+| Response | ✅ | All of the above, with masking support |
+| Streaming | ✅ | SSE chunk reassembly for every provider, including MCP |
+| Pre-tool call | ❌ | Not applicable - designed for direct LLM/MCP gateway requests |
+| Post-tool call | ✅ | Tool results scanned as `tool_event`; MCP scans tool input+output together |
+
 ## 🎯 What This Does
 The fragments handle scanning of prompts, responses, and tool events on the following API calls:
-* **POST /chat/completions** - OpenAI chat completions (v1, v2)
-* **POST /responses** - OpenAI Responses API (v1, v2)
-* **POST /v1/messages** - Anthropic direct and Azure AI Foundry Claude (v2 only)
+* **POST /chat/completions** - OpenAI chat completions (v1+)
+* **POST /responses** - OpenAI / Azure AI Foundry GPT Responses API (v1+; Foundry GPT specifically from v2.1)
+* **POST /v1/messages** - Anthropic direct and Azure AI Foundry Claude (v2+)
+* **POST /v1beta/models/\*:generateContent** / **:streamGenerateContent** - Google Gemini, natively (v2.1+)
+* **JSON-RPC `tools/call`** - Model Context Protocol (MCP) servers, any path (v2.1+)
 
-> **Gemini:** Not directly supported, but Google's OpenAI-compatible endpoint (`/v1beta/openai/chat/completions`) works with both v1 and v2 since it uses the same chat/completions schema.
+> **Gemini before v2.1:** Not directly supported, but Google's OpenAI-compatible endpoint (`/v1beta/openai/chat/completions`) worked with v1/v2 since it uses the same chat/completions schema. **v2.1 adds native support** for Gemini's own API shape (`contents`/`parts`, not OpenAI-compatible), so you're no longer limited to that compatibility shim.
 
 **Scanning capabilities:**
 - **User prompts** before sending to the LLM
@@ -87,6 +112,8 @@ It will return bespoke responses dependent on the category detected.
 * Return masked PII responses if the action is Allow and Masking is enabled
 * Define if the sidecar should FailOpen or FailClosed if Prisma AIRS is not responding or has an error
 * Claude Code (v2.1): graceful blocking (200 streaming refusal so the session continues) plus automatic session/user/agent attribution
+* **v2.1**: native Google Gemini support and MCP (Model Context Protocol) `tools/call` scanning
+* **v2.1.2**: Prisma AIRS OAuth bearer-token mode (`PrismaAirsAPI = "OAUTH"`) as an alternative to the static API key
 
 ## 📊 Architecture
 ```
@@ -166,8 +193,12 @@ curl -X POST "https://<YOUR-HOSTNAME>/<YOUR API>/chat/completions" \
 
 ## 📁 What's Included
 * `prisma-airs-policy-fragment-v1/panw-airs-scan` : Prisma AIRS policy fragment for OpenAI endpoints (chat/completions, responses).
-* `prisma-airs-policy-fragment-v2/panw-airs-scan-v2` : Prisma AIRS policy fragment with multi-model support (OpenAI, Anthropic, Azure AI Foundry Claude) and streaming/SSE scanning. The current file is the **v2.1** release, which adds Claude Code support and is backward-compatible with v2 policies.
+* `prisma-airs-policy-fragment-v2/panw-airs-scan-v2` : Prisma AIRS policy fragment with multi-model support (OpenAI, Anthropic, Azure AI Foundry Claude) and streaming/SSE scanning. Does **not** include Gemini, Foundry GPT, or MCP — those were introduced in v2.1 (see `prisma-airs-policy-fragment-v2.1/panw-airs-scan-v2.1`), not here.
+* `prisma-airs-policy-fragment-v2.1/panw-airs-scan-v2.1` : Adds Claude Code support, native Google Gemini support, Azure AI Foundry GPT (Responses API), and MCP `tools/call` scanning on top of v2. Backward-compatible with existing v2 policies.
+* `prisma-airs-policy-fragment-v2.1.1/panw-airs-scan-v2.1.1` : Adds standards-based `failOpen` and AIRS profile UUID support on top of v2.1.
+* `prisma-airs-policy-fragment-v2.1.2/panw-airs-scan-v2.1.2` : Adds Prisma AIRS OAuth bearer-token mode plus a code-hardening pass on top of v2.1.1. Not yet deployed. That directory's `tests/` folder has a test suite used locally to validate it, but `tests/` is gitignored and not committed to this repo.
 * `policy-example` : An example policy for an LLM API.
+* `policy-oauth-example` : The same example policy with Prisma AIRS OAuth bearer-token mode added (v2.1.2+) — see the "Configuration" section below for the variables it sets.
 
 ## 🔧 Configuration
 Policy fragment is configured in the policy using the following variables:
@@ -185,8 +216,8 @@ Policy fragment is configured in the policy using the following variables:
 - `toolProfileUUID`: (string, optional) **v2.1.1+** The UUID of the AIRS profile for tool events. **Takes priority over `toolProfile` when defined.**
 
 ### User & Agent Attribution
-- `user`: (string, optional) Authenticated user identifier included in AIRS as `metadata.app_user`. If not set, the fragment falls back to the `x-user-id` request header, then to Claude Code's body `metadata.user_id` (`account_uuid`/`device_id`), then `"anonymous"`.
 - `agent`: (string, optional) Agent or workflow identifier included in AIRS as `metadata.agent_meta.agent_id`. Prefer setting this from trusted APIM policy or backend routing context. If unset, the fragment falls back to Claude Code's `x-claude-code-agent-id` header (subagent attribution only — treat as untrusted client-supplied metadata, not a security boundary).
+- **v2.1+**: the variable names for this are `agentID` and `agentVersion` (not `agent`) — `agentID` populates `metadata.agent_meta.agent_id`, `agentVersion` populates `metadata.agent_meta.agent_version`. `app_user` has no explicit override variable: it resolves from the `x-user-id` request header, then Claude Code's body `metadata.user_id` (`account_uuid`/`device_id`), then falls back to `"anonymous"`.
 
 ### Error Handling
 - `failOpen`: (boolean) **v2.1.1+** Standards-based variable (lowercase). `true` to allow traffic if the scanner is unavailable, `false` to block it. Defaults to `false`.

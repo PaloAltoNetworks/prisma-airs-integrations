@@ -1,0 +1,75 @@
+<!--
+  Same policy as `policy-example`, with Prisma AIRS OAuth bearer-token mode
+  added (v2.1.2+) instead of the static `airs-api` named value.
+
+  Only two lines are added, both in <inbound>, both before the scan
+  fragment's own <include-fragment>:
+    - set-variable PrismaAirsAPI = "OAUTH"   (tells panw-airs-scan to use
+      the bearer token instead of x-pan-token)
+    - include-fragment panw-airs-oauth       (fetches/caches the token into
+      PrismaAirsToken)
+
+  Both only need to run once, during inbound — context.Variables persist
+  across the whole request lifecycle (inbound -> backend -> outbound), so
+  the outbound phase's panw-airs-scan call automatically reuses the same
+  PrismaAirsAPI="OAUTH" and PrismaAirsToken already set, with no need to
+  repeat either line in <outbound>.
+
+  Required named values (create these before deploying — see the NAMED
+  VALUES REQUIRED / REUSED NAMED VALUES section at the top of
+  prisma-airs-policy-fragment-v2.1.2/panw-airs-oauth-v1.0.0):
+    - panw-client-id      SCM service account Client ID
+    - panw-client-secret  SCM service account Client Secret
+    - panw-tsg            Strata Cloud Manager TSG ID
+    - panw-customer-app   AIRS Application name (plain string, not a key)
+    - airs-api            Still required even in OAuth mode — reused as the
+                           client_id field in the AIRS token exchange itself
+-->
+<policies>
+    <inbound>
+        <base />
+        <set-backend-service id="apim-generated-policy" backend-id="my-llm-openai-endpoint" />
+        <!--Optional Entries -->
+        <set-variable name="airsDescriptions" value="@{
+                return new JObject(
+                    new JProperty("url_cats", "There are unacceptable URLs."),
+                    new JProperty("dlp", "There is sensitive data."),
+                    new JProperty("injection", "This contains content that is interpreted as trying to do something malicious."),
+                    new JProperty("agent", "Do not mess with my agent."),
+                    new JProperty("toxic_content", "This contains content that is not in keeping with our policy."),
+                    new JProperty("malicious_code", "You are not fooling me with your naughty code."),
+                    new JProperty("topic_violation", "We are going off topic."),
+                    new JProperty("db_security", "Keep out of DB commands."),
+                    new JProperty("ungrounded", "We lost the plot.")
+                );
+            }" />
+        <set-variable name="failOpen" value="true" />
+        <!--Recommended Entries -->
+        <set-variable name="currentProfile" value="prompt-profile" />
+        <!--OAuth mode (v2.1.2+) — only needs to be here, not in <outbound> too -->
+        <set-variable name="PrismaAirsAPI" value="OAUTH" />
+        <include-fragment fragment-id="panw-airs-oauth" />
+        <!--Mandatory Entries -->
+        <set-variable name="scanType" value="prompt" />
+        <include-fragment fragment-id="panw-airs-scan" />
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+        <!--Optional Entries -->
+        <set-variable name="failOpen" value="false" />
+        <!--Recommended Entries -->
+        <set-variable name="currentProfile" value="response-profile" />
+        <!--Mandatory Entries -->
+        <set-variable name="scanType" value="response" />
+        <!--No OAuth lines needed here — PrismaAirsAPI/PrismaAirsToken from
+             inbound are still set, context.Variables persist for the whole
+             request -->
+        <include-fragment fragment-id="panw-airs-scan" />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>
