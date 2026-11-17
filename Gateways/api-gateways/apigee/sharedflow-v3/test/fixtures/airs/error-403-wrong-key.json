@@ -1,0 +1,16 @@
+{
+ "what": "a wrong key",
+ "recorded_utc": "2026-11-10T00:21:50Z",
+ "status": 403,
+ "ms": 319,
+ "request_contents_shape": [
+  [
+   "prompt"
+  ]
+ ],
+ "body": {
+  "error": {
+   "message": "Invalid API Key or OAuth Token"
+  }
+ }
+}

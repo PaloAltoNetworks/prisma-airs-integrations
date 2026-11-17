@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- A flow hook passes no parameters, so this SharedFlow names the leg and hook mode for v3 (phase 3). -->
+<SharedFlow name="default">
+  <Step>
+    <Name>FC-Airs3HookResponse</Name>
+  </Step>
+</SharedFlow>

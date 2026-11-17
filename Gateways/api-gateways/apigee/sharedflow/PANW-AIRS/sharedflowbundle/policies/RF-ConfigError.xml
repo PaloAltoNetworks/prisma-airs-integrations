@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Fail-closed configuration guard: the AIRS token is absent from KVM airs-config
+  and failOpen is false. Surface a clear 500 rather than silently failing the
+  scan. (In fail-open mode this step is skipped and traffic proceeds.)
+-->
+<RaiseFault continueOnError="false" enabled="true" name="RF-ConfigError">
+  <DisplayName>RF-ConfigError</DisplayName>
+  <Properties/>
+  <FaultResponse>
+    <Set>
+      <Headers>
+        <Header name="Content-Type">application/json</Header>
+        <Header name="x-airs-blocked">true</Header>
+      </Headers>
+      <Payload contentType="application/json">{"error":"&#128737; PRISMA AIRS SECURITY ALERT: Configuration error - AIRS token not configured in KVM 'airs-config'."}</Payload>
+      <StatusCode>500</StatusCode>
+      <ReasonPhrase>Internal Server Error</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>

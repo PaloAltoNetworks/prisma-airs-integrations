@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Phase 7: DLP masking. Rewrites request (prompt leg) or response (response
+     leg) with AIRS masked data. Runs only when airs.outcome == "mask". -->
+<Javascript name="JS-ApplyMasking" timeLimit="5000">
+  <DisplayName>JS-ApplyMasking</DisplayName>
+  <IncludeURL>jsc://airs-lib.js</IncludeURL>
+  <ResourceURL>jsc://apply-masking.js</ResourceURL>
+</Javascript>

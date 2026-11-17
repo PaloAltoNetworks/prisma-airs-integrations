@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Scan slot 3: a fresh, empty airs3ScanResponse3 before its call, as AM-Airs3ClearScan does for slot 1, and the
+     mark that this leg ran slot 3, which JS-Airs3Verdict needs before it reads the slot's answer. -->
+<AssignMessage continueOnError="false" enabled="true" name="AM-Airs3ClearScan3">
+  <DisplayName>AM-Airs3ClearScan3</DisplayName>
+  <AssignVariable><Name>airs3.slotRan3</Name><Value>true</Value></AssignVariable>
+  <AssignTo createNew="true" transport="http" type="response">airs3ScanResponse3</AssignTo>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

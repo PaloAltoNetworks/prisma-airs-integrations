@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- v3: continueOnError=true with a done flag, so a step that does not finish
+     is refused in the client's format, never with Apigee's bare 500 (L2). -->
+<Javascript continueOnError="true" enabled="true" timeLimit="5000" name="JS-Airs3Detect">
+  <DisplayName>JS-Airs3Detect</DisplayName>
+  <IncludeURL>jsc://airs3-lib.js</IncludeURL>
+  <ResourceURL>jsc://airs3-detect.js</ResourceURL>
+</Javascript>

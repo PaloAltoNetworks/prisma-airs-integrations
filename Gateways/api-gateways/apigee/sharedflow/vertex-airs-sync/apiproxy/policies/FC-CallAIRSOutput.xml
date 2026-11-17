@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  FlowCallout into PANW-AIRS with type=response-prompt.
+  Used in the response path to scan the model output before returning to client.
+-->
+<FlowCallout continueOnError="false" enabled="true" name="FC-CallAIRSOutput">
+  <DisplayName>FC-CallAIRSOutput</DisplayName>
+  <FaultRules/>
+  <Parameters>
+    <Parameter name="type">response-prompt</Parameter>
+  </Parameters>
+  <SharedFlowBundle>PANW-AIRS</SharedFlowBundle>
+</FlowCallout>

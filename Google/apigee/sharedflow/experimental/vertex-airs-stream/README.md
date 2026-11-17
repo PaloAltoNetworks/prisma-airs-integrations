@@ -1,5 +1,7 @@
 # vertex-airs-stream (experimental)
 
+> **Superseded by [v3](../../../../../Gateways/api-gateways/apigee/sharedflow-v3/).** v3 turns streaming off on the way to the model and scans the whole reply. The stream proxy here fails open when a scan errors, ignores the configured Prisma AIRS region, and never scans a last stretch of under 200 characters when the stream ends without `finishReason: STOP` (A36 in [v3's MIGRATION](../../../../../Gateways/api-gateways/apigee/sharedflow-v3/MIGRATION.md#the-findings-a01-to-a39)).
+
 > **Status: not production-ready.** Do not deploy this in front of real traffic. The bundle is checked in as a starting point for streaming AIRS integration, but it has known reliability issues that are not yet resolved.
 
 ## What this bundle is trying to do

@@ -1,0 +1,60 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"anthropic.claude-haiku-4-5-20251001-v1:0","id":"msg_bdrk_nio4a54tiuu7r2dkoku2mq4ywakgf4fp43gu4ubsgcsuasarvaja","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":51,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"17"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" times"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" 23"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nLet me calculate this:\n17 "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"× 23 = 17 "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"× ("}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"20 + 3)"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n= 17 × 20"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" + 17 × 3"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n= 340 + 51"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n= 391"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EsoCCoQBCBMQARgCKkCiDbxBbZo6r2212isUpueAu/bsyxCMfCGk+g3l7mpr7U+L2BeLsQ0Q0aIOHkMFUHWVT7LL4v9WVV4pLDUVQKb3MhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOABCCHRoaW5raW5nWgw1Mzg0OTg5NzMzNTKoAd2kttcGEgxh4PaMrT6xIXKv5Y8aDGWzQZMf/hZfWSb4yiIwYYTCwd3iFr9mjXy4fzxNkXVt6kUrgyuTrNl3KBF/cQD8dpaH/1Os98e8Jpv+GUxIKnPy9XnKdD7dR4CtGcajFcp4s6jQFzsGsslYgviAiqDQWNKfSFfeZkMpckV2pUIaKSMuE99qWPJB4tzJ5HpVOpuFzZv7RG0efKZmO0rDU0FEmAwEmi+Y3tXhhopz+1h5sMxc8wPXY1XQWnzEAOrPZ/0mC1geGAE="}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"391"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":51,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":70,"output_tokens_details":{"thinking_tokens":64}}}
+
+event: message_stop
+data: {"type":"message_stop","amazon-bedrock-invocationMetrics":{"inputTokenCount":51,"outputTokenCount":70,"invocationLatency":641,"firstByteLatency":482}}
+

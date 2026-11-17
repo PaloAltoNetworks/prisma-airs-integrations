@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- The reply leg runs here, in the ProxyEndpoint's response flow. The request leg runs in the TargetEndpoint's PreFlow
+     (targets/default.xml), because PANW-AIRS can turn streaming off only there (it changes the target path). -->
+<ProxyEndpoint name="default">
+  <PreFlow name="PreFlow">
+    <Request>
+      <Step><Name>AM-AirsSettings</Name></Step>
+    </Request>
+    <Response>
+      <Step><Name>FC-AirsResponse</Name></Step>
+    </Response>
+  </PreFlow>
+  <HTTPProxyConnection>
+    <BasePath>/airs-mcp</BasePath>
+  </HTTPProxyConnection>
+  <RouteRule name="default">
+    <TargetEndpoint>default</TargetEndpoint>
+  </RouteRule>
+</ProxyEndpoint>

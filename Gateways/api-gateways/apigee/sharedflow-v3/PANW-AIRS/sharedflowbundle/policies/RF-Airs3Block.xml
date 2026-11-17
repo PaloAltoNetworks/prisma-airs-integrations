@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RaiseFault continueOnError="false" enabled="true" name="RF-Airs3Block">
+  <DisplayName>RF-Airs3Block</DisplayName>
+  <FaultResponse>
+    <Set>
+      <Headers>
+        <Header name="Content-Type">{airs3.blockType}</Header>
+        <Header name="x-airs-blocked">true</Header>
+        <Header name="x-airs-kind">{airs3.blockKind}</Header>
+        <Header name="x-airs-category">{airs3.category}</Header>
+        <Header name="x-airs-scan-id">{airs3.scanId}</Header>
+      </Headers>
+      <Payload>{airs3.blockBody}</Payload>
+      <StatusCode>{airs3.blockCode}</StatusCode>
+      <ReasonPhrase>{airs3.blockReason}</ReasonPhrase>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>

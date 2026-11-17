@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- A fresh, empty airs3ScanResponse before every scan: without it, a reply-leg call that gets no answer would still
+     show the request leg's answer. -->
+<AssignMessage continueOnError="false" enabled="true" name="AM-Airs3ClearScan">
+  <DisplayName>AM-Airs3ClearScan</DisplayName>
+  <AssignTo createNew="true" transport="http" type="response">airs3ScanResponse</AssignTo>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

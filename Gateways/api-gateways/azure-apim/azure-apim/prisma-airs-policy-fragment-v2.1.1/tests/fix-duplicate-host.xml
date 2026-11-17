@@ -1,0 +1,19 @@
+<!-- Add this to your mcp-searxng API policy -->
+<policies>
+    <inbound>
+        <base />
+        <!-- Remove the original Host header (APIM gateway host) -->
+        <!-- APIM will automatically set the correct Host header for the backend -->
+        <set-header name="Host" exists-action="delete" />
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+        <include-fragment fragment-id="panw-airs-mcp-scan" />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>

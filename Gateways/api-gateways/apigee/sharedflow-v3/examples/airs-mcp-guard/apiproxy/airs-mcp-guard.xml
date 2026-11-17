@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<APIProxy name="airs-mcp-guard">
+  <Description>An MCP server (streamable HTTP) behind PANW-AIRS. Set the URL to your server; set it to reply in JSON, because PANW-AIRS withholds event-stream replies it can't inspect.</Description>
+</APIProxy>

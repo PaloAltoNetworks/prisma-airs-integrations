@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<APIProxy revision="1" name="vertex-airs-sync">
+    <DisplayName>vertex-airs-sync</DisplayName>
+    <Description>Synchronous Apigee proxy invoking the PANW-AIRS SharedFlow on both request and response, fronting Vertex AI generateContent. JS-based prompt extraction safely handles multi-paragraph payloads.</Description>
+</APIProxy>

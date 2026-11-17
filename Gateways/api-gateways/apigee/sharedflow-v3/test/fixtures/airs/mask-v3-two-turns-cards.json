@@ -1,0 +1,66 @@
+{
+ "what": "v3's scan text for a user turn with the card, then another that uses it",
+ "recorded_utc": "2026-11-10T01:50:17Z",
+ "status": 200,
+ "ms": 639,
+ "request_contents_shape": [
+  [
+   "prompt"
+  ]
+ ],
+ "body": {
+  "action": "block",
+  "category": "malicious",
+  "error": false,
+  "errors": [],
+  "masked": true,
+  "profile_id": "PROFILE_ID",
+  "profile_name": "PROFILE_NAME",
+  "prompt_detected": {
+   "agent": false,
+   "dlp": true,
+   "injection": false,
+   "malicious_code": false,
+   "toxic_content": false,
+   "url_cats": false
+  },
+  "prompt_detection_details": {
+   "prompt_injection_details": {
+    "pi_categories": []
+   },
+   "toxic_content_details": {
+    "toxic_categories": []
+   }
+  },
+  "prompt_masked_data": {
+   "data": "My card number is XXXXXXXXXXXXXXXXXXX.\nUse XXXXXXXXXXXXXXXXXXX for the order.",
+   "pattern_detections": [
+    {
+     "dlp_profiles": [
+      "Sensitive Content"
+     ],
+     "locations": [
+      [
+       18,
+       36
+      ],
+      [
+       43,
+       61
+      ]
+     ],
+     "pattern": "Credit Card Number"
+    }
+   ]
+  },
+  "report_id": "REPORT_ID",
+  "response_detected": {},
+  "scan_id": "SCAN_ID",
+  "session_id": "ID",
+  "source": "AI-Runtime-API",
+  "timeout": false,
+  "tool_detected": {},
+  "tr_id": "ID",
+  "transaction_id": "ID"
+ }
+}

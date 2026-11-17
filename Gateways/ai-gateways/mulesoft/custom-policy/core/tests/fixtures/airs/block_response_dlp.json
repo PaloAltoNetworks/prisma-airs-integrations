@@ -1,0 +1,95 @@
+{
+  "action": "block",
+  "category": "malicious",
+  "error": false,
+  "errors": [],
+  "masked": true,
+  "profile_id": "00000000-0000-0000-0000-000000000000",
+  "profile_name": "my-security-profile",
+  "prompt_detected": {
+    "agent": true,
+    "dlp": false,
+    "injection": true,
+    "malicious_code": false,
+    "toxic_content": false,
+    "url_cats": false
+  },
+  "prompt_detection_details": {
+    "prompt_injection_details": {
+      "pi_categories": [
+        "model_context_exposure"
+      ]
+    },
+    "toxic_content_details": {
+      "toxic_categories": []
+    }
+  },
+  "report_id": "R3f7df8b1-f425-4464-ad3a-3ae439ef1de7",
+  "response_detected": {
+    "db_security": false,
+    "dlp": true,
+    "malicious_code": false,
+    "toxic_content": false,
+    "url_cats": false
+  },
+  "response_masked_data": {
+    "data": "Chase bank Routing number XXXXXXXXX, user name mike, password is maskmemaskme. Account number XXXXXXXXXXX. Account owner: Mike Johnson in California",
+    "pattern_detections": [
+      {
+        "dlp_profiles": [
+          "Sensitive Content"
+        ],
+        "locations": [
+          [
+            26,
+            34
+          ]
+        ],
+        "pattern": "Bank - American Bankers Association Routing Number - ABA"
+      },
+      {
+        "dlp_profiles": [
+          "Sensitive Content"
+        ],
+        "locations": [
+          [
+            26,
+            34
+          ]
+        ],
+        "pattern": "Bank - Committee on Uniform Securities Identification Procedures number"
+      },
+      {
+        "dlp_profiles": [
+          "Sensitive Content"
+        ],
+        "locations": [
+          [
+            94,
+            104
+          ]
+        ],
+        "pattern": "National Id - Brazil - CPF"
+      },
+      {
+        "dlp_profiles": [
+          "Sensitive Content"
+        ],
+        "locations": [
+          [
+            94,
+            104
+          ]
+        ],
+        "pattern": "Tax Id - Germany"
+      }
+    ]
+  },
+  "scan_id": "3f7df8b1-f425-4464-ad3a-3ae439ef1de7",
+  "session_id": "payload-probe-session",
+  "source": "AI-Runtime-API",
+  "timeout": false,
+  "tool_detected": {},
+  "tr_id": "payload-probe-session",
+  "transaction_id": "payload-probe-5"
+}

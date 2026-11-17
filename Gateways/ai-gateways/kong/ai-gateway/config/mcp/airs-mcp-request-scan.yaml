@@ -1,0 +1,206 @@
+# =============================================================================
+# Prisma AIRS on MCP traffic — Kong AI Gateway 2.x — REQUEST LEG ONLY
+#
+#   *** MEASURED 2026-09-12 on AI Gateway 2.0.3, and the limits are the point.
+#   *** This scans the REQUEST leg of tools/call: a clean call is delivered
+#   *** (HTTP 200), and an injection in the tool arguments is refused with
+#   *** JSON-RPC -32001. The RESPONSE leg is unreachable — a payload returned
+#   *** in the tool RESULT is delivered to the client (HTTP 200) — and
+#   *** initialize and tools/list are not scanned at all. Do not present this
+#   *** as MCP response-side protection, and do not rely on it for tool
+#   *** poisoning.
+#
+# Apply : kongctl apply -f dist/mcp/airs-mcp-request-scan.yaml --pat "$KONNECT_PAT"
+#
+# -----------------------------------------------------------------------------
+# WHY THIS IS A request-callout AND NOT A GUARDRAIL
+#
+# No Kong guardrail policy can see MCP traffic. Kong states it themselves:
+#
+#   * ai-mcp-proxy's scope-of-support table:
+#       "AI Guardrails | Applying guardrails to MCP AI plugin requests and
+#        responses | Not supported"
+#   * ai-custom-guardrail enforces introspection "handled by the AI Model
+#     entity", and its Scopes are AI Models / AI Consumers / AI Consumer Groups
+#     / Global. AI MCP Servers is NOT among them.
+#   * The AI MCP Server entity page: "MCP traffic is API-level traffic, not LLM
+#     request/response flows."
+#
+# request-callout IS scoped to AI MCP Servers at Minimum Version AI Gateway 2.0,
+# and that scope list differentiates policy by policy rather than being
+# boilerplate, so it is load-bearing. It is the only documented way to send MCP
+# content to an external scanner and act on the answer.
+#
+# -----------------------------------------------------------------------------
+# WHAT THIS CANNOT DO, STATED BEFORE WHAT IT CAN
+#
+# It cannot see the MCP server's RESPONSE. The request-callout schema declares
+# exactly three Lua hooks and all three run before the upstream is called:
+#
+#   callouts[].request.by_lua   "executes before the callout request is made"
+#   callouts[].response.by_lua  "executes after the callout response is
+#                                received" -- the CALLOUT's response, i.e. the
+#                                reply from AIRS, not from the MCP server
+#   config.upstream.by_lua      "executes before the upstream request is made"
+#
+# There is no header_filter, no body_filter, no response-phase hook of any kind.
+# So TOOL POISONING -- a malicious tool description in a tools/list reply,
+# poisoned `instructions` in an initialize reply, or an injection inside a tool
+# RESULT -- is not detectable here. That is the threat most people mean when
+# they say "MCP security", and this policy does not address it. See docs/DESIGN.md
+# for the post-function detect-and-rewrite alternative and why it is not
+# enforcement.
+#
+# For MCP response-side enforcement today, the answer is PANW's v3 Lua plugin on
+# a classic Kong Gateway control plane, where it already works.
+# =============================================================================
+
+ai_gateway_policies:
+
+  - ref: airs-mcp-scan
+    ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+    name: airs-mcp-scan
+    display_name: "Prisma AIRS — MCP request scan"
+    type: request-callout
+    enabled: true
+    config:
+
+      # A cached security verdict is a replay surface: the same tool call is
+      # allowed a second time without being judged again, and an attacker who
+      # learns the cache key controls how long that lasts. Off at both levels.
+      cache:
+        strategy: "off"
+
+      callouts:
+        - name: airs_scan
+
+          cache:
+            bypass: true
+
+          request:
+            url: https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request
+            method: POST
+
+            headers:
+              # Do NOT forward the caller's headers to AIRS. They carry the MCP
+              # session, any upstream authorization, and whatever else the
+              # client sent -- none of which AIRS needs and all of which would
+              # then sit in a third party's logs.
+              forward: false
+              custom:
+                Content-Type: "application/json"
+                Accept: "application/json"
+                # NOTE, and it is a real one: unlike ai-custom-guardrail's
+                # request.auth.value, there is no documented x-encrypted slot
+                # here. Whether this vault reference is stored encrypted or in
+                # clear on the control plane has not been established; it is
+                # recorded as open in docs/DESIGN.md. If it stores in clear, the
+                # answer is a Konnect Vault or config store, not a shrug.
+                x-pan-token: "{vault://airs/prisma-airs-api-key}"
+
+            body:
+              # decode gives request.by_lua the parsed JSON-RPC envelope.
+              # forward is false because AIRS needs its own ScanRequest wrapper,
+              # not the raw MCP body -- request.by_lua builds it.
+              decode: true
+              forward: false
+
+            http_opts:
+              ssl_verify: true
+              # The schema requires all three timeouts or none.
+              timeouts:
+                connect: 2000
+                write: 2000
+                read: 5000
+
+            # AVAILABILITY, not verdict. This block matches the HTTP STATUS of
+            # the callout response. AIRS returns HTTP 200 carrying
+            # `action: "block"` in the body, so a verdict can never be expressed
+            # here -- it is handled in upstream.by_lua below. What this does is
+            # refuse the MCP call when AIRS is down, throttled or erroring,
+            # rather than passing it through uninspected.
+            #
+            # on_error: fail, and no retries. Per the schema the `retries`
+            # count applies only when on_error is `retry`, so it would be inert
+            # here; and `fail` is the right choice for a security control,
+            # because a scan that did not happen must not become an allowed
+            # tool call.
+            error:
+              on_error: fail
+              http_statuses: [429, 500, 502, 503, 504]
+              error_response_code: 502
+              error_response_msg: "Prisma AIRS scan unavailable"
+
+            by_lua: "__INLINE__lua/callout/request_by_lua.lua"
+
+          response:
+            body:
+              decode: true
+            by_lua: "__INLINE__lua/callout/response_by_lua.lua"
+
+      upstream:
+        # The single enforcement point. Runs in the access phase, which is the
+        # only phase where the Kong PDK permits kong.response.exit WITH A BODY
+        # -- and a body is the whole point, because an MCP client that receives
+        # a bare 403 sees a dead transport and several SDKs tear the session
+        # down, while a JSON-RPC error carrying the caller's own id is a tool
+        # failure the session survives.
+        by_lua: "__INLINE__lua/callout/upstream_by_lua.lua"
+
+      # SOURCE-ONLY. Stripped from dist/ by scripts/build-config.py, which
+      # substitutes these into the inlined Lua. It is not `params:` because the
+      # request-callout schema has no such field -- its config accepts only
+      # cache, callouts and upstream, and anything else is rejected on apply.
+      # A callout by_lua has no documented way to read its own policy config,
+      # so the values are pinned into the code at build time and this block
+      # stays the one place an operator edits them.
+      x-airs-build:
+        profile: !env PRISMA_AIRS_PROFILE_NAME
+        app_name: "kong-ai-gateway"
+        server_name: !env AIRS_MCP_SERVER_NAME
+        # What to do with a message the request hook could not classify: a
+        # JSON-RPC batch, a body that is not JSON-RPC, or a body that does not
+        # decode at all. Any of the three can carry a tools/call, and none of
+        # them was inspected.
+        #
+        #   refuse  (default) -- 403, JSON-RPC -32001, upstream never reached.
+        #   allow             -- forwarded uninspected. Opt-in, and a
+        #                        transport-compatibility choice rather than a
+        #                        security one: it reopens GAP 4.
+        #
+        # Anything other than the exact string "allow" refuses, so a typo or an
+        # empty value fails closed rather than silently opening the gap.
+        unclassified_action: "refuse"
+
+# =============================================================================
+# Attaching it.
+#
+# Target passthrough-listener MCP servers specifically. In that mode there is a
+# real upstream, the tool descriptions are attacker-controlled rather than
+# Kong's own configuration, and the JSON-RPC envelope has the best chance of
+# reaching the callout intact. conversion-listener mode is UNVERIFIED here:
+# ai-mcp-proxy rewrites the call into a REST request, and whether the callout
+# still sees JSON-RPC there has not been tested.
+#
+# Also unverified, and capable of invalidating this whole file: ai-mcp-proxy
+# runs at priority 820 and request-callout at 812, and kong.response.exit
+# interrupts the plugin flow for the current phase. Anything Kong answers
+# itself -- a tools/list served from Kong's own tool definitions, an ACL denial
+# -- plausibly never reaches the callout and is therefore uninspected.
+# docs/DESIGN.md enumerates those paths by name. Until it runs, assume
+# they exist.
+# =============================================================================
+#
+# ai_gateway_mcp_servers:
+#   - ref: my-mcp
+#     ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+#     name: my-mcp
+#     type: passthrough-listener
+#     config:
+#       url: http://your-mcp-server:9000/mcp
+#       route:
+#         paths:
+#           - /airs-mcp
+#     policies:
+#       # By NAME, not !ref — the value is the policy's `name` field.
+#       - airs-mcp-scan

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Parses the incoming Vertex generateContent request body and joins
+  contents[*].parts[*].text into a single string assigned to
+  request_prompt_value. JSON.parse handles whatever escaping was on the wire.
+-->
+<Javascript continueOnError="false" enabled="true" timeLimit="200" name="JS-ExtractRequestPrompt">
+  <DisplayName>JS-ExtractRequestPrompt</DisplayName>
+  <Properties/>
+  <ResourceURL>jsc://extract-request-prompt.js</ResourceURL>
+</Javascript>

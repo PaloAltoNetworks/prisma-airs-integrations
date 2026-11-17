@@ -1,5 +1,7 @@
 # Apigee X + Vertex AI + Prisma AIRS Architecture
 
+> **Superseded by [v3](../../Gateways/api-gateways/apigee/sharedflow-v3/).** This page describes V1, the single-bundle proxy, and hasn't been corrected. [v3's MIGRATION](../../Gateways/api-gateways/apigee/sharedflow-v3/MIGRATION.md#the-findings-a01-to-a39) lists V1's defects (A33 to A35, A37).
+
 ## Network Architecture
 
 **Deployment Model**: Non-VPC Peering + Private Service Connect (PSC)

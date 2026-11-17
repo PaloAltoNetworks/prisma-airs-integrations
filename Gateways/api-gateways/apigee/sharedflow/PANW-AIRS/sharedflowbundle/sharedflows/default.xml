@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  PANW-AIRS — unified AIRS scan flow.
+
+  Called from a proxy's request flow (type=user-prompt) and/or response flow
+  (type=response-prompt | both). The same steps run in either leg; the phase and
+  the parsed message decide what is scanned. Steps after detection are gated so
+  the flow is a clean no-op when there is nothing to scan.
+-->
+<SharedFlow name="default">
+
+  <!-- 1. Config: token + profile from KVM, then normalise all knobs. -->
+  <Step><Name>KVM-GetAIRSConfig</Name></Step>
+  <Step><Name>JS-InitConfig</Name></Step>
+
+  <!-- 2. Fail-closed guard: no token configured. -->
+  <Step>
+    <Name>RF-ConfigError</Name>
+    <Condition>airs.cfg.keyMissing = "true" and airs.cfg.failOpen = "false"</Condition>
+  </Step>
+
+  <!-- 3. Detect API type / Claude Code / shouldScan / identifiers. -->
+  <Step><Name>JS-DetectContext</Name></Step>
+
+  <!-- 4. Extract content (multi-format + inline tool calls). -->
+  <Step>
+    <Name>JS-ExtractContent</Name>
+    <Condition>airs.shouldScan = "true"</Condition>
+  </Step>
+
+  <!-- 5. Build body → call AIRS → parse verdict → decide outcome.
+       Gated on hasContent so text-less turns never send an empty scan. -->
+  <Step>
+    <Name>JS-BuildAIRSScanBody</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>AM-SetAIRSScanRequest</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>SC-AIRSScan</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>EV-ParseAIRSVerdict</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
+  </Step>
+  <Step>
+    <Name>JS-ProcessVerdict</Name>
+    <Condition>airs.shouldScan = "true" and airs.hasContent = "true"</Condition>
+  </Step>
+
+  <!-- 6. Act on the verdict: mask in place, or block with a native-shape response. -->
+  <Step>
+    <Name>JS-ApplyMasking</Name>
+    <Condition>airs.outcome = "mask"</Condition>
+  </Step>
+  <Step>
+    <Name>RF-Block</Name>
+    <Condition>airs.outcome = "block"</Condition>
+  </Step>
+
+</SharedFlow>

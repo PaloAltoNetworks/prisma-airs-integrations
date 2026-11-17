@@ -1,0 +1,10 @@
+# Copyright 2026 Salesforce, Inc. All rights reserved.
+---
+apiVersion: gateway.mulesoft.com/v1alpha1
+kind: Configuration
+metadata:
+  name: logging-config
+spec:
+  logging:
+    runtimeLogs:
+      logLevel: debug

@@ -1,0 +1,12 @@
+# Copyright 2026 Salesforce, Inc. All rights reserved.
+version: "3.3"
+
+services:
+  local-flex:
+    image: ${PDK_TEST_FLEX_IMAGE_NAME:-mulesoft/flex-gateway}:${PDK_TEST_FLEX_IMAGE_VERSION:-1.13.0}
+    ports:
+      - 8081:8081
+    volumes:
+      - ./config:/usr/local/share/mulesoft/flex-gateway/conf.d/
+  backend:
+    image: kennethreitz/httpbin

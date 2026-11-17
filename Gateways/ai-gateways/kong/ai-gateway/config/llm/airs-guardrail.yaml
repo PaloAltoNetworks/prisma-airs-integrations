@@ -1,0 +1,234 @@
+# =============================================================================
+# Prisma AIRS as an AI Policy on Kong AI Gateway 2.x — LLM routes
+#
+# Shape : AI Gateway 2.x control plane in Konnect, self-managed data planes
+# Apply : kongctl apply -f config/llm/airs-guardrail.yaml --pat "$KONNECT_PAT"
+# Needs : an AI Gateway instance, one AI Model, and a Prisma AIRS API Intercept
+#         application with a named security profile
+#
+# This is NOT a plugin. Kong AI Gateway 2.x expresses configuration as AI
+# entities and AI Policies; a policy is what a plugin used to be, and Kong's own
+# changelog says so: "policies are a control plane concept. In the runtime
+# they're implemented as plugins." Nothing here is installed on a data plane and
+# no image is rebuilt. There IS Lua — in the `functions` block below — but it
+# travels inside the configuration rather than as a package.
+#
+# DO NOT EDIT THE FUNCTION BODIES HERE. They are generated from lua/guardrail/
+# by scripts/build-config.py so that the Lua is lintable and unit-tested rather
+# than living only as a quoted string. Edit the .lua file and rebuild.
+#
+# -----------------------------------------------------------------------------
+# CLAIM STATUS. Every assertion in this file is one of three things, and they
+# are never mixed silently:
+#
+#   DOCUMENTED    — from the AI Gateway 2.x POLICY schema at
+#                   developer.konghq.com/ai-gateway/policies/ai-custom-guardrail/reference/
+#                   (note: the Kong Gateway 3.x PLUGIN schema is a DIFFERENT and
+#                   smaller contract — four config keys exist only on the policy.
+#                   scripts/check-policy-schema.py validates against the policy
+#                   schema for exactly this reason.)
+#   MEASURED      — established on a live gateway by someone, with the date and
+#                   the runtime version. Attribution is in docs/CREDITS.md.
+#   UNVERIFIED    — believed, not tested. Every one of these is a row in
+#                   docs/DESIGN.md and none of them is claimed in the README.
+# =============================================================================
+
+ai_gateway_policies:
+
+  - ref: airs-scan
+    ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+    name: airs-scan
+    display_name: "Prisma AIRS — prompt and response scan"
+    type: ai-custom-guardrail
+    enabled: true
+    config:
+
+      # DOCUMENTED. Enum BOTH | INPUT | OUTPUT. One policy covers both legs;
+      # $(source) tells the content function which AIRS key to build. Prisma
+      # AIRS keys the two directions differently (contents[].prompt versus
+      # contents[].response) and runs a different detector set on each, so the
+      # direction is not cosmetic.
+      guarding_mode: BOTH
+
+      # DOCUMENTED, and chosen over the schema default `last_message`
+      # deliberately. `concatenate_all_content` is the only value under which a
+      # role:"tool" result — where an untrusted external system injects into the
+      # conversation — reaches the scanner.
+      #
+      # MEASURED (2026-09-08, AI Gateway 2.0.3): the text is the message
+      # contents joined by "\n\n" in REVERSE chronological order, system prompt
+      # included. Two consequences to plan for rather than discover: a system
+      # prompt that reads like an injection is a false-positive surface, and
+      # larger payloads cost more AIRS tokens per scan.
+      #
+      # MEASURED, and this is a coverage GAP the README states plainly:
+      # tools[].function.description and assistant tool_calls[].function.arguments
+      # are NOT message content and never enter $(content) under any value of
+      # this setting. Tool definitions on the LLM path are outside this control.
+      text_source: concatenate_all_content
+
+      # DOCUMENTED. Restated rather than left to the default because both are
+      # load-bearing: stop_on_error is what refuses traffic when the call to
+      # AIRS itself fails, and 10 s of added latency against an unreachable
+      # endpoint is too long for an inline control.
+      timeout: 5000
+      ssl_verify: true
+      stop_on_error: true
+
+      # DOCUMENTED, policy-only — absent from the Kong Gateway plugin schema.
+      #
+      # continue_on_detection: false — enforce. For a genuine observe-only
+      # rollout, set continue_on_detection: true on this same policy: the scan
+      # still runs and the detection is still recorded, but the request is not
+      # refused. No second file is needed.
+      continue_on_detection: false
+      # rejection_mode: none — the client receives the generic block message,
+      # which carries the scan_id so support can find the scan in Strata Cloud
+      # Manager. `stealth` returns a bare 403 for estates that treat the
+      # existence of a block as information. UNVERIFIED: the exact status line
+      # and body of each mode on a live 2.x data plane — docs/DESIGN.md.
+      rejection_mode: none
+      # log_blocked_content: false — a blocked prompt is by definition content
+      # somebody tried to send through a security control. Keeping it out of
+      # Kong's telemetry is the privacy-preserving default; the full record
+      # lives in the AIRS scan log where it is access-controlled. Flip to true
+      # only with a deliberate decision.
+      log_blocked_content: false
+
+      # DOCUMENTED: the policy schema describes this as the number of BYTES
+      # received from upstream before the buffer is handed to the guardrail, and
+      # the default is 100.
+      #
+      # UNVERIFIED VALUE. At 100 a single answer could produce many AIRS calls,
+      # each on a context-free fragment, with part of the response already
+      # delivered before a block lands. 65536 keeps a typical completion in one
+      # scan. How many calls each value actually produces has not been measured.
+      response_buffer_size: 65536
+
+      params:
+        # Your AIRS security profile name, supplied at apply time so that no
+        # tenant-specific value is committed:
+        #     export PRISMA_AIRS_PROFILE_NAME=my-profile
+        profile: !env PRISMA_AIRS_PROFILE_NAME
+        app_name: "kong-ai-gateway"
+        # app_user and ai_model are optional and are sent only if set. They are
+        # static: see docs/DESIGN.md for why a guardrail function cannot
+        # reach the calling consumer or the model name.
+
+      request:
+        # The hostname depends on your tenant's region. The endpoint shipped
+        # below is the one this configuration was built and measured against; if
+        # your profile is in a region with a different hostname, take it from
+        # your AIRS onboarding rather than guessing.
+        url: https://service.api.aisecurity.paloaltonetworks.com/v1/scan/sync/request
+
+        # DOCUMENTED. request.auth.value is the only field in this schema marked
+        # BOTH referenceable and encrypted, so the vault reference resolves here
+        # and the stored value is encrypted at rest. It also keeps the key out
+        # of the `conf` table handed to every guardrail function, which
+        # config.params does not.
+        #
+        # WHICH VAULT. The reference names a Vault entity, and the choice of
+        # vault decides where the key rests:
+        #
+        #   vault://airs/prisma-airs-api-key  with a `type: konnect` vault -- the key is
+        #     held in a Konnect Config Store, written at apply time from a
+        #     deferred !secret. Nothing is needed on the data plane host. This
+        #     is what config/lab/airs-secret.yaml creates.
+        #
+        #   vault://airs/prisma-airs-api-key  with a `type: env` vault and NO
+        #     config.prefix -- the env vault PREPENDS the prefix to the key in
+        #     the reference, so `prefix: AIRS_` would resolve the wrong variable
+        #     entirely. See docs/DEPLOYMENT.md section 5 for the rule and both
+        #     working combinations. Without a prefix this resolves the key from
+        #     the DATA PLANE's own environment, so the
+        #     key never reaches Kong's control plane at all. Prefer this where a
+        #     security vendor credential must not sit in a SaaS control plane.
+        #
+        # The reference below is identical either way; only the Vault entity
+        # changes. See config/lab/airs-secret.yaml and docs/DEPLOYMENT.md.
+        auth:
+          location: header
+          name: x-pan-token
+          value: "{vault://airs/prisma-airs-api-key}"
+
+        headers:
+          # Not optional. AIRS answers 415 to a scan POST without a content type.
+          Content-Type: "application/json"
+          Accept: "application/json"
+
+        # request.body is a flat map of strings; nested YAML fails schema
+        # validation. Nested JSON comes from functions that return a table.
+        #
+        # MEASURED (2026-09-08): functions are referenced BARE. The
+        # explicit-argument form $(airs_contents(source, content)) returns
+        # HTTP 500 "invalid expression syntax" and no request reaches the model.
+        # Built-ins are injected by PARAMETER NAME.
+        body:
+          ai_profile: "$(airs_profile)"
+          metadata: "$(airs_metadata)"
+          contents: "$(airs_contents)"
+
+      response:
+        block: "$(airs_verdict.block)"
+        block_message: "$(airs_verdict.block_message)"
+
+      # MEASURED (2026-09-12, AI Gateway 2.0.3): both of these are DROPPED at
+      # runtime. The data plane logs
+      #   [ai-custom-guardrail] metric input_block_detail has unexpected type
+      #   string, expected table
+      # and no value is exported. The intent was to keep the category and the
+      # detector names out of the client response and in the gateway's own
+      # telemetry; on this runtime that does not happen. Until it does, Strata
+      # Cloud Manager, correlated by scan_id, is the record.
+      metrics:
+        block_reason: "$(airs_verdict.block_message)"
+        block_detail: "$(airs_verdict.detail)"
+
+      functions:
+        # GENERATED FROM lua/guardrail/ — edit there, then run
+        # scripts/build-config.py. Do not hand-edit.
+        airs_profile: "__INLINE__lua/guardrail/airs_profile.lua"
+        airs_metadata: "__INLINE__lua/guardrail/airs_metadata.lua"
+        airs_contents: "__INLINE__lua/guardrail/airs_contents.lua"
+        airs_verdict: "__INLINE__lua/guardrail/airs_verdict.lua"
+
+# =============================================================================
+# Attaching the policy, and closing the streaming hole at the same time.
+#
+# Take your existing AI Model and add ONE policy reference, plus
+# response_streaming: deny.
+#
+# WHY deny MATTERS. DOCUMENTED by Kong: "You can't add AI Policies that use the
+# Response Transformer Policy or otherwise trigger in the response phase when
+# streaming is configured." MEASURED (2026-09-08): with stream:true the OUTPUT
+# phase is never invoked — the guardrail service receives no call, there is no
+# error and no warning, and every SSE chunk reaches the client. So without this
+# line ANY CALLER CAN OPT ITSELF OUT OF RESPONSE SCANNING by setting one flag in
+# its own request body.
+#
+# If some models must stream, attach to those models a second copy of this
+# policy with guarding_mode: INPUT, and state plainly that their coverage is
+# prompt-only — rather than attaching this one and assuming the response is
+# inspected.
+# =============================================================================
+#
+# ai_gateway_models:
+#   - ref: my-model
+#     ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+#     name: my-model
+#     type: model
+#     formats:
+#       - type: openai
+#     config:
+#       response_streaming: deny
+#     policies:
+#       # By NAME, not !ref — the value is the policy's `name` field.
+#       - airs-scan
+#     targets:
+#       - name: gpt-4o
+#         provider: generic-openai
+#         config:
+#           type: openai
+#     capabilities:
+#       - generate

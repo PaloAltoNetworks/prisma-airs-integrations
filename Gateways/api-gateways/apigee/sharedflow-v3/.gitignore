@@ -1,0 +1,3 @@
+# The folder's .gitignore leaves out every *.json file, to keep service account keys out of the repository. The
+# unit suite's recorded Prisma AIRS replies are JSON, so only they are put back in.
+!/test/fixtures/airs/*.json

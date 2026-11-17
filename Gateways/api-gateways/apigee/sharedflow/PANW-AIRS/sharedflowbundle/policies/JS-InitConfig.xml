@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Phase 1: resolve config (phase, profile, endpoint, fail mode, agent meta,
+     threat descriptions) from flow variables + KVM, with APIM-matching defaults. -->
+<Javascript name="JS-InitConfig" timeLimit="5000">
+  <DisplayName>JS-InitConfig</DisplayName>
+  <IncludeURL>jsc://airs-lib.js</IncludeURL>
+  <ResourceURL>jsc://init-config.js</ResourceURL>
+</Javascript>

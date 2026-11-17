@@ -1,0 +1,71 @@
+{
+ "what": "a reply scan whose prompt context trips injection and whose reply carries the card",
+ "recorded_utc": "2026-11-10T01:50:22Z",
+ "status": 200,
+ "ms": 1017,
+ "request_contents_shape": [
+  [
+   "prompt",
+   "response"
+  ]
+ ],
+ "body": {
+  "action": "block",
+  "category": "malicious",
+  "error": false,
+  "errors": [],
+  "masked": true,
+  "profile_id": "PROFILE_ID",
+  "profile_name": "PROFILE_NAME",
+  "prompt_detected": {
+   "agent": true,
+   "dlp": false,
+   "injection": true,
+   "malicious_code": false,
+   "toxic_content": false,
+   "url_cats": false
+  },
+  "prompt_detection_details": {
+   "prompt_injection_details": {
+    "pi_categories": [
+     "repeated_token_risk"
+    ]
+   },
+   "toxic_content_details": {
+    "toxic_categories": []
+   }
+  },
+  "report_id": "REPORT_ID",
+  "response_detected": {
+   "db_security": false,
+   "dlp": true,
+   "malicious_code": false,
+   "toxic_content": false,
+   "url_cats": false
+  },
+  "response_masked_data": {
+   "data": "The card on file is XXXXXXXXXXXXXXXXXXX.",
+   "pattern_detections": [
+    {
+     "dlp_profiles": [
+      "Sensitive Content"
+     ],
+     "locations": [
+      [
+       20,
+       38
+      ]
+     ],
+     "pattern": "Credit Card Number"
+    }
+   ]
+  },
+  "scan_id": "SCAN_ID",
+  "session_id": "ID",
+  "source": "AI-Runtime-API",
+  "timeout": false,
+  "tool_detected": {},
+  "tr_id": "ID",
+  "transaction_id": "ID"
+ }
+}

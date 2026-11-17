@@ -1,0 +1,11 @@
+[package]
+name = "prisma-airs-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Prisma AIRS Guardrails for MuleSoft: settings, formats, extraction, the AIRS contract and decisions, with no gateway dependency"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"

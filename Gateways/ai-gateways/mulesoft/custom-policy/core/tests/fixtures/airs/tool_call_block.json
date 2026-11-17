@@ -1,0 +1,70 @@
+{
+  "action": "block",
+  "category": "malicious",
+  "error": false,
+  "errors": [],
+  "masked": false,
+  "profile_id": "00000000-0000-0000-0000-000000000000",
+  "profile_name": "my-security-profile",
+  "prompt_detected": {},
+  "report_id": "R90210286-8c7e-4a8c-9fd4-696b142c258c",
+  "response_detected": {},
+  "scan_id": "90210286-8c7e-4a8c-9fd4-696b142c258c",
+  "session_id": "payload-probe-session",
+  "source": "AI-Runtime-API",
+  "timeout": false,
+  "tool_detected": {
+    "input_detected": {
+      "detection_entries": [
+        {
+          "details": {
+            "prompt_injection_details": {
+              "pi_categories": [
+                "goal_redirection_and_social_engineering",
+                "model_context_exposure"
+              ]
+            }
+          },
+          "detections": {
+            "agent": true,
+            "db_security": false,
+            "dlp": false,
+            "injection": true,
+            "malicious_code": false,
+            "toxic_content": false,
+            "url_cats": false
+          },
+          "threats": [
+            "context poisoning"
+          ],
+          "tool_invoked": "ask_wiki_question"
+        }
+      ]
+    },
+    "metadata": {
+      "ecosystem": "mcp",
+      "method": "tools/call",
+      "server_name": "deepwiki-test"
+    },
+    "output_detected": {
+      "detection_entries": null
+    },
+    "summary": {
+      "detections": {
+        "agent": true,
+        "db_security": false,
+        "dlp": false,
+        "injection": true,
+        "malicious_code": false,
+        "toxic_content": false,
+        "url_cats": false
+      },
+      "threats": [
+        "context poisoning"
+      ]
+    },
+    "verdict": "malicious"
+  },
+  "tr_id": "payload-probe-session",
+  "transaction_id": "payload-probe-5"
+}

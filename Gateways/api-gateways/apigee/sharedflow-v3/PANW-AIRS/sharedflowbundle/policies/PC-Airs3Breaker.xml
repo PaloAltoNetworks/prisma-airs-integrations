@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Phase 3, the circuit breaker: its new state, when this leg's calls changed it. The expiry comes from a variable alone (an
+     expiry takes a value or a variable, not both: L19). -->
+<PopulateCache continueOnError="true" enabled="true" name="PC-Airs3Breaker">
+  <DisplayName>PC-Airs3Breaker</DisplayName>
+  <CacheKey>
+    <KeyFragment ref="airs3.breakerKey"/>
+  </CacheKey>
+  <Scope>Global</Scope>
+  <ExpirySettings>
+    <TimeoutInSec ref="airs3.breakerTtl"/>
+  </ExpirySettings>
+  <Source>airs3.breakerNew</Source>
+</PopulateCache>

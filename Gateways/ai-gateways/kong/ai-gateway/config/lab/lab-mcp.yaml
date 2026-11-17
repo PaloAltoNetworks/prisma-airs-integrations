@@ -1,0 +1,52 @@
+# =============================================================================
+# LAB FIXTURE -- an AI MCP Server entity in front of scripts/lab-mcp-server.py.
+#
+# Registered WITHOUT a policy first, on purpose: proving the passthrough route
+# works before adding a scan means a later failure has one candidate cause
+# instead of two.
+#
+#   python3 scripts/lab-mcp-server.py --host 0.0.0.0 --port 9200
+#
+#   With --poison this fixture serves a poisoned tool catalogue. --host 0.0.0.0
+#   is shown because the data plane reaches it across a container bridge; bind
+#   the bridge address rather than every interface if the host is not isolated.
+#   kongctl apply -f config/lab/lab-mcp.yaml
+# =============================================================================
+
+ai_gateway_mcp_servers:
+
+  - ref: lab-mcp
+    ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+    name: lab-mcp
+    display_name: "Lab MCP server"
+    enabled: true
+
+    # Union selector -- same trap as models and providers, only `scaffold` shows
+    # it. Five options exist: conversion-only, conversion-listener, listener,
+    # passthrough-listener, upstream-server. `passthrough-listener` is the one
+    # that fronts an EXISTING MCP server rather than converting REST APIs into
+    # one, which is the case Prisma AIRS needs to cover.
+    type: passthrough-listener
+
+    # MEASURED 2026-09-12. `ai-custom-guardrail` CANNOT be attached here. The
+    # Konnect control plane refuses the update outright:
+    #
+    #   400 Bad Request -- policies: policy "airs-scan" of type
+    #   "ai-custom-guardrail" is not supported for scope "mcp-servers"
+    #
+    # This is the gap Kong documents in the ai-mcp-proxy support table, confirmed
+    # by the API rather than inferred from prose. MCP content scanning therefore
+    # goes through `request-callout`, which IS scoped to AI MCP Servers -- see
+    # config/mcp/airs-mcp-request-scan.yaml.
+
+    # `request-callout` IS accepted at this scope -- the contrast with
+    # ai-custom-guardrail above is the whole reason this design exists.
+    policies:
+      - airs-mcp-scan
+
+    config:
+      # 172.17.0.1 is the host as seen from inside the data plane container.
+      url: http://172.17.0.1:9200
+      route:
+        paths:
+          - /mcp

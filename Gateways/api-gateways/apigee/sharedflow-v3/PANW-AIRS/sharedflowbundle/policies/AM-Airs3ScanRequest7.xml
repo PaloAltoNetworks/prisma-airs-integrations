@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Scan slot 7: the scan request, a private. message, as AM-Airs3ScanRequest's (A25). -->
+<AssignMessage continueOnError="false" enabled="true" name="AM-Airs3ScanRequest7">
+  <DisplayName>AM-Airs3ScanRequest7</DisplayName>
+  <AssignTo createNew="true" transport="http" type="request">private.airs3_scan7</AssignTo>
+  <Set>
+    <Verb>POST</Verb>
+    <Headers>
+      <Header name="Content-Type">application/json</Header>
+      <Header name="x-pan-token">{private.airs3_token}</Header>
+    </Headers>
+    <Payload contentType="application/json">{airs3.scanBody7}</Payload>
+  </Set>
+  <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

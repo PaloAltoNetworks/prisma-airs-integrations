@@ -1,0 +1,9 @@
+{
+  "model": "gpt-test",
+  "instructions": "You are a weather bot.",
+  "input": [
+    {"role": "user", "content": [{"type": "input_text", "text": "What is the weather in Paris?"}]},
+    {"type": "function_call", "call_id": "call_1", "name": "get_weather", "arguments": "{\"city\":\"Paris\"}"},
+    {"type": "function_call_output", "call_id": "call_1", "output": "Sunny, 21C"}
+  ]
+}

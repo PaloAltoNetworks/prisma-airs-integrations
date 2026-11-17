@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Scan slot 7, the verdict cache (phase 3): its clean allow, by scan id, for verdictCacheTtlS seconds. The expiry comes from a variable
+     alone (L19). continueOnError=true: a write that fails leaves nothing behind. -->
+<PopulateCache continueOnError="true" enabled="true" name="PC-Airs3Verdict7">
+  <DisplayName>PC-Airs3Verdict7</DisplayName>
+  <CacheKey>
+    <KeyFragment ref="airs3.vcKey7"/>
+  </CacheKey>
+  <Scope>Global</Scope>
+  <ExpirySettings>
+    <TimeoutInSec ref="airs3.vcTtl"/>
+  </ExpirySettings>
+  <Source>airs3.vcPut7</Source>
+</PopulateCache>
