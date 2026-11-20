@@ -57,14 +57,27 @@ ai_gateway_policies:
       #
       # MEASURED (2026-09-08, AI Gateway 2.0.3): the text is the message
       # contents joined by "\n\n" in REVERSE chronological order, system prompt
-      # included. Two consequences to plan for rather than discover: a system
-      # prompt that reads like an injection is a false-positive surface, and
-      # larger payloads cost more AIRS tokens per scan.
+      # included, with NO indication of who said what. Two consequences to plan
+      # for rather than discover: a system prompt that reads like an injection
+      # is a false-positive surface, and larger payloads cost more AIRS tokens
+      # per scan.
+      #
+      # A THIRD consequence turned out to be the serious one. MEASURED
+      # (2026-09-14, AI Gateway 2.0.3) on a live tenant: an unattributed join of
+      # an ordinary conversation is blocked as prompt injection, because the
+      # model's own previous answer reads as an assertion planted in the prompt.
+      # airs_contents therefore rebuilds the scanned text from the request body
+      # with each turn attributed, and this value is now the FALLBACK used when
+      # that rebuild meets a body shape it does not understand. It still has to
+      # be concatenate_all_content for that fallback to be the widest one.
       #
       # MEASURED, and this is a coverage GAP the README states plainly:
       # tools[].function.description and assistant tool_calls[].function.arguments
       # are NOT message content and never enter $(content) under any value of
-      # this setting. Tool definitions on the LLM path are outside this control.
+      # this setting. They ARE in the raw request body, which airs_contents can
+      # read, so params.tool_scan below puts them in front of the scanner --
+      # opt-in, off by default. What no setting reaches is a tool call on the
+      # leg the model emits it on: GAP 2, README and docs/DESIGN.md 8.2.
       text_source: concatenate_all_content
 
       # DOCUMENTED. Restated rather than left to the default because both are
@@ -99,11 +112,23 @@ ai_gateway_policies:
       # received from upstream before the buffer is handed to the guardrail, and
       # the default is 100.
       #
-      # UNVERIFIED VALUE. At 100 a single answer could produce many AIRS calls,
-      # each on a context-free fragment, with part of the response already
-      # delivered before a block lands. 65536 keeps a typical completion in one
-      # scan. How many calls each value actually produces has not been measured.
-      response_buffer_size: 65536
+      # MEASURED (2026-09-14, AI Gateway 2.0.3), against a guardrail service
+      # that counted every call it received: this is the SEGMENT SIZE of
+      # chunked OUTPUT scanning on a streamed response, not a total-answer
+      # buffer. A 309-character streamed answer at the default (100) produced
+      # 3 OUTPUT calls of 101/104/103 characters; at 512, 2 calls for 1148
+      # characters; at 2048, ZERO calls -- the stream ended before the
+      # threshold was ever reached. Non-streamed replies are always ONE call
+      # carrying the whole body, at every value tried. A large value therefore
+      # buys nothing on the buffered path and, on the streamed path, is
+      # INFERRED (not re-measured) to be why an earlier revision of this file
+      # believed the response leg never runs on a stream at all -- the
+      # zero-calls-at-a-large-buffer result above is measured, that it explains
+      # the earlier reading is an inference.
+      # See GAP 1 in the README, and `config/lab/lab-model.yaml`
+      # for how to reproduce the segment behaviour. NEVER set a large value
+      # here "to scan a whole streamed answer at once": it scans nothing. Left
+      # at the schema default (100) by not setting the key.
 
       params:
         # Your AIRS security profile name, supplied at apply time so that no
@@ -111,9 +136,45 @@ ai_gateway_policies:
         #     export PRISMA_AIRS_PROFILE_NAME=my-profile
         profile: !env PRISMA_AIRS_PROFILE_NAME
         app_name: "kong-ai-gateway"
-        # app_user and ai_model are optional and are sent only if set. They are
-        # static: see docs/DESIGN.md for why a guardrail function cannot
-        # reach the calling consumer or the model name.
+
+        # MEASURED (2026-09-14, AI Gateway 2.0.3): a guardrail function body
+        # reaches the Kong PDK, so the model name, the caller's address and the
+        # authenticated consumer are all available to airs_metadata and no
+        # longer have to be pinned per policy. The consumer lookup is reachable
+        # but was never exercised with an authenticated consumer -- the lab
+        # model carried no auth -- so what has actually been measured end to
+        # end is the header label below. app_user and ai_model remain
+        # accepted here as the LAST fallback, for an operator who prefers a
+        # fixed label on a policy attached to one consumer group:
+        #   app_user: "team-a"
+        #   ai_model: "my-model"
+
+        # user_header names a request header carrying the end user, used only
+        # when Kong has authenticated no consumer. It is caller-supplied, so it
+        # labels a scan and must never be read as an authenticated identity.
+        # Point it at whatever header your application already sends.
+        user_header: "x-airs-user"
+
+        # Correlation. session_header names the CONVERSATION, which only the
+        # caller can know -- absent, a conversation is a single exchange. The
+        # ROUND is Kong's own request id and needs no configuration;
+        # transaction_header exists only for an application trusted to name its
+        # own rounds, and hands that choice to the caller, so leave it unset
+        # unless you mean it. See docs/DESIGN.md section 7.
+        session_header: "x-airs-session-id"
+        # transaction_header: "x-airs-transaction-id"
+
+        # tool_scan closes part of GAP 2, and it is off unless set to exactly
+        # "calls" or "catalogue". MEASURED (2026-09-14): tools[] and
+        # tool_calls[].function.arguments are not message content and never
+        # enter $(content) under any text_source, but the raw request body
+        # carries both, so airs_contents can put them in front of the
+        # detectors. "calls" appends the arguments the model generated;
+        # "catalogue" also prepends the tool declarations, which is the
+        # tool-poisoning surface -- and the one a profile with the source_code
+        # detector flags, because a JSON parameter schema reads as code. Try
+        # either against your own profile before enabling it in production.
+        # tool_scan: "calls"
 
       request:
         # The hostname depends on your tenant's region. The endpoint shipped
@@ -165,6 +226,25 @@ ai_gateway_policies:
         # HTTP 500 "invalid expression syntax" and no request reaches the model.
         # Built-ins are injected by PARAMETER NAME.
         body:
+          # Correlation identifiers, built by airs_correlation below. They nest
+          # and they are not interchangeable: transaction_id is one ROUND -- a
+          # prompt and the response it produced -- and carries the same value on
+          # both legs so Strata Cloud Manager shows one exchange rather than two
+          # unrelated scans; session_id is the CONVERSATION grouping several
+          # rounds, taken from the caller's header and falling back to the round
+          # so an exchange is never split across two sessions.
+          #
+          # tr_id is deliberately absent. MEASURED (2026-09-14): it is the older
+          # name of session_id, NOT of transaction_id -- a request carrying only
+          # tr_id comes back with session_id set to that value. Sending the
+          # round under it files the round in the conversation slot.
+          #
+          # MEASURED (2026-09-14): a field the function leaves nil is omitted
+          # from the payload, and AIRS then generates pan_<uuid> for that slot.
+          # A field set to an empty string is rendered as JSON false instead,
+          # which is why airs_correlation returns nothing rather than blanks.
+          transaction_id: "$(airs_correlation.transaction_id)"
+          session_id: "$(airs_correlation.session_id)"
           ai_profile: "$(airs_profile)"
           metadata: "$(airs_metadata)"
           contents: "$(airs_contents)"
@@ -173,14 +253,28 @@ ai_gateway_policies:
         block: "$(airs_verdict.block)"
         block_message: "$(airs_verdict.block_message)"
 
-      # MEASURED (2026-09-12, AI Gateway 2.0.3): both of these are DROPPED at
-      # runtime. The data plane logs
+      # MEASURED (2026-09-14, AI Gateway 2.0.3): with block_detail wired to a
+      # STRING expression, that metric is DROPPED at runtime, on every single
+      # request, allowed or blocked. The data plane logged
       #   [ai-custom-guardrail] metric input_block_detail has unexpected type
       #   string, expected table
-      # and no value is exported. The intent was to keep the category and the
-      # detector names out of the client response and in the gateway's own
-      # telemetry; on this runtime that does not happen. Until it does, Strata
-      # Cloud Manager, correlated by scan_id, is the record.
+      # and no value was exported. block_reason as a string logs no warning.
+      #
+      # FIXED, MEASURED (2026-09-14, AI Gateway 2.0.3): the runtime wants a
+      # Lua TABLE. Kong's policy reference types this field as `string`, which
+      # is the type of the config VALUE -- the expression template below -- and
+      # says nothing about what that template must render to; the runtime
+      # type-checks the RENDERED value. An undocumented rendering requirement,
+      # not a contradiction. airs_verdict's `detail` is now
+      # `{ reason, category, detections }` on every path, including allow (an
+      # empty table). With a table the warning disappears and both metrics are
+      # exported: a `file-log` policy attached to the same model shows
+      # `ai.proxy.custom-guardrail.input_block_detail` populated with
+      # `{category, reason, detections}`. Whether block_reason was still
+      # exported while block_detail was a string was never measured, so it is
+      # not claimed here. The category and detector names still never reach the
+      # client -- they are only in this table and in the SCM scan log,
+      # correlated by scan_id.
       metrics:
         block_reason: "$(airs_verdict.block_message)"
         block_detail: "$(airs_verdict.detail)"
@@ -189,28 +283,48 @@ ai_gateway_policies:
         # GENERATED FROM lua/guardrail/ — edit there, then run
         # scripts/build-config.py. Do not hand-edit.
         airs_profile: "__INLINE__lua/guardrail/airs_profile.lua"
+        airs_correlation: "__INLINE__lua/guardrail/airs_correlation.lua"
         airs_metadata: "__INLINE__lua/guardrail/airs_metadata.lua"
         airs_contents: "__INLINE__lua/guardrail/airs_contents.lua"
         airs_verdict: "__INLINE__lua/guardrail/airs_verdict.lua"
 
 # =============================================================================
-# Attaching the policy, and closing the streaming hole at the same time.
+# Attaching the policy: SIMPLE mode versus STRICT mode on streaming.
 #
-# Take your existing AI Model and add ONE policy reference, plus
-# response_streaming: deny.
+# Take your existing AI Model and add ONE policy reference. What you do about
+# `response_streaming` decides which of two honest postures you are in — there
+# is no config that gives both full streaming AND full response coverage.
 #
-# WHY deny MATTERS. DOCUMENTED by Kong: "You can't add AI Policies that use the
-# Response Transformer Policy or otherwise trigger in the response phase when
-# streaming is configured." MEASURED (2026-09-08): with stream:true the OUTPUT
-# phase is never invoked — the guardrail service receives no call, there is no
-# error and no warning, and every SSE chunk reaches the client. So without this
-# line ANY CALLER CAN OPT ITSELF OUT OF RESPONSE SCANNING by setting one flag in
-# its own request body.
+# SIMPLE MODE (leave response_streaming: allow, the schema default). MEASURED
+# (2026-09-14, AI Gateway 2.0.3 / Kong Gateway 3.14.0.3; attribution in
+# docs/CREDITS.md): the OUTPUT phase DOES run on a stream, once per
+# response_buffer_size segment. Coverage is real but partial and best-effort.
+# Roughly 100 bytes must accumulate before the phase runs at all, so an answer
+# SHORTER than that is never scanned in its entirety (most chat-UI answers are
+# short) -- on a longer answer those first ~100 bytes are the first segment
+# scanned. Whatever is still below the threshold when the stream ends is never
+# scanned either, and a block always lands AFTER the flagged segment has
+# already reached the client (HTTP 200 already sent) — leak before a cut is
+# roughly output rate x AIRS scan latency. Good enough for a streaming UX
+# where "eventually blocked, mostly" is an acceptable bar.
 #
-# If some models must stream, attach to those models a second copy of this
-# policy with guarding_mode: INPUT, and state plainly that their coverage is
-# prompt-only — rather than attaching this one and assuming the response is
-# inspected.
+# STRICT MODE (response_streaming: deny on the AI Model, below). Two statements
+# to hold side by side rather than reconcile. DOCUMENTED by Kong: "You can't
+# add AI Policies that use the Response Transformer Policy or otherwise trigger
+# in the response phase when streaming is configured" -- Kong documents the
+# combination as UNSUPPORTED and says nothing about how it behaves. MEASURED
+# (2026-09-14, above): the phase does run, per segment. The measurement
+# contradicts the documentation, both are recorded, and the practical reading
+# is that simple mode relies on behaviour Kong does not commit to. MEASURED
+# (2026-09-12): with deny, a stream:true request is refused at HTTP 400 before
+# any scan runs; buffered traffic is unaffected. Full response coverage, no
+# streaming. This is the only way to guarantee the whole answer is scanned
+# before the client sees any of it.
+#
+# If some models must stream and also need STRICT coverage, attach to those
+# models a second copy of this policy with guarding_mode: INPUT, and state
+# plainly that their coverage is prompt-only — rather than assuming SIMPLE
+# mode's per-segment OUTPUT scanning is equivalent to a buffered scan.
 # =============================================================================
 #
 # ai_gateway_models:

@@ -11,6 +11,25 @@
 -- probe for mapping which inputs trip which detector. The detail is not lost --
 -- it goes to `detail`, which the policy wires to metrics.block_detail, and the
 -- full record is in the SCM scan log, correlated by scan_id.
+--
+-- `detail` IS A TABLE, on every path, including the allow path (an empty
+-- table). MEASURED (2026-09-14, AI Gateway 2.0.3): the AI Gateway 2.x metrics
+-- pipeline evaluates metrics.block_detail on every request, allowed or
+-- blocked, and a string value there logs
+--   [ai-custom-guardrail] metric input_block_detail has unexpected type
+--   string, expected table
+-- and drops the metric -- silently, on every single request. Kong's policy
+-- reference types this field as a string, which is the type of the config
+-- value -- the expression template -- and is silent on what that template
+-- must render to; the runtime type-checks the RENDERED value. An undocumented
+-- rendering requirement rather than a contradiction, and a string is what
+-- this repo shipped until this fix. The shape
+-- is `{ reason, category, detections }`: `reason` is a short fixed phrase for
+-- why this call ended in a block (or nil on allow), `category` mirrors AIRS's
+-- own `category` field when one was returned, and `detections` is an array of
+-- detector names that fired. None of the three ever reaches the client --
+-- `block_message` is what the caller sees, and it stays the fixed generic text
+-- on every path.
 
 return function(resp)
     -- Kong's plugin overview says $(resp) is a table while inspecting the
@@ -30,7 +49,7 @@ return function(resp)
     if type(resp) ~= "table" or type(resp.action) ~= "string" then
         return { block = true,
                  block_message = "Blocked by Prisma AIRS",
-                 detail = "verdict unavailable (fail-closed)" }
+                 detail = { reason = "verdict unavailable (fail-closed)" } }
     end
 
     local msg = "Blocked by Prisma AIRS"
@@ -56,7 +75,8 @@ return function(resp)
 
     if is_set(resp.error) or is_set(resp.timeout) then
         return { block = true, block_message = msg,
-                 detail = "partial scan failure (fail-closed)" }
+                 detail = { reason = "partial scan failure (fail-closed)",
+                            category = resp.category } }
     end
     if type(resp.errors) == "table" and next(resp.errors) ~= nil then
         local which = {}
@@ -66,9 +86,10 @@ return function(resp)
             end
         end
         table.sort(which)
-        local d = "detector degraded (fail-closed)"
-        if #which > 0 then d = d .. ": " .. table.concat(which, ", ") end
-        return { block = true, block_message = msg, detail = d }
+        return { block = true, block_message = msg,
+                 detail = { reason = "detector degraded (fail-closed)",
+                            category = resp.category,
+                            detections = which } }
     end
 
     -- Kept for the same reason as the string branch above: cheap, and it costs
@@ -77,7 +98,8 @@ return function(resp)
     -- belt-and-braces rather than the primary check.
     if resp.category == "error" or resp.category == "timeout" then
         return { block = true, block_message = msg,
-                 detail = "scan " .. resp.category .. " (fail-closed)" }
+                 detail = { reason = "scan " .. resp.category .. " (fail-closed)",
+                            category = resp.category } }
     end
 
     -- THE ONLY PASS. An exact, lower-case "allow". A differently-cased or
@@ -91,7 +113,7 @@ return function(resp)
     -- choice. The gateway enforces the verdict AIRS returns; it does not
     -- second-guess the profile.
     if resp.action == "allow" then
-        return { block = false, block_message = "", detail = "" }
+        return { block = false, block_message = "", detail = {} }
     end
 
     -- Blocked. Collect what fired, for telemetry only.
@@ -111,13 +133,13 @@ return function(resp)
     end
     table.sort(hits)
 
-    local detail
+    local reason
     if resp.action == "block" then
-        detail = tostring(resp.category or "unknown")
+        reason = tostring(resp.category or "unknown")
     else
-        detail = "unrecognised action (fail-closed)"
+        reason = "unrecognised action (fail-closed)"
     end
-    if #hits > 0 then detail = detail .. ": " .. table.concat(hits, ", ") end
 
-    return { block = true, block_message = msg, detail = detail }
+    return { block = true, block_message = msg,
+             detail = { reason = reason, category = resp.category, detections = hits } }
 end

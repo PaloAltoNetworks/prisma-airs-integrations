@@ -13,28 +13,97 @@ back to the original work.
 **Licence:** MIT
 
 That project independently established a set of findings on **2026-09-08**,
-before the work in this repository began. Where this repository states one of
-those findings as MEASURED, **the measurement is theirs unless this repository
-says we repeated it**. The configuration, Lua and scripts here were written
+before the work in this repository began, and a second set on **2026-09-14 and
+2026-09-15** which arrived after it and corrected two of the first (credited
+findings 2 and 7). Where this repository states one of those findings as
+MEASURED, **the measurement is theirs unless this repository says we repeated
+it**. The configuration, Lua and scripts here were written
 against the AI Gateway 2.x policy schema and no file from that repository is
 included in this one; the debt is factual, not textual, and it is a large one.
 
 ### Findings credited to that project
 
-Each of the following was established there first, on 2026-09-08. They are the
+Findings 1 to 8 were established there first on **2026-09-08**. They are the
 reason this repository could be written as configuration at all, rather than
-discovered one HTTP 500 at a time.
+discovered one HTTP 500 at a time. Findings 9 to 12 came later, on
+**2026-09-14**, on Kong AI Gateway 2.0.3 / Kong Gateway 3.14.0.3 against a live
+Prisma AIRS tenant; they are what the guardrail functions here were rewritten
+around.
 
 | # | Finding | Where it shows up here |
 |---|---|---|
 | 1 | `ai-custom-guardrail` function references are written **bare** — `$(airs_contents)` — and arguments are injected **by parameter name**. The explicit-argument call form, `$(airs_contents(source, content))`, returns HTTP 500 `failed to render by function: invalid expression syntax`, and no request reaches the model. | `config/llm/airs-guardrail.yaml`, the `request.body` block |
-| 2 | Only four parameters can be injected into a guardrail function: `source`, `content`, `conf`, `resp`. Nothing else is reachable. The consequence is that the **calling consumer's identity and the model name are unavailable to the function**. | `lua/guardrail/airs_metadata.lua`; the `params` comment in the guardrail policy |
+| 2 | Only four parameters can be injected into a guardrail function: `source`, `content`, `conf`, `resp`. Nothing else is accepted as an argument. | `lua/guardrail/airs_metadata.lua`, `lua/guardrail/airs_correlation.lua`. **The half of this finding about what a function can REACH has been superseded — see [below](#credited-finding-2-partly-superseded).** The half about argument injection stands and is still relied on |
 | 3 | `$(resp)` is a **Lua table in both phases**, not a string on the response leg. | `lua/guardrail/airs_verdict.lua`, which keeps a string branch only as a defensive path |
 | 4 | A block from this policy is **HTTP 400** with a body of the form `{"error":{"message":...}}`. | Documented as the client contract; clients must not expect 403 |
 | 5 | Under `text_source: concatenate_all_content` the scanned text is the message contents joined by `"\n\n"` in **reverse chronological order**, system prompt included. | The `text_source` comment in the guardrail policy, and the false-positive and token-cost warnings that follow from it |
 | 6 | A guardrail function that **raises fails the request closed at HTTP 500**. | The whole design of `lua/guardrail/airs_contents.lua` depends on this |
-| 7 | **The streaming bypass.** See below. | `response_streaming: deny` on the AI Model |
-| 8 | **The tool-call extraction gap**, established as a matrix. See below. | Stated as a coverage gap rather than worked around |
+| 7 | **The streaming bypass.** See below — the method stands, the blanket conclusion does not: the OUTPUT leg does run on a stream, per segment. | `response_streaming: deny` on the AI Model, as the strict-mode posture |
+| 8 | **The tool-call extraction gap**, established as a matrix. See below. | Stated as a coverage gap; narrowed, not closed, by `params.tool_scan` |
+| 9 | **A guardrail function body reaches the Kong PDK**, and every call in one must be `pcall`-wrapped or it is a silent fail-open on streamed responses. This supersedes half of finding 2. See [below](#credited-finding-2-partly-superseded). | The three guardrail functions that touch the PDK: `airs_contents`, `airs_metadata`, `airs_correlation` |
+| 10 | **Unattributed conversation text is read as prompt injection.** `text_source` joins message content with no roles, and an ordinary multi-turn chat is blocked 3/3 as agent + injection. Prefixing `user:` and `assistant:` clears it without weakening detection; prefixing `system:` blocks it again, because that is the shape of a system-prompt spoof. | `lua/guardrail/airs_contents.lua` rebuilds and attributes the scanned text |
+| 11 | **Prisma AIRS judges only the LAST element of `contents[]`.** Earlier elements are context and are not scanned, so a conversation split one-element-per-message stops scanning every turn but the newest. | `airs_contents` returns exactly one element, and `spec/verdict_spec.lua` fails if it ever returns more |
+| 12 | **The AIRS correlation identifiers**, settled by nine probes against a live tenant because no published page settles it: `transaction_id` is the round, `session_id` is the conversation, and `tr_id` is the legacy name of `session_id` — not of `transaction_id`. A `request.body` field that is `nil` is omitted; one that is `""` is sent as JSON `false`. Confirmed in their tenant's Strata Cloud Manager: a conversation renders as one AI Session, each round a transaction carrying its prompt scan and its response scan. | `lua/guardrail/airs_correlation.lua`, and the `request.body` comment in the guardrail policy |
+
+### Credited finding 2, partly superseded
+
+Credited finding 2 has two halves, and only one of them survived.
+
+**What stands.** Kong injects built-ins into a guardrail function *by parameter
+name*, and the accepted names are exactly `source`, `content`, `conf` and
+`resp`. Anything else is rejected outright with `argument '<name>' is not
+allowed in guardrail functions`. That is true, it is still relied on throughout
+this repository, and finding 1 depends on it.
+
+**What does not.** The conclusion drawn from it — that the calling consumer's
+identity and the model name are therefore unreachable — is wrong, and the error
+is worth naming precisely because it is an easy one to make and neither project
+caught it for six days. **The allowlist was enumerated by probing parameter
+names and reading the rejection message. That measures what Kong hands the
+function as an ARGUMENT. It says nothing about the sandbox the function BODY
+runs in, which was never tested.** A negative established on one mechanism was
+carried over to a different one.
+
+MEASURED by the prior-art project on **2026-09-14**, against Kong AI Gateway
+2.0.3 (Kong Gateway 3.14.0.3), later than the 2026-09-12 runtime the rest of
+this file reports on. Inside a guardrail function body, `kong` and `ngx` are
+tables and `require` is a function:
+
+| Call | Result |
+| --- | --- |
+| `kong.request.get_header(name)` | the client's header, same value on both legs |
+| `kong.request.get_body()` | the **structured `messages[]`**, in BOTH phases, chronological, roles intact. Also carries `tools[]` and `tool_calls`, which `$(content)` never exposes |
+| `ngx.ctx.ai_model` | the AI Model entity — `id`, `name` |
+| `kong.client.get_ip()` / `get_forwarded_ip()` | the caller's address |
+| `kong.client.get_consumer()` / `get_credential()` | the authenticated consumer. Reachable; returned `nil` in a lab with no auth on the model, so the API is proved and a populated consumer is not |
+| `ngx.var.request_id` | Kong's own request id |
+| `kong.ctx.shared` | **persists from the INPUT leg to the OUTPUT leg of the same buffered request** |
+| `kong.router.*` | `nil` — not reachable |
+| `kong.log.serialize()` | refuses: "function cannot be called in access phase" |
+
+**And one hard constraint that comes with it, measured the same day.** Every PDK
+call in a guardrail function must be wrapped in `pcall`. On the OUTPUT leg of a
+**streamed** response the function runs with no request context, and an
+unguarded raise there does **not** fail the request the way a raise on a
+buffered leg does (credited finding 6): it silently skips the guardrail call for
+that segment. A/B on one streamed request, same policy: a function returning a
+constant produced **7** segment scans; the same function calling
+`kong.request.get_header` unguarded produced **0**, with HTTP 200 and the whole
+stream delivered and nothing in the client's view to suggest the response was
+never scanned; the same calls wrapped in `pcall` produced **7** again. *An
+unguarded PDK call in a guardrail function is a silent fail-OPEN.* Every
+function under `lua/guardrail/` is written to that rule and
+`spec/verdict_spec.lua` asserts it: remove a `pcall` and the "no request
+context" cases stop passing.
+
+Two further facts from the same runs, both of which shape the code here.
+`request.body` fields behave asymmetrically: a field that is `nil` is omitted
+from the scan payload, while a field that is an **empty string is rendered as
+JSON `false`**, so an identifier that cannot be built must be absent rather than
+blank. And Prisma AIRS **judges only the LAST element of `contents[]`** — an
+injection sent as the first of two, or the first of three, comes back
+`allow`/`benign`, while the same injection sent last, or alone, blocks. Earlier
+elements are context and are not scanned.
 
 ### Two findings where the method is the contribution
 
@@ -56,6 +125,28 @@ MEASURED here (2026-09-12, AI Gateway 2.0.3): we reproduced the effect on our ow
 runtime — an identical payload is blocked with HTTP 400 when buffered and
 delivered with HTTP 200 when streamed. The remedy was measured here: `response_streaming: deny` on the AI Model refuses a `stream: true` request with HTTP 400 before any scan runs (2026-09-12). The hole is theirs; the remedy is measured here.
 
+**Correction, MEASURED by the prior-art project (2026-09-14, AI Gateway 2.0.3 /
+Kong Gateway 3.14.0.3); not re-run here.** "The guardrail service received no
+call at all" does not generalise the way it was generalised. It held on their
+own run of 2026-09-08 and on ours of 2026-09-12, and both ran
+`response_buffer_size: 65536` in `config/llm/airs-guardrail.yaml`. Pointed at a
+guardrail service that counted every call it received, with the buffer at other
+values: the OUTPUT phase runs on a stream, once per `response_buffer_size`
+segment (schema default 100 bytes) — a 309-character answer produced 3 calls of
+101/104/103 characters; at 2048, zero calls.
+
+INFERRED, and this is the part neither gateway has measured: that the 65536 is
+also what produced the apparent bypass *here*, by keeping a typical streamed
+answer below the threshold at which the OUTPUT phase ever fires. The zero-call
+result at a large buffer was measured on their gateway, on the same 2.0.3
+runtime and the same policy type, so the inference is a strong one — but it is
+an inference, and it has not been re-run on the 2026-09-12 runtime the rest of
+this file reports on. So the prior art's method (point a blocking guardrail at
+the stream, count calls) was exactly right and is still the right method; the
+buffer value fed to it is what the result turned on. See
+GAP 1 in `README.md` for the corrected coverage claim: partial, per-segment,
+best-effort, with a floor, a tail and a delay, not zero.
+
 **The tool-call extraction gap.** The method was a **matrix: five message
 positions by three `text_source` values**, each cell tested rather than reasoned
 about. That is what makes the negative result trustworthy — it distinguishes "we
@@ -68,8 +159,12 @@ message content and never enter `$(content)` under any value of the setting.
 
 MEASURED here (2026-09-12, AI Gateway 2.0.3): a buffered reply with
 `content: null` whose payload lives only in `tool_calls[].function.arguments` is
-allowed. This is not fixable in configuration. The Kong 3.x custom plugin can
-read `tool_calls` directly; a config-only policy cannot.
+allowed. That case is not fixable in configuration. The Kong 3.x custom plugin
+can read `tool_calls` directly; a config-only policy cannot. The *request* leg
+has since been narrowed: the raw body a guardrail function can read carries
+`tools[]` and the tool calls a client replays as history, which `params.tool_scan`
+puts in front of the scanner (GAP 2 in `README.md`). The gap that remains is the
+leg the model emits a tool call on, which no configuration reaches.
 
 ## What differs in this repository
 
@@ -103,9 +198,13 @@ local function is_set(v) return v ~= nil and v ~= false end
 
 if is_set(resp.error) or is_set(resp.timeout) then
     return { block = true, block_message = msg,
-             detail = "partial scan failure (fail-closed)" }
+             detail = { reason = "partial scan failure (fail-closed)",
+                        category = resp.category } }
 end
 ```
+
+(`detail` is a table, `{ reason, category, detections }`, on every path this function returns — see
+"Measurements made in this repository" below for why a string there is not an option.)
 
 The same function deliberately does **not** block on `category` alone on the
 allow path: an AIRS profile in alert-only mode returns `allow` together with a
@@ -136,24 +235,46 @@ stated that way round.
 ## Measurements made in this repository
 
 For symmetry, the findings below are ours, measured on 2026-09-12 against AI
-Gateway 2.0.3 unless marked otherwise. They are not attributable to the prior
-art.
+Gateway 2.0.3 and not attributable to the prior art — **except where an entry
+says otherwise**, which two of them do: the block-metrics bullet and the
+Strata Cloud Manager confirmation in the bullet above it are the prior art's
+measurements, on their runtime, and are marked as such where they appear.
 
 - `guarding_mode: BOTH` genuinely runs both legs, visible in Strata Cloud Manager
   as two separate transactions, one Prompt and one Response.
 - The `scan_id` in the client's error message matches the `scan_id` in SCM
   exactly, so an operator can go from a user complaint to the detection record.
-- SCM records `model_name: None` and `user_id: None` on every scan — the direct
-  consequence of credited finding 2.
-- **Defect, unresolved (MEASURED).** `metrics.block_reason` and
-  `metrics.block_detail` wired to a string expression produce, on every block,
+- SCM recorded `model_name: None` and `user_id: None` on every scan. That was
+  read as the direct consequence of credited finding 2; it was the consequence
+  of `airs_metadata` reading static policy config, which it did because of the
+  superseded half of that finding. Both fields now carry real values, and the
+  prior-art project confirmed the rendering in the Strata Cloud Manager
+  Transaction Metadata panel on 2026-09-15 — `model_name`, `user_id`, `user_ip`,
+  `profile`, `environment` — which the scan results API cannot show, because it
+  never echoes metadata back.
+- **Fixed here, and it was an unresolved defect here — but the measurement is
+  not ours.** MEASURED 2026-09-14 by the prior-art project, on their own AI
+  Gateway 2.0.3 / Kong Gateway 3.14.0.3 runtime; not re-run here. The same
+  applies to the `file-log` serializer observation in the same bullet.
+  `metrics.block_detail` wired to a **string** expression produces, on every
+  request — allowed or blocked —
   `[ai-custom-guardrail] metric input_block_detail has unexpected type string, expected table`,
-  and the metric is dropped at runtime. Blocking itself is unaffected; the
-  operator-facing reason does not reach Kong telemetry. Kong's policy reference
-  documents these fields as `type: string`, which contradicts the runtime, and the
-  shape the runtime wants is not documented. Do not build a dashboard or an alert
-  on these metrics: Strata Cloud Manager, correlated by `scan_id`, remains the
-  complete record.
+  and that metric is dropped at runtime. Blocking itself is unaffected; the
+  operator-facing detail did not reach Kong telemetry. Kong's policy reference
+  types `metrics.block_detail` as `type: string`, which is the type of the
+  config *value* — the expression template — and says nothing about what the
+  template must render to; the runtime type-checks the **rendered** value and
+  wants a Lua table. An undocumented rendering requirement, not a
+  contradiction. With `airs_verdict`'s `detail` changed to
+  `{ reason, category, detections }` on every path, including allow (an empty
+  table), the warning disappears and the metric is exported: a `file-log`
+  policy on the same model shows `ai.proxy.custom-guardrail.input_block_detail`
+  populated with the table. `metrics.block_reason` as a string logs no warning,
+  and it is exported once `block_detail` renders a table; whether it was
+  exported while `block_detail` was still a string was not measured on either
+  gateway, so nothing here claims it. Strata Cloud Manager, correlated by
+  `scan_id`, remains the fuller record (threats, the scanned text), but Kong
+  telemetry now carries a reason code too.
 - The AIRS scan API's tool-event contract: `tool_event` is a member of a
   `contents[]` element, not a top-level sibling of `contents`; `input` and
   `output` are strings containing JSON; `tool_invoked` is accepted and echoed
@@ -181,9 +302,12 @@ Policies which trigger in the response phase cannot be combined with streaming.
 Kong's own changelog is the source for the framing used throughout — policies are
 a control plane concept, implemented in the runtime as plugins.
 
-Kong's documentation is also the source of the one place where documentation and
-runtime disagree, recorded above: the policy reference types the `metrics` fields
-as strings and the runtime rejects strings.
+Kong's documentation is also the source of the one place where it does not cover
+what the runtime enforces, recorded above: the policy reference types the
+`metrics` fields as `string` — the type of the expression template the operator
+writes — and is silent on what that template must render to, while the runtime
+requires `block_detail` to render to a Lua table. An undocumented rendering
+requirement rather than a contradiction.
 
 Kong's guardrail hub ships integrations for AWS, Azure, GCP, Lakera and NVIDIA
 NeMo. There is no Palo Alto Networks entry, which is why this integration is

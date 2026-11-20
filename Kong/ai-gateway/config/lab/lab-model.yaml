@@ -100,7 +100,18 @@ ai_gateway_models:
       # MEASURED 2026-09-12: `response_streaming` is a field on the AI MODEL,
       # not on a policy. That matters for the guardrail: Kong documents that a
       # policy which acts in the response phase cannot run when streaming is in
-      # play, so the fix -- `deny` -- is applied HERE, on the model, not
-      # alongside the guardrail config. Left at `allow` in the lab so that the
-      # streaming bypass can be demonstrated before it is closed.
+      # play, so the strict-mode fix -- `deny` -- is applied HERE, on the
+      # model, not alongside the guardrail config.
+      #
+      # Left at `allow` in the lab so SIMPLE mode's per-segment OUTPUT
+      # scanning can be reproduced rather than assumed. MEASURED
+      # (2026-09-14, AI Gateway 2.0.3), pointed at scripts/lab-echo-server.py
+      # with a stream request: the guardrail service DOES receive OUTPUT
+      # calls, one per response_buffer_size segment (schema default 100
+      # bytes) -- not zero, and not one call for the whole answer. Send a
+      # short reply (well under 100 characters) to see the other half: it
+      # never crosses the buffer threshold and is never scanned at all. Set
+      # `deny` outside the lab for full response coverage; see the note on
+      # `response_buffer_size` in config/llm/airs-guardrail.yaml for the
+      # measurements behind both halves of this.
       response_streaming: allow
