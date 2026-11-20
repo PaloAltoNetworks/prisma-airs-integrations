@@ -150,13 +150,19 @@ Both `session_id` and `transaction_id` are capped at **100 characters** (an AIRS
 identifier becomes `session_id` (Cursor `conversation_id`, Cline `taskId`, Claude Code /
 Codex `session_id`, Gemini CLI `conversationId`, Grok Build `sessionId`), falling back to a
 hash of the working directory; `transaction_id` comes from a per-turn id (`tool_use_id` / `prompt_id` /
-`turn_id`) when the agent provides one, else it reuses `session_id`. **Cursor** supplies a
-per-conversation id but no per-turn id, so `transaction_id` reuses the conversation id
-(constant across the conversation) unless you export your own or let AIRS mint one.
+`turn_id`) when the agent provides one; otherwise the hook generates a new per-event
+identifier (a UUID/GUID, or a portable fallback in Bash). **Cursor** supplies a
+per-conversation id but no per-turn id, so the hook supplies a new transaction id
+for each event. When no conversation identifier is available, the hook hashes the
+working directory as a fallback session id: events from separate conversations
+in the same directory can consequently share a session id. Do not interpret this
+fallback as evidence of a unique conversation.
 
 ## Validation
 
 Every agent ships `tests/run-tests.sh`, running shared fixtures through all three runtimes. **Offline** (no key) it exercises block rendering; set `PRISMA_AIRS_API_KEY` + `PRISMA_AIRS_PROFILE_NAME` for a **live** detection run.
+
+Codex's `tests/run-tests.sh stub` additionally runs `test_request_contract.py` against a loopback-only fake AIRS service. Unlike the verdict fixtures, this checks the outgoing session and transaction identifiers, identifier precedence, application metadata and MCP method attribution. It uses synthetic inputs and no production credentials. Full three-runtime assurance requires Node.js, Bash and PowerShell; an unavailable runtime must be identified as an incomplete check, not silently counted as a pass.
 
 <div align="center">
 <br>
