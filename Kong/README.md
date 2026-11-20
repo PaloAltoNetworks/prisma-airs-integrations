@@ -11,7 +11,7 @@ The contents of this repository are community examples and reference implementat
 | Integration | Prompt Scan | Response Scan | Pre/Post Tool | Multi-Provider | Best For |
 |-------------|:-----------:|:-------------:|:-------------:|:--------------:|----------|
 | [Custom Plugin (v1)](custom-plugin/) | ✅ | ✅ | ❌ | ✅ (via AI Gateway) | LLM-only traffic, full ai-proxy compatibility |
-| [Custom Plugin (v2 — MCP-aware)](custom-plugin-v2/) | ✅ | ✅ | ✅ | ⚠️ (OpenAI + Bedrock Converse native) | LLM + MCP `tools/call` inspection |
+| [Custom Plugin (v2 — MCP-aware)](custom-plugin-v2/) | ✅ | ✅ | ✅ | ⚠️ (OpenAI + Bedrock Converse requests native; Gemini/Vertex responses) | LLM + MCP `tools/call` inspection |
 | [Request Callout](request-callout/) | ✅ | ❌ | ❌ | ❌ | Kong Konnect SaaS, OpenAI only |
 | [Custom Plugin (v3)](custom-plugin-v3/) | ✅ | ✅ | ✅ | ✅ (native, 9 shapes) | Full MCP method coverage, buffered SSE, DLP, and a test suite |
 | [AI Gateway 2.x Policies](ai-gateway/) | ✅ | ✅ (buffered) | ⚠️ (MCP `tools/call`, request leg) | ✅ (any AI Model) | Kong **AI Gateway 2.x**, configuration only — no plugin to install |
@@ -38,7 +38,7 @@ The v1 custom plugin supports all LLM providers when used with [Kong AI Gateway]
 
 Kong's AI Proxy plugin normalizes requests/responses to OpenAI format. See [custom-plugin README](custom-plugin/README.md#multi-provider-support-kong-ai-gateway) for setup.
 
-> v2 runs at priority 1000 (above ai-proxy at 770) and parses OpenAI + Bedrock Converse request shapes directly. Use v1 if you need ai-proxy normalization to run first.
+> v2 runs at priority 1000 (above ai-proxy at 770) and parses OpenAI + Bedrock Converse request shapes directly, and scans Gemini/Vertex responses (`candidates[].content.parts[].text`). Use v1 if you need ai-proxy normalization to run first. v2 also supports opt-in `x-airs-*` observability headers (see the [v2 README](custom-plugin-v2/README.md#configuration)).
 
 ### MCP tool call inspection (v2 and v3)
 
