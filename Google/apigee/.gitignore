@@ -2,9 +2,12 @@
 .env
 .env.local
 
-# Service account keys
+# Service account keys and build artifacts (*.json)
+# Exceptions: package.json and Bruno/Postman test collections
 *.json
 !package.json
+!sharedflow/**/*.json
+!sharedflow/bruno/
 
 # Apigee deployment artifacts
 *.zip.bak
