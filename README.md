@@ -39,6 +39,7 @@ This repository collects example configurations, sample code, and reference patt
 | [Kong (AI Gateway 2.x Policies)](./Kong/ai-gateway/) | API Gateway | ✅ | ✅ | ❌ | ⚠️ | ❌ |
 | [MuleSoft (AI Gateway Custom Policy — LLM + MCP)](./Gateways/ai-gateways/mulesoft/custom-policy/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ⚠️ |
 | [MuleSoft (API Gateway — plain API instances)](./Gateways/api-gateways/mulesoft/) | API Gateway | ✅ | ✅ | ⚠️ | ✅ | ⚠️ |
+| [Databricks (Unity AI Gateway: Python Policy, App and AWS Adapters)](./Gateways/ai-gateways/databricks/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ✅ |
 | [LiteLLM](./LiteLLM/) | AI Gateway | ✅ | ✅ | ⚠️ | ✅ | ❌ |
 | [Bifrost](./Bifrost/) | AI Gateway | ✅ | ✅ | ⚠️ | ❌ | ❌ |
 | [n8n](./n8n/) | Workflow Automation | ✅ | ✅ | ❌ | ❌ | ❌ |
