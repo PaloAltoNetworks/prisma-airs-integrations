@@ -2,6 +2,10 @@
 
 Puts Prisma AIRS runtime scanning on the traffic Unity AI Gateway governs: prompts and replies on model services, and tool calls and tool results on MCP services. A request or reply that AIRS flags is blocked, and the caller gets the reason and the AIRS report id. Clean traffic passes. Unity AI Gateway's service policies are in Beta.
 
+## IMPORTANT
+
+The contents of this repository are community examples and reference implementations, supported as best effort by Palo Alto Networks. They are intended as starting points to illustrate integration patterns — review, adapt, and validate them for your own environment before any production use.
+
 ## Coverage
 
 > For detection categories and use cases, see the [Prisma AIRS documentation](https://pan.dev/prisma-airs/api/airuntimesecurity/usecases/).
@@ -34,7 +38,7 @@ caller --> Unity AI Gateway --> model or MCP service
 
 | Option | Runs in | Use it when | Needs |
 |---|---|---|---|
-| Python Policy | A Python service policy in the workspace | You want the quickest start, with nothing extra to run | Python service policies in your region (in November 2026, three AWS regions, us-east-1, us-west-2 and ap-southeast-2, and four Azure regions), and serverless egress to the AIRS API. Not available with a restricted serverless network policy, the compliance security profile or a private network gateway: Databricks then denies every request, so use one of the Adapters |
+| Python Policy | A Python service policy in the workspace | You want the quickest start, with nothing extra to run | Python service policies in your region: see Databricks' list for [AWS](https://docs.databricks.com/aws/en/data-governance/unity-catalog/service-policies/python-policies) or [Azure](https://learn.microsoft.com/en-us/azure/databricks/data-governance/unity-catalog/service-policies/python-policies) (on 24 November 2026: ap-southeast-1, ap-southeast-2, us-east-1 and us-west-2 on AWS; eastus, eastus2, centralus and westeurope on Azure). Also serverless egress to the AIRS API. Not available with a restricted serverless network policy, the compliance security profile or a private network gateway: Databricks then denies every request, so use one of the Adapters |
 | Databricks App Adapter | A Databricks App called by an External policy | You want everything to stay inside Databricks | Databricks Apps and HTTP connections in your region (App compute is billed while it runs) |
 | AWS Adapter | AWS API Gateway and Lambda, called by an External policy | Any cloud, or when Apps or Python policies aren't available | HTTP connections in your region, an AWS account, and a public HTTPS endpoint protected by OAuth client credentials |
 
