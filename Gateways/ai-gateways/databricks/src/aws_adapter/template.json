@@ -1,0 +1,232 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Prisma AIRS for Databricks Unity AI Gateway, AWS Adapter: one HTTP API and one Lambda function, the token issuer and the External service policy endpoint.",
+  "Resources": {
+    "ApiAccessLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/apigateway/dbx-airs",
+        "RetentionInDays": 7
+      }
+    },
+    "HttpApi": {
+      "Type": "AWS::ApiGatewayV2::Api",
+      "Properties": {
+        "Name": "dbx-airs",
+        "ProtocolType": "HTTP",
+        "Tags": {
+          "app": "prisma-airs-unity-gateway"
+        }
+      }
+    },
+    "DefaultStage": {
+      "Type": "AWS::ApiGatewayV2::Stage",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "StageName": "$default",
+        "AutoDeploy": true,
+        "DefaultRouteSettings": {
+          "ThrottlingBurstLimit": 20,
+          "ThrottlingRateLimit": 10
+        },
+        "AccessLogSettings": {
+          "DestinationArn": {
+            "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiAccessLogGroup}"
+          },
+          "Format": "{\"requestId\":\"$context.requestId\",\"time\":\"$context.requestTime\",\"ip\":\"$context.identity.sourceIp\",\"method\":\"$context.httpMethod\",\"path\":\"$context.path\",\"routeKey\":\"$context.routeKey\",\"status\":\"$context.status\",\"length\":\"$context.responseLength\",\"integrationError\":\"$context.integrationErrorMessage\",\"userAgent\":\"$context.identity.userAgent\"}"
+        },
+        "Tags": {
+          "app": "prisma-airs-unity-gateway"
+        }
+      }
+    },
+    "AdapterLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/dbx-airs-adapter",
+        "RetentionInDays": 7
+      }
+    },
+    "AdapterRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "logs",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "AdapterLogGroup",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "read-adapter-secrets",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "ssm:GetParameters",
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dbx-airs/c_client_id"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dbx-airs/c_client_secret"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dbx-airs/c_signing_key"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dbx-airs/airs_api_key"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "AdapterFunction": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "AdapterLogGroup",
+      "Properties": {
+        "FunctionName": "dbx-airs-adapter",
+        "Description": "Prisma AIRS AWS Adapter: /oauth/token (client credentials) and /policy (Databricks External policy -> Prisma AIRS). Code is uploaded by deploy.sh; until then it answers 503.",
+        "Runtime": "python3.12",
+        "Architectures": [
+          "arm64"
+        ],
+        "Handler": "index.handler",
+        "MemorySize": 1024,
+        "Timeout": 6,
+        "Role": {
+          "Fn::GetAtt": [
+            "AdapterRole",
+            "Arn"
+          ]
+        },
+        "Environment": {
+          "Variables": {
+            "CLIENT_ID_PARAM": "/dbx-airs/c_client_id",
+            "CLIENT_SECRET_PARAM": "/dbx-airs/c_client_secret",
+            "SIGNING_KEY_PARAM": "/dbx-airs/c_signing_key",
+            "AIRS_KEY_PARAM": "/dbx-airs/airs_api_key",
+            "ALLOW_FAIL_OPEN": "false",
+            "ALLOW_UNSCANNED_PARTS": "false",
+            "TOKEN_ISSUER": "dbx-airs"
+          }
+        },
+        "Code": {
+          "ZipFile": "def handler(event, context):\n    return {\"statusCode\": 503}\n"
+        }
+      }
+    },
+    "AdapterIntegration": {
+      "Type": "AWS::ApiGatewayV2::Integration",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "AdapterFunction",
+            "Arn"
+          ]
+        },
+        "PayloadFormatVersion": "2.0",
+        "TimeoutInMillis": 6000
+      }
+    },
+    "TokenRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "POST /oauth/token",
+        "Target": {
+          "Fn::Sub": "integrations/${AdapterIntegration}"
+        }
+      }
+    },
+    "PolicyRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "POST /policy",
+        "Target": {
+          "Fn::Sub": "integrations/${AdapterIntegration}"
+        }
+      }
+    },
+    "DefaultRoute": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "$default",
+        "Target": {
+          "Fn::Sub": "integrations/${AdapterIntegration}"
+        }
+      }
+    },
+    "AdapterInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "AdapterFunction"
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "TokenUrl": {
+      "Value": {
+        "Fn::Sub": "${HttpApi.ApiEndpoint}/oauth/token"
+      }
+    },
+    "ApiEndpoint": {
+      "Value": {
+        "Fn::Sub": "${HttpApi.ApiEndpoint}"
+      }
+    }
+  }
+}

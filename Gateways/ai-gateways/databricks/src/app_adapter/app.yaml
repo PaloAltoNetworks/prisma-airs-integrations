@@ -1,0 +1,7 @@
+# The AIRS key never appears in this file: Databricks injects it from the App's secret resource (key airs-key).
+command: ["python", "app.py"]
+env:
+  - name: AIRS_API_KEY
+    valueFrom: airs-key
+  - name: ALLOWED_CALLER
+    value: "__ALLOWED_CALLER__"

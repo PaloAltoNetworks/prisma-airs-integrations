@@ -1,0 +1,7 @@
+# Secrets and local settings never go into the repository.
+*.local.env
+*.env
+lab/
+.venv/
+__pycache__/
+.pytest_cache/
